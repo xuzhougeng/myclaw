@@ -38,6 +38,7 @@ type aiBackend interface {
 	IsConfigured(ctx context.Context) (bool, error)
 	RouteCommand(ctx context.Context, input string) (ai.RouteDecision, error)
 	Answer(ctx context.Context, question string, entries []knowledge.Entry) (string, error)
+	TranslateToChinese(ctx context.Context, input string) (string, error)
 }
 
 func NewService(store *knowledge.Store, aiService aiBackend, reminders reminderBackend) *Service {
@@ -96,6 +97,7 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 		return "可用命令:\n" +
 			"/remember <内容> 或 记住：<内容> — 保存一条知识\n" +
 			"/append <ID前缀> <内容> — 追加到已有知识\n" +
+			"/translate <内容> — 翻译成中文\n" +
 			"/forget <ID前缀> — 删除一条知识\n" +
 			"/list — 查看全部知识\n" +
 			"/stats — 查看知识库状态\n" +
@@ -133,6 +135,16 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 			return s.appendLatestKnowledge(ctx, mc, appendText)
 		}
 		return s.appendKnowledge(ctx, target, appendText)
+	case "/translate":
+		if len(fields) < 2 {
+			return "用法: /translate <待翻译内容>", nil
+		}
+		body := strings.TrimSpace(strings.TrimPrefix(input, fields[0]))
+		reply, err := s.ensureAIAvailable(ctx)
+		if reply != "" || err != nil {
+			return reply, err
+		}
+		return s.aiService.TranslateToChinese(ctx, body)
 	case "/forget", "/delete":
 		if len(fields) < 2 {
 			return "用法: /forget <知识ID前缀>", nil
@@ -239,7 +251,7 @@ func (s *Service) answerWithAllKnowledge(ctx context.Context, question string) (
 	return formatKnowledgeDump(entries, question)
 }
 
-func (s *Service) handleAIMessage(ctx context.Context, mc MessageContext, text string) (string, error) {
+func (s *Service) ensureAIAvailable(ctx context.Context) (string, error) {
 	if s.aiService == nil {
 		return "模型尚未启用。请先在本地环境变量中配置模型，或使用 `/remember` / `记住：` 明确保存内容。", nil
 	}
@@ -250,6 +262,13 @@ func (s *Service) handleAIMessage(ctx context.Context, mc MessageContext, text s
 	}
 	if !configured {
 		return "模型还没有配置完成。请先设置本地环境变量 `MYCLAW_MODEL_PROVIDER`、`MYCLAW_MODEL_BASE_URL`、`MYCLAW_MODEL_API_KEY` 和 `MYCLAW_MODEL_NAME`。", nil
+	}
+	return "", nil
+}
+
+func (s *Service) handleAIMessage(ctx context.Context, mc MessageContext, text string) (string, error) {
+	if reply, err := s.ensureAIAvailable(ctx); reply != "" || err != nil {
+		return reply, err
 	}
 
 	decision, err := s.aiService.RouteCommand(ctx, text)

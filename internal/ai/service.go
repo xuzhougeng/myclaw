@@ -184,6 +184,23 @@ Keep the answer concise but useful.
 	return s.generateText(ctx, cfg, instructions, prompt.String())
 }
 
+func (s *Service) TranslateToChinese(ctx context.Context, input string) (string, error) {
+	cfg, err := s.requireConfig(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	instructions := strings.TrimSpace(`
+You are myclaw's translation mode.
+Translate the user's input into natural, fluent Simplified Chinese.
+Preserve factual meaning, tone, names, technical terms, formatting, and line breaks whenever possible.
+Do not explain, do not summarize, and do not add commentary.
+Return only the Chinese translation.
+`)
+
+	return s.generateText(ctx, cfg, instructions, strings.TrimSpace(input))
+}
+
 func (s *Service) requireConfig(ctx context.Context) (modelconfig.Config, error) {
 	cfg, err := s.CurrentConfig(ctx)
 	if err != nil {

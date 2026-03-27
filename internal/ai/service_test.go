@@ -83,6 +83,42 @@ func TestAnswerUsesKnowledgeEntries(t *testing.T) {
 	}
 }
 
+func TestTranslateToChinese(t *testing.T) {
+	store := modelconfig.NewStore()
+	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
+	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
+	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
+	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+
+	service := NewService(store)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req responsesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if len(req.Input) == 0 || !strings.Contains(req.Input[0].Content[0].Text, "Puppeteer is a browser automation tool.") {
+			t.Fatalf("translation source not included: %#v", req.Input)
+		}
+		if !strings.Contains(req.Instructions, "translation mode") {
+			t.Fatalf("unexpected instructions: %q", req.Instructions)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"Puppeteer 是一个浏览器自动化工具。"}]}]}`))
+	}))
+	defer server.Close()
+	service.httpClient = server.Client()
+
+	t.Setenv("MYCLAW_MODEL_BASE_URL", server.URL)
+
+	reply, err := service.TranslateToChinese(context.Background(), "Puppeteer is a browser automation tool.")
+	if err != nil {
+		t.Fatalf("translate: %v", err)
+	}
+	if !strings.Contains(reply, "浏览器自动化工具") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
 func TestCreateResponseReturnsAPIErrors(t *testing.T) {
 	store := modelconfig.NewStore()
 	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")

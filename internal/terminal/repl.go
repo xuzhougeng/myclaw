@@ -66,6 +66,12 @@ func (r *REPL) Run(ctx context.Context) error {
 				return err
 			}
 			r.runMessage(ctx, "/remember "+body)
+		case line == "/translate":
+			body, err := r.readMultiline(scanner, "待翻译内容")
+			if err != nil {
+				return err
+			}
+			r.runMessage(ctx, "/translate "+body)
 		case line == "/ask":
 			body, err := r.readMultiline(scanner, "问题")
 			if err != nil {
@@ -116,6 +122,7 @@ func (r *REPL) printHelp() {
 	fmt.Fprintln(r.output, "  /exit")
 	fmt.Fprintln(r.output, "  /remember          paste multiline content until EOF")
 	fmt.Fprintln(r.output, "  /append <ID> <内容>")
+	fmt.Fprintln(r.output, "  /translate         paste multiline content until EOF")
 	fmt.Fprintln(r.output, "  /ask               paste multiline question until EOF")
 	fmt.Fprintln(r.output, "  /notice 2小时后 喝水")
 	fmt.Fprintln(r.output, "  /notice 每天 09:00 写日报")

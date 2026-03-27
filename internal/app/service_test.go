@@ -165,6 +165,25 @@ func TestNaturalAppendByIDUpdatesExistingKnowledge(t *testing.T) {
 	}
 }
 
+func TestTranslateCommandUsesAITranslator(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, fakeAI{
+		configured:  true,
+		translation: "Puppeteer 是一个浏览器自动化工具。",
+	}, reminders)
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{}, "/translate Puppeteer is a browser automation tool.")
+	if err != nil {
+		t.Fatalf("translate command: %v", err)
+	}
+	if !strings.Contains(reply, "浏览器自动化工具") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
 func TestHandleMessageRequiresConfiguredModelForNaturalLanguage(t *testing.T) {
 	t.Parallel()
 
@@ -469,9 +488,10 @@ func TestHandleMessageUsesAIRouteForAppendLast(t *testing.T) {
 }
 
 type fakeAI struct {
-	configured bool
-	route      ai.RouteDecision
-	answer     string
+	configured  bool
+	route       ai.RouteDecision
+	answer      string
+	translation string
 }
 
 func (f fakeAI) IsConfigured(context.Context) (bool, error) {
@@ -484,4 +504,8 @@ func (f fakeAI) RouteCommand(context.Context, string) (ai.RouteDecision, error) 
 
 func (f fakeAI) Answer(context.Context, string, []knowledge.Entry) (string, error) {
 	return f.answer, nil
+}
+
+func (f fakeAI) TranslateToChinese(context.Context, string) (string, error) {
+	return f.translation, nil
 }

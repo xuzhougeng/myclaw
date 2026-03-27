@@ -96,6 +96,7 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 - `/append 6d2d7724 它是 Google 出品的一个工具`
 - `给 #6d2d7724 补充：它是 Google 出品的一个工具`
 - `再补充一点：它是 Google 出品的一个工具`
+- `/translate Puppeteer is a browser automation tool.`
 - `/forget 0015f908`
 - `/notice 2小时后 喝水`
 - `一分钟后提醒我喝水`
