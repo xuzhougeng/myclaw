@@ -4,7 +4,8 @@ param(
     [string]$OutputDir = "dist",
     [string]$AppName = "myclaw",
     [switch]$All,
-    [switch]$RunTests
+    [switch]$RunTests,
+    [switch]$UseCgo
 )
 
 Set-StrictMode -Version Latest
@@ -41,12 +42,12 @@ try {
 
     $arches = if ($All) { @("amd64", "arm64") } else { @($Arch) }
     foreach ($targetArch in $arches) {
-        $env:CGO_ENABLED = "0"
+        $env:CGO_ENABLED = if ($UseCgo) { "1" } else { "0" }
         $env:GOOS = "windows"
         $env:GOARCH = $targetArch
 
         $output = Join-Path $outputRoot ("{0}-windows-{1}.exe" -f $AppName, $targetArch)
-        Write-Host "Building $output ..."
+        Write-Host "Building $output (CGO_ENABLED=$($env:CGO_ENABLED)) ..."
         Invoke-GoCommand -Arguments @("build", "-trimpath", "-o", $output, "./cmd/myclaw")
     }
 }

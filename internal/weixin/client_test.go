@@ -4,33 +4,48 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
-func newTestServer(t *testing.T, got *SendMessageRequest) *httptest.Server {
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func newTestClient(t *testing.T, got *SendMessageRequest) *Client {
 	t.Helper()
 
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/ilink/bot/sendmessage" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		if r.Header.Get("AuthorizationType") != "ilink_bot_token" {
-			t.Fatalf("unexpected auth type: %q", r.Header.Get("AuthorizationType"))
-		}
-		if r.Header.Get("Authorization") != "Bearer secret-token" {
-			t.Fatalf("unexpected auth header: %q", r.Header.Get("Authorization"))
-		}
+	client := NewClient("http://unit.test", "secret-token")
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path != "/ilink/bot/sendmessage" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+			if r.Header.Get("AuthorizationType") != "ilink_bot_token" {
+				t.Fatalf("unexpected auth type: %q", r.Header.Get("AuthorizationType"))
+			}
+			if r.Header.Get("Authorization") != "Bearer secret-token" {
+				t.Fatalf("unexpected auth header: %q", r.Header.Get("Authorization"))
+			}
 
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("read body: %v", err)
-		}
-		if err := json.Unmarshal(body, got); err != nil {
-			t.Fatalf("decode body: %v", err)
-		}
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+			if err := json.Unmarshal(body, got); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
 
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ret":0}`))
-	}))
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"application/json"},
+				},
+				Body: io.NopCloser(strings.NewReader(`{"ret":0}`)),
+			}, nil
+		}),
+	}
+	return client
 }

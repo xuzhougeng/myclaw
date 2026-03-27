@@ -2,12 +2,16 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"myclaw/internal/ai"
+	"myclaw/internal/fileingest"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/reminder"
 )
@@ -181,6 +185,128 @@ func TestTranslateCommandUsesAITranslator(t *testing.T) {
 	}
 	if !strings.Contains(reply, "浏览器自动化工具") {
 		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
+func TestRememberFileCommandStoresImageSummary(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, fakeAI{
+		configured:   true,
+		imageSummary: "- 这是一张 Puppeteer 截图",
+	}, reminders)
+
+	imagePath := filepath.Join(t.TempDir(), "puppeteer.png")
+	imageData, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6p3xkAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatalf("decode image fixture: %v", err)
+	}
+	if err := os.WriteFile(imagePath, imageData, 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{
+		UserID:    "terminal",
+		Interface: "terminal",
+	}, "/remember-file "+imagePath)
+	if err != nil {
+		t.Fatalf("remember-file: %v", err)
+	}
+	if !strings.Contains(reply, "已记住") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+
+	entries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list entries: %v", err)
+	}
+	if len(entries) != 1 || !strings.Contains(entries[0].Text, "Puppeteer 截图") {
+		t.Fatalf("unexpected entries: %#v", entries)
+	}
+}
+
+func TestDirectPDFPathStoresSummary(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, fakeAI{
+		configured: true,
+		pdfSummary: "- 这份 PDF 讲了 Puppeteer 基础用法",
+	}, reminders)
+
+	originalExtractPDFText := extractPDFText
+	extractPDFText = func(string) (string, error) {
+		return "Puppeteer PDF full text", nil
+	}
+	t.Cleanup(func() {
+		extractPDFText = originalExtractPDFText
+	})
+
+	pdfPath := filepath.Join(t.TempDir(), "puppeteer.pdf")
+	if err := os.WriteFile(pdfPath, []byte("%PDF-1.4 dummy"), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{
+		UserID:    "terminal",
+		Interface: "terminal",
+	}, pdfPath)
+	if err != nil {
+		t.Fatalf("direct path ingest: %v", err)
+	}
+	if !strings.Contains(reply, "已记住") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+
+	entries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list entries: %v", err)
+	}
+	if len(entries) != 1 || !strings.Contains(entries[0].Text, "Puppeteer 基础用法") {
+		t.Fatalf("unexpected entries: %#v", entries)
+	}
+}
+
+func TestRememberFileReturnsFriendlyMessageWhenPDFUnavailable(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, fakeAI{configured: true}, reminders)
+
+	originalExtractPDFText := extractPDFText
+	extractPDFText = func(string) (string, error) {
+		return "", errors.Join(fileingest.ErrPDFExtractorUnavailable, errors.New("no cgo in this build"))
+	}
+	t.Cleanup(func() {
+		extractPDFText = originalExtractPDFText
+	})
+
+	pdfPath := filepath.Join(t.TempDir(), "puppeteer.pdf")
+	if err := os.WriteFile(pdfPath, []byte("%PDF-1.4 dummy"), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{
+		UserID:    "terminal",
+		Interface: "terminal",
+	}, "/remember-file "+pdfPath)
+	if err != nil {
+		t.Fatalf("remember-file unavailable pdf: %v", err)
+	}
+	if !strings.Contains(reply, "当前这个构建不包含 PDF 文本提取能力") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+
+	entries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list entries: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no stored entry, got %#v", entries)
 	}
 }
 
@@ -488,10 +614,12 @@ func TestHandleMessageUsesAIRouteForAppendLast(t *testing.T) {
 }
 
 type fakeAI struct {
-	configured  bool
-	route       ai.RouteDecision
-	answer      string
-	translation string
+	configured   bool
+	route        ai.RouteDecision
+	answer       string
+	translation  string
+	pdfSummary   string
+	imageSummary string
 }
 
 func (f fakeAI) IsConfigured(context.Context) (bool, error) {
@@ -508,4 +636,12 @@ func (f fakeAI) Answer(context.Context, string, []knowledge.Entry) (string, erro
 
 func (f fakeAI) TranslateToChinese(context.Context, string) (string, error) {
 	return f.translation, nil
+}
+
+func (f fakeAI) SummarizePDFText(context.Context, string, string) (string, error) {
+	return f.pdfSummary, nil
+}
+
+func (f fakeAI) SummarizeImageFile(context.Context, string, string) (string, error) {
+	return f.imageSummary, nil
 }

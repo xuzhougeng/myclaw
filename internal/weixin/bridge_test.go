@@ -34,9 +34,7 @@ func TestSendTextMessageIncludesClientIDAndBaseInfo(t *testing.T) {
 	t.Parallel()
 
 	var got SendMessageRequest
-	server := newTestServer(t, &got)
-	client := NewClient(server.URL, "secret-token")
-	client.httpClient = server.Client()
+	client := newTestClient(t, &got)
 
 	err := client.SendTextMessage(context.Background(), "user-1", "hello", "ctx-1")
 	if err != nil {

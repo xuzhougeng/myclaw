@@ -121,6 +121,7 @@ func (r *REPL) printHelp() {
 	fmt.Fprintln(r.output, "  /help")
 	fmt.Fprintln(r.output, "  /exit")
 	fmt.Fprintln(r.output, "  /remember          paste multiline content until EOF")
+	fmt.Fprintln(r.output, "  /remember-file <路径>")
 	fmt.Fprintln(r.output, "  /append <ID> <内容>")
 	fmt.Fprintln(r.output, "  /translate         paste multiline content until EOF")
 	fmt.Fprintln(r.output, "  /ask               paste multiline question until EOF")

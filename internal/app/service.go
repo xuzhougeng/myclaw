@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"myclaw/internal/ai"
+	"myclaw/internal/fileingest"
 	"myclaw/internal/knowledge"
 )
 
@@ -21,6 +23,8 @@ var (
 	appendByIDShortPattern = regexp.MustCompile(`^#?([0-9a-fA-F]{4,})\s*(?:追加|补充|补记)(?:\s*[:：]\s*|\s+)(.+)$`)
 	appendLastPattern      = regexp.MustCompile(`^(?:再)?(?:补充|追加|补记)(?:一点|一下|一条|一句|笔记)?(?:\s*[:：]\s*|\s+)(.+)$`)
 	appendLastRefPattern   = regexp.MustCompile(`^(?:请)?(?:给|把)(?:上一条|上条|刚才那条|刚刚那条|这条)\s*(?:再)?(?:补充|追加|补记|加上)(?:一点|一下|一条|一句|笔记)?(?:\s*[:：]\s*|\s+)(.+)$`)
+	resolveFileInput       = fileingest.Resolve
+	extractPDFText         = fileingest.ExtractPDFText
 )
 
 type MessageContext struct {
@@ -39,6 +43,8 @@ type aiBackend interface {
 	RouteCommand(ctx context.Context, input string) (ai.RouteDecision, error)
 	Answer(ctx context.Context, question string, entries []knowledge.Entry) (string, error)
 	TranslateToChinese(ctx context.Context, input string) (string, error)
+	SummarizePDFText(ctx context.Context, fileName, extractedText string) (string, error)
+	SummarizeImageFile(ctx context.Context, fileName, imageURL string) (string, error)
 }
 
 func NewService(store *knowledge.Store, aiService aiBackend, reminders reminderBackend) *Service {
@@ -53,6 +59,10 @@ func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input st
 	text := strings.TrimSpace(input)
 	if text == "" {
 		return "我没有收到有效内容。发送“记住：xxx”保存知识，或直接问问题。", nil
+	}
+
+	if reply, ok, err := s.tryHandleDirectFileIngest(ctx, mc, text); ok || err != nil {
+		return reply, err
 	}
 
 	if normalized := normalizeSlash(text); strings.HasPrefix(normalized, "/") {
@@ -96,6 +106,7 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 	case "/help", "/h":
 		return "可用命令:\n" +
 			"/remember <内容> 或 记住：<内容> — 保存一条知识\n" +
+			"/remember-file <路径> — 总结图片/PDF并存入知识库\n" +
 			"/append <ID前缀> <内容> — 追加到已有知识\n" +
 			"/translate <内容> — 翻译成中文\n" +
 			"/forget <ID前缀> — 删除一条知识\n" +
@@ -120,6 +131,12 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 			return "", err
 		}
 		return fmt.Sprintf("已记住 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes)), nil
+	case "/remember-file", "/ingest":
+		if len(fields) < 2 {
+			return "用法: /remember-file <图片或PDF路径>", nil
+		}
+		body := strings.TrimSpace(strings.TrimPrefix(input, fields[0]))
+		return s.ingestFilePath(ctx, mc, body)
 	case "/append":
 		if len(fields) < 3 {
 			return "用法: /append <知识ID前缀> <补充内容>", nil
@@ -249,6 +266,61 @@ func (s *Service) answerWithAllKnowledge(ctx context.Context, question string) (
 		return "", err
 	}
 	return formatKnowledgeDump(entries, question)
+}
+
+func (s *Service) tryHandleDirectFileIngest(ctx context.Context, mc MessageContext, input string) (string, bool, error) {
+	if _, ok, err := resolveFileInput(input); err != nil {
+		return "", true, err
+	} else if !ok {
+		return "", false, nil
+	}
+	reply, err := s.ingestFilePath(ctx, mc, input)
+	return reply, true, err
+}
+
+func (s *Service) ingestFilePath(ctx context.Context, mc MessageContext, rawPath string) (string, error) {
+	input, ok, err := resolveFileInput(rawPath)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "只支持直接输入现有的图片或 PDF 文件路径。", nil
+	}
+
+	reply, err := s.ensureAIAvailable(ctx)
+	if reply != "" || err != nil {
+		return reply, err
+	}
+
+	var summary string
+	switch input.Kind {
+	case fileingest.KindPDF:
+		extractedText, extractErr := extractPDFText(input.Path)
+		if extractErr != nil {
+			if errors.Is(extractErr, fileingest.ErrPDFExtractorUnavailable) {
+				return "当前这个构建不包含 PDF 文本提取能力。请使用启用 CGO 的本机构建来开启 go-fitz PDF 总结。", nil
+			}
+			return "", extractErr
+		}
+		summary, err = s.aiService.SummarizePDFText(ctx, input.Name, extractedText)
+	case fileingest.KindImage:
+		summary, err = s.aiService.SummarizeImageFile(ctx, input.Name, input.DataURL)
+	default:
+		return "暂不支持这个文件类型。", nil
+	}
+	if err != nil {
+		return "", err
+	}
+
+	entry, err := s.store.Add(ctx, knowledge.Entry{
+		Text:       fileingest.FormatKnowledgeText(input, summary),
+		Source:     sourceLabel(mc),
+		RecordedAt: time.Now(),
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("已记住 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes)), nil
 }
 
 func (s *Service) ensureAIAvailable(ctx context.Context) (string, error) {

@@ -3,14 +3,37 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"myclaw/internal/knowledge"
 	"myclaw/internal/modelconfig"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func newTestClient(t *testing.T, handler func(*http.Request) (*http.Response, error)) *http.Client {
+	t.Helper()
+	return &http.Client{
+		Transport: roundTripFunc(handler),
+	}
+}
+
+func jsonResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Body: io.NopCloser(strings.NewReader(body)),
+	}
+}
 
 func TestRouteCommand(t *testing.T) {
 	store := modelconfig.NewStore()
@@ -20,7 +43,7 @@ func TestRouteCommand(t *testing.T) {
 	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
 
 	service := NewService(store)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
 		var req responsesRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
@@ -28,13 +51,8 @@ func TestRouteCommand(t *testing.T) {
 		if req.Text == nil || req.Text.Format.Type != "json_schema" {
 			t.Fatalf("expected json schema request, got %#v", req.Text)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"command\":\"remember\",\"memory_text\":\"- 已整理内容\",\"append_text\":\"\",\"knowledge_id\":\"\",\"reminder_spec\":\"\",\"reminder_id\":\"\",\"question\":\"\"}"}]}]}`))
-	}))
-	defer server.Close()
-	service.httpClient = server.Client()
-
-	t.Setenv("MYCLAW_MODEL_BASE_URL", server.URL)
+		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"command\":\"remember\",\"memory_text\":\"- 已整理内容\",\"append_text\":\"\",\"knowledge_id\":\"\",\"reminder_spec\":\"\",\"reminder_id\":\"\",\"question\":\"\"}"}]}]}`), nil
+	})
 
 	decision, err := service.RouteCommand(context.Background(), "请帮我记住这个东西：abc")
 	if err != nil {
@@ -56,7 +74,7 @@ func TestAnswerUsesKnowledgeEntries(t *testing.T) {
 	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
 
 	service := NewService(store)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
 		var req responsesRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
@@ -64,13 +82,8 @@ func TestAnswerUsesKnowledgeEntries(t *testing.T) {
 		if len(req.Input) == 0 || !strings.Contains(req.Input[0].Content[0].Text, "未来要支持 macOS") {
 			t.Fatalf("knowledge not included in prompt: %#v", req.Input)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"可以，知识库里提到未来要支持 macOS。"}]}]}`))
-	}))
-	defer server.Close()
-	service.httpClient = server.Client()
-
-	t.Setenv("MYCLAW_MODEL_BASE_URL", server.URL)
+		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"可以，知识库里提到未来要支持 macOS。"}]}]}`), nil
+	})
 
 	reply, err := service.Answer(context.Background(), "未来要支持什么？", []knowledge.Entry{
 		{Text: "未来要支持 macOS"},
@@ -91,7 +104,7 @@ func TestTranslateToChinese(t *testing.T) {
 	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
 
 	service := NewService(store)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
 		var req responsesRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
@@ -102,19 +115,79 @@ func TestTranslateToChinese(t *testing.T) {
 		if !strings.Contains(req.Instructions, "translation mode") {
 			t.Fatalf("unexpected instructions: %q", req.Instructions)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"Puppeteer 是一个浏览器自动化工具。"}]}]}`))
-	}))
-	defer server.Close()
-	service.httpClient = server.Client()
-
-	t.Setenv("MYCLAW_MODEL_BASE_URL", server.URL)
+		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"Puppeteer 是一个浏览器自动化工具。"}]}]}`), nil
+	})
 
 	reply, err := service.TranslateToChinese(context.Background(), "Puppeteer is a browser automation tool.")
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}
 	if !strings.Contains(reply, "浏览器自动化工具") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
+func TestSummarizeImageFileUsesVisionInput(t *testing.T) {
+	store := modelconfig.NewStore()
+	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
+	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
+	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
+	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		var req responsesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if len(req.Input) == 0 || len(req.Input[0].Content) < 2 {
+			t.Fatalf("unexpected input: %#v", req.Input)
+		}
+		if req.Input[0].Content[1].Type != "input_image" {
+			t.Fatalf("expected input_image, got %#v", req.Input[0].Content)
+		}
+		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"- 图像摘要"}]}]}`), nil
+	})
+
+	reply, err := service.SummarizeImageFile(context.Background(), "sample.png", "data:image/png;base64,AAAA")
+	if err != nil {
+		t.Fatalf("summarize image: %v", err)
+	}
+	if !strings.Contains(reply, "图像摘要") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
+func TestSummarizePDFTextUsesExtractedText(t *testing.T) {
+	store := modelconfig.NewStore()
+	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
+	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
+	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
+	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		var req responsesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if len(req.Input) == 0 || len(req.Input[0].Content) < 1 {
+			t.Fatalf("unexpected input: %#v", req.Input)
+		}
+		if req.Input[0].Content[0].Type != "input_text" {
+			t.Fatalf("expected input_text, got %#v", req.Input[0].Content)
+		}
+		if !strings.Contains(req.Input[0].Content[0].Text, "Puppeteer PDF full text") {
+			t.Fatalf("expected extracted pdf text in prompt, got %#v", req.Input[0].Content[0])
+		}
+		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"- PDF 摘要"}]}]}`), nil
+	})
+
+	reply, err := service.SummarizePDFText(context.Background(), "sample.pdf", "Puppeteer PDF full text")
+	if err != nil {
+		t.Fatalf("summarize pdf: %v", err)
+	}
+	if !strings.Contains(reply, "PDF 摘要") {
 		t.Fatalf("unexpected reply: %q", reply)
 	}
 }
@@ -127,14 +200,9 @@ func TestCreateResponseReturnsAPIErrors(t *testing.T) {
 	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
 
 	service := NewService(store)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":{"message":"bad key"}}`))
-	}))
-	defer server.Close()
-	service.httpClient = server.Client()
-
-	t.Setenv("MYCLAW_MODEL_BASE_URL", server.URL)
+	service.httpClient = newTestClient(t, func(*http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusUnauthorized, `{"error":{"message":"bad key"}}`), nil
+	})
 
 	_, err := service.TestConnection(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "bad key") {

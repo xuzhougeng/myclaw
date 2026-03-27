@@ -7,6 +7,7 @@
 - 知识库存储在本地 JSON 文件里
 - 模型配置只从本地环境变量读取，不在终端或聊天界面里暴露
 - 配置模型后，会先做 AI 命令路由，再决定是“记住 / 遗忘 / 提醒 / 查看 / 回答”
+- 支持图片直接总结入库；PDF 走 `go-fitz` 提取全文后再总结
 - 支持单次提醒和每天重复提醒
 - 微信桥接只保留扫码登录、长轮询、文本/语音文字收发
 - 没有向量检索、没有模型总结、没有多租户隔离
@@ -93,6 +94,8 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 - `记住：Windows 版本先做微信接口`
 - `请帮我记住这个东西：未来要支持 macOS`
 - `/remember 未来要支持 macOS`
+- `/remember-file ./docs/puppeteer.pdf`
+- `./screenshots/puppeteer-home.png`
 - `/append 6d2d7724 它是 Google 出品的一个工具`
 - `给 #6d2d7724 补充：它是 Google 出品的一个工具`
 - `再补充一点：它是 Google 出品的一个工具`
@@ -110,6 +113,13 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 - `/clear`
 - `现在我记了什么？`
 
+文件摄入说明：
+
+- 图片会走视觉输入，总结成适合后续检索的中文 Markdown
+- PDF 会先用 `go-fitz` 提取全文，再做摘要
+- 默认跨平台 release 包使用 `CGO_ENABLED=0`，因此图片可用，但 PDF 会返回“当前构建不包含 PDF 文本提取能力”
+- 如果你要在 Windows 本机启用 PDF，总结请安装可用的 C 工具链后用 `.\scripts\build-windows.ps1 -UseCgo`
+
 ## 编译
 
 ### Windows 本机
@@ -120,12 +130,18 @@ PowerShell:
 .\scripts\build-windows.ps1
 .\scripts\build-windows.ps1 -All
 .\scripts\build-windows.ps1 -Arch arm64 -RunTests
+.\scripts\build-windows.ps1 -UseCgo
 ```
 
 默认会输出到 `dist/`：
 
 - `dist/myclaw-windows-amd64.exe`
 - `dist/myclaw-windows-arm64.exe`（使用 `-All` 或 `-Arch arm64`）
+
+说明：
+
+- 默认脚本使用 `CGO_ENABLED=0`，更适合直接分发
+- 如果要启用 `go-fitz` 的 PDF 提取，请在 Windows 本机准备好 C 工具链后加上 `-UseCgo`
 
 ### Release 包
 
