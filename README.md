@@ -93,6 +93,9 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 - `记住：Windows 版本先做微信接口`
 - `请帮我记住这个东西：未来要支持 macOS`
 - `/remember 未来要支持 macOS`
+- `/append 6d2d7724 它是 Google 出品的一个工具`
+- `给 #6d2d7724 补充：它是 Google 出品的一个工具`
+- `再补充一点：它是 Google 出品的一个工具`
 - `/forget 0015f908`
 - `/notice 2小时后 喝水`
 - `一分钟后提醒我喝水`

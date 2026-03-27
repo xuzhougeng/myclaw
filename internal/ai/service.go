@@ -18,6 +18,7 @@ import (
 type RouteDecision struct {
 	Command      string `json:"command"`
 	MemoryText   string `json:"memory_text"`
+	AppendText   string `json:"append_text"`
 	KnowledgeID  string `json:"knowledge_id"`
 	ReminderSpec string `json:"reminder_spec"`
 	ReminderID   string `json:"reminder_id"`
@@ -70,9 +71,12 @@ func (s *Service) RouteCommand(ctx context.Context, input string) (RouteDecision
 		"properties": map[string]any{
 			"command": map[string]any{
 				"type": "string",
-				"enum": []string{"remember", "forget", "notice_add", "notice_list", "notice_remove", "list", "stats", "help", "answer"},
+				"enum": []string{"remember", "append", "append_last", "forget", "notice_add", "notice_list", "notice_remove", "list", "stats", "help", "answer"},
 			},
 			"memory_text": map[string]any{
+				"type": "string",
+			},
+			"append_text": map[string]any{
 				"type": "string",
 			},
 			"knowledge_id": map[string]any{
@@ -88,13 +92,15 @@ func (s *Service) RouteCommand(ctx context.Context, input string) (RouteDecision
 				"type": "string",
 			},
 		},
-		"required": []string{"command", "memory_text", "knowledge_id", "reminder_spec", "reminder_id", "question"},
+		"required": []string{"command", "memory_text", "append_text", "knowledge_id", "reminder_spec", "reminder_id", "question"},
 	}
 
 	instructions := strings.TrimSpace(`
 You are the command router for myclaw.
 Classify the user input into exactly one command:
 - remember: save something into the knowledge base
+- append: append a note to an existing knowledge item by ID or ID prefix
+- append_last: append a note to the user's latest knowledge item in the current interface
 - forget: delete one knowledge item by its ID or ID prefix
 - notice_add: create a reminder
 - notice_list: list reminders
@@ -106,6 +112,8 @@ Classify the user input into exactly one command:
 
 Rules:
 - For remember, rewrite the memory as concise Markdown while preserving facts.
+- For append, fill knowledge_id and append_text.
+- For append_last, fill append_text.
 - For forget, fill knowledge_id without the leading # when present.
 - For notice_add, normalize reminder_spec into one of these executable forms:
   - <duration>后 <message>
@@ -126,6 +134,7 @@ Rules:
 
 	decision.Command = strings.TrimSpace(strings.ToLower(decision.Command))
 	decision.MemoryText = strings.TrimSpace(decision.MemoryText)
+	decision.AppendText = strings.TrimSpace(decision.AppendText)
 	decision.KnowledgeID = strings.TrimSpace(strings.TrimPrefix(decision.KnowledgeID, "#"))
 	decision.ReminderSpec = strings.TrimSpace(decision.ReminderSpec)
 	decision.ReminderID = strings.TrimSpace(strings.TrimPrefix(decision.ReminderID, "#"))

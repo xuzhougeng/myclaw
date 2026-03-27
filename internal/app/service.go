@@ -15,7 +15,13 @@ import (
 
 const maxReplyPreviewRunes = 240
 
-var forgetIntentPattern = regexp.MustCompile(`^(?:请)?(?:帮我)?(?:遗忘|忘掉|删除|删掉)\s*#?([0-9a-fA-F]{4,})\s*$`)
+var (
+	forgetIntentPattern    = regexp.MustCompile(`^(?:请)?(?:帮我)?(?:遗忘|忘掉|删除|删掉)\s*#?([0-9a-fA-F]{4,})\s*$`)
+	appendByIDPattern      = regexp.MustCompile(`^(?:请)?(?:给|把)\s*#?([0-9a-fA-F]{4,})\s*(?:这条|这一条)?(?:再)?(?:补充|追加|补记|加上)(?:一点|一下|一条|一句|笔记)?(?:\s*[:：]\s*|\s+)(.+)$`)
+	appendByIDShortPattern = regexp.MustCompile(`^#?([0-9a-fA-F]{4,})\s*(?:追加|补充|补记)(?:\s*[:：]\s*|\s+)(.+)$`)
+	appendLastPattern      = regexp.MustCompile(`^(?:再)?(?:补充|追加|补记)(?:一点|一下|一条|一句|笔记)?(?:\s*[:：]\s*|\s+)(.+)$`)
+	appendLastRefPattern   = regexp.MustCompile(`^(?:请)?(?:给|把)(?:上一条|上条|刚才那条|刚刚那条|这条)\s*(?:再)?(?:补充|追加|补记|加上)(?:一点|一下|一条|一句|笔记)?(?:\s*[:：]\s*|\s+)(.+)$`)
+)
 
 type MessageContext struct {
 	UserID    string
@@ -52,6 +58,10 @@ func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input st
 		return s.handleCommand(ctx, mc, normalized)
 	}
 
+	if reply, ok, err := s.tryHandleNaturalAppend(ctx, mc, text); ok || err != nil {
+		return reply, err
+	}
+
 	if reply, ok, err := s.tryHandleNaturalReminder(ctx, mc, text); ok || err != nil {
 		return reply, err
 	}
@@ -85,6 +95,7 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 	case "/help", "/h":
 		return "可用命令:\n" +
 			"/remember <内容> 或 记住：<内容> — 保存一条知识\n" +
+			"/append <ID前缀> <内容> — 追加到已有知识\n" +
 			"/forget <ID前缀> — 删除一条知识\n" +
 			"/list — 查看全部知识\n" +
 			"/stats — 查看知识库状态\n" +
@@ -107,6 +118,21 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 			return "", err
 		}
 		return fmt.Sprintf("已记住 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes)), nil
+	case "/append":
+		if len(fields) < 3 {
+			return "用法: /append <知识ID前缀> <补充内容>", nil
+		}
+		body := strings.TrimSpace(strings.TrimPrefix(input, fields[0]))
+		bodyFields := strings.Fields(body)
+		if len(bodyFields) < 2 {
+			return "用法: /append <知识ID前缀> <补充内容>", nil
+		}
+		target := bodyFields[0]
+		appendText := strings.TrimSpace(strings.TrimPrefix(body, target))
+		if strings.EqualFold(target, "last") || strings.EqualFold(target, "latest") {
+			return s.appendLatestKnowledge(ctx, mc, appendText)
+		}
+		return s.appendKnowledge(ctx, target, appendText)
 	case "/forget", "/delete":
 		if len(fields) < 2 {
 			return "用法: /forget <知识ID前缀>", nil
@@ -141,6 +167,28 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 	}
 }
 
+func (s *Service) tryHandleNaturalAppend(ctx context.Context, mc MessageContext, input string) (string, bool, error) {
+	text := strings.TrimSpace(input)
+
+	if matches := appendByIDPattern.FindStringSubmatch(text); len(matches) == 3 {
+		reply, err := s.appendKnowledge(ctx, matches[1], matches[2])
+		return reply, true, err
+	}
+	if matches := appendByIDShortPattern.FindStringSubmatch(text); len(matches) == 3 {
+		reply, err := s.appendKnowledge(ctx, matches[1], matches[2])
+		return reply, true, err
+	}
+	if matches := appendLastRefPattern.FindStringSubmatch(text); len(matches) == 2 {
+		reply, err := s.appendLatestKnowledge(ctx, mc, matches[1])
+		return reply, true, err
+	}
+	if matches := appendLastPattern.FindStringSubmatch(text); len(matches) == 2 {
+		reply, err := s.appendLatestKnowledge(ctx, mc, matches[1])
+		return reply, true, err
+	}
+	return "", false, nil
+}
+
 func (s *Service) tryHandleNaturalForget(ctx context.Context, input string) (string, bool, error) {
 	matches := forgetIntentPattern.FindStringSubmatch(strings.TrimSpace(input))
 	if len(matches) != 2 {
@@ -148,6 +196,28 @@ func (s *Service) tryHandleNaturalForget(ctx context.Context, input string) (str
 	}
 	reply, err := s.forgetKnowledge(ctx, matches[1])
 	return reply, true, err
+}
+
+func (s *Service) appendKnowledge(ctx context.Context, idOrPrefix, appendText string) (string, error) {
+	entry, ok, err := s.store.Append(ctx, idOrPrefix, appendText)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return fmt.Sprintf("没有找到知识 #%s。", strings.TrimPrefix(strings.TrimSpace(idOrPrefix), "#")), nil
+	}
+	return fmt.Sprintf("已补充 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes)), nil
+}
+
+func (s *Service) appendLatestKnowledge(ctx context.Context, mc MessageContext, appendText string) (string, error) {
+	entry, ok, err := s.store.AppendLatest(ctx, sourceLabel(mc), appendText)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "当前没有可补充的最近知识。先记住一条内容，再说“再补充一点：...”。", nil
+	}
+	return fmt.Sprintf("已补充 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes)), nil
 }
 
 func (s *Service) forgetKnowledge(ctx context.Context, idOrPrefix string) (string, error) {
@@ -202,6 +272,19 @@ func (s *Service) handleAIMessage(ctx context.Context, mc MessageContext, text s
 			return "", err
 		}
 		return fmt.Sprintf("已记住 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes)), nil
+	case "append":
+		if decision.KnowledgeID == "" {
+			return "请提供要补充的知识 ID。", nil
+		}
+		if decision.AppendText == "" {
+			return "请提供要补充的内容。", nil
+		}
+		return s.appendKnowledge(ctx, decision.KnowledgeID, decision.AppendText)
+	case "append_last":
+		if decision.AppendText == "" {
+			return "请提供要补充的内容。", nil
+		}
+		return s.appendLatestKnowledge(ctx, mc, decision.AppendText)
 	case "forget":
 		if decision.KnowledgeID == "" {
 			return "请提供要遗忘的知识 ID。", nil

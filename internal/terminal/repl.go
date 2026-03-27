@@ -115,6 +115,7 @@ func (r *REPL) printHelp() {
 	fmt.Fprintln(r.output, "  /help")
 	fmt.Fprintln(r.output, "  /exit")
 	fmt.Fprintln(r.output, "  /remember          paste multiline content until EOF")
+	fmt.Fprintln(r.output, "  /append <ID> <内容>")
 	fmt.Fprintln(r.output, "  /ask               paste multiline question until EOF")
 	fmt.Fprintln(r.output, "  /notice 2小时后 喝水")
 	fmt.Fprintln(r.output, "  /notice 每天 09:00 写日报")

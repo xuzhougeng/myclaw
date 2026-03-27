@@ -98,6 +98,73 @@ func TestHandleMessageUsesAIIntentRecognition(t *testing.T) {
 	}
 }
 
+func TestAppendCommandUpdatesExistingKnowledge(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, nil, reminders)
+
+	if _, err := store.Add(context.Background(), knowledge.Entry{
+		ID:         "6d2d7724abcd1234",
+		Text:       "Puppeteer 是一个浏览器自动化工具。",
+		RecordedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{}, "/append 6d2d7724 它是 Google 出品的一个工具。")
+	if err != nil {
+		t.Fatalf("append command: %v", err)
+	}
+	if !strings.Contains(reply, "已补充 #6d2d7724") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+
+	entries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list entries: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if !strings.Contains(entries[0].Text, "Google 出品") {
+		t.Fatalf("expected appended text, got %q", entries[0].Text)
+	}
+}
+
+func TestNaturalAppendByIDUpdatesExistingKnowledge(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, nil, reminders)
+
+	if _, err := store.Add(context.Background(), knowledge.Entry{
+		ID:         "6d2d7724abcd1234",
+		Text:       "Puppeteer 是一个浏览器自动化工具。",
+		RecordedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{}, "给 #6d2d7724 补充：它是 Google 出品的一个工具。")
+	if err != nil {
+		t.Fatalf("natural append by id: %v", err)
+	}
+	if !strings.Contains(reply, "已补充 #6d2d7724") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+
+	entries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list entries: %v", err)
+	}
+	if len(entries) != 1 || !strings.Contains(entries[0].Text, "Google 出品") {
+		t.Fatalf("unexpected entries: %#v", entries)
+	}
+}
+
 func TestHandleMessageRequiresConfiguredModelForNaturalLanguage(t *testing.T) {
 	t.Parallel()
 
@@ -138,6 +205,64 @@ func TestNoticeCreatesReminder(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Message != "喝水" {
 		t.Fatalf("unexpected reminders: %#v", items)
+	}
+}
+
+func TestNaturalAppendLastUpdatesLatestKnowledgeFromSameSource(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, nil, reminders)
+
+	if _, err := store.Add(context.Background(), knowledge.Entry{
+		ID:         "11111111aaaa1111",
+		Text:       "old same source",
+		Source:     "weixin:u1",
+		RecordedAt: time.Date(2026, 3, 27, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("seed old same source: %v", err)
+	}
+	if _, err := store.Add(context.Background(), knowledge.Entry{
+		ID:         "22222222bbbb2222",
+		Text:       "other source latest",
+		Source:     "weixin:u2",
+		RecordedAt: time.Date(2026, 3, 27, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("seed other source: %v", err)
+	}
+	if _, err := store.Add(context.Background(), knowledge.Entry{
+		ID:         "33333333cccc3333",
+		Text:       "Puppeteer 是一个浏览器自动化工具。",
+		Source:     "weixin:u1",
+		RecordedAt: time.Date(2026, 3, 27, 11, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("seed latest same source: %v", err)
+	}
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{
+		UserID:    "u1",
+		Interface: "weixin",
+	}, "再补充一点：它是 Google 出品的一个工具。")
+	if err != nil {
+		t.Fatalf("natural append last: %v", err)
+	}
+	if !strings.Contains(reply, "已补充 #33333333") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+
+	entries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list entries: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+	if !strings.Contains(entries[1].Text, "Google 出品") {
+		t.Fatalf("expected latest same-source entry to be appended, got %#v", entries[1])
+	}
+	if strings.Contains(entries[2].Text, "Google 出品") {
+		t.Fatalf("should not append to another source entry: %#v", entries[2])
 	}
 }
 
@@ -298,6 +423,48 @@ func TestHandleMessageUsesAIRouteForReminderList(t *testing.T) {
 	}
 	if !strings.Contains(reply, "当前没有提醒") {
 		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
+func TestHandleMessageUsesAIRouteForAppendLast(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, fakeAI{
+		configured: true,
+		route: ai.RouteDecision{
+			Command:    "append_last",
+			AppendText: "它是 Google 出品的一个工具。",
+		},
+	}, reminders)
+
+	if _, err := store.Add(context.Background(), knowledge.Entry{
+		ID:         "6d2d7724abcd1234",
+		Text:       "Puppeteer 是一个浏览器自动化工具。",
+		Source:     "terminal:u1",
+		RecordedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{
+		UserID:    "u1",
+		Interface: "terminal",
+	}, "我看了这个 Puppeteer，想再追加一点笔记")
+	if err != nil {
+		t.Fatalf("handle message: %v", err)
+	}
+	if !strings.Contains(reply, "已补充 #6d2d7724") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+
+	entries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list entries: %v", err)
+	}
+	if len(entries) != 1 || !strings.Contains(entries[0].Text, "Google 出品") {
+		t.Fatalf("unexpected entries: %#v", entries)
 	}
 }
 

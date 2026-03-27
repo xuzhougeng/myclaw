@@ -103,6 +103,61 @@ func (s *Store) Remove(_ context.Context, idOrPrefix string) (Entry, bool, error
 	return Entry{}, false, nil
 }
 
+func (s *Store) Append(_ context.Context, idOrPrefix, addition string) (Entry, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entries, err := s.readAllLocked()
+	if err != nil {
+		return Entry{}, false, err
+	}
+
+	match := normalizeEntryID(idOrPrefix)
+	for index, entry := range entries {
+		if strings.HasPrefix(normalizeEntryID(entry.ID), match) {
+			entry.Text = mergeEntryText(entry.Text, addition)
+			entries[index] = entry
+			if err := s.writeAllLocked(entries); err != nil {
+				return Entry{}, false, err
+			}
+			return entry, true, nil
+		}
+	}
+	return Entry{}, false, nil
+}
+
+func (s *Store) AppendLatest(_ context.Context, source, addition string) (Entry, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entries, err := s.readAllLocked()
+	if err != nil {
+		return Entry{}, false, err
+	}
+
+	selectedIndex := -1
+	for index, entry := range entries {
+		if strings.TrimSpace(source) != "" && entry.Source != source {
+			continue
+		}
+		if selectedIndex == -1 || entry.RecordedAt.After(entries[selectedIndex].RecordedAt) {
+			selectedIndex = index
+		}
+	}
+
+	if selectedIndex == -1 {
+		return Entry{}, false, nil
+	}
+
+	entry := entries[selectedIndex]
+	entry.Text = mergeEntryText(entry.Text, addition)
+	entries[selectedIndex] = entry
+	if err := s.writeAllLocked(entries); err != nil {
+		return Entry{}, false, err
+	}
+	return entry, true, nil
+}
+
 func (s *Store) readAllLocked() ([]Entry, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
@@ -151,4 +206,18 @@ func normalizeEntryID(value string) string {
 	value = strings.TrimSpace(value)
 	value = strings.TrimPrefix(value, "#")
 	return strings.ToLower(value)
+}
+
+func mergeEntryText(base, addition string) string {
+	base = strings.TrimSpace(base)
+	addition = strings.TrimSpace(addition)
+
+	switch {
+	case base == "":
+		return addition
+	case addition == "":
+		return base
+	default:
+		return base + "\n" + addition
+	}
 }
