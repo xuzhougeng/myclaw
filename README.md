@@ -1,11 +1,13 @@
 # myclaw
 
-`myclaw` 现在是一个最小化的 Go 桌面常驻工具，先只做一件事：通过微信收消息，把需要记住的内容存进本地知识库，然后在回答时读取全部知识后直接回复。
+`myclaw` 现在是一个最小化的 Go 桌面常驻工具，当前支持两类入口：本地终端 REPL 和微信桥接。它可以把需要记住的内容存进本地知识库，并在配置模型后用 AI 做意图识别、整理记忆和基于知识库回答。
 
 当前版本刻意保持简单：
 
 - 知识库存储在本地 JSON 文件里
-- 普通提问时，直接读取完整知识库并返回
+- 模型配置只从本地环境变量读取，不在终端或聊天界面里暴露
+- 配置模型后，会先做 AI 意图识别，再决定是“记住”还是“回答”
+- 支持单次提醒和每天重复提醒
 - 微信桥接只保留扫码登录、长轮询、文本/语音文字收发
 - 没有向量检索、没有模型总结、没有多租户隔离
 
@@ -13,12 +15,56 @@
 
 ```text
 cmd/myclaw            程序入口
+internal/ai           OpenAI responses 调用
 internal/app          最小消息处理逻辑
 internal/knowledge    本地知识库存储
+internal/modelconfig  模型环境变量读取
+internal/reminder     提醒调度与持久化
+internal/terminal     终端 REPL
 internal/weixin       iLink 微信桥接最小实现
 ```
 
 ## 运行
+
+### 0. 终端模式
+
+直接运行即可进入终端：
+
+```bash
+go run ./cmd/myclaw
+```
+
+或者显式指定：
+
+```bash
+go run ./cmd/myclaw -terminal
+```
+
+模型配置只允许通过本地环境变量传入，不提供终端内配置命令。先在本地 shell 里设置：
+
+```bash
+export MYCLAW_MODEL_PROVIDER=openai
+export MYCLAW_MODEL_BASE_URL=https://api.openai.com/v1
+export MYCLAW_MODEL_API_KEY=<你的 key>
+export MYCLAW_MODEL_NAME=<你的模型名>
+```
+
+Windows PowerShell:
+
+```powershell
+$env:MYCLAW_MODEL_PROVIDER="openai"
+$env:MYCLAW_MODEL_BASE_URL="https://api.openai.com/v1"
+$env:MYCLAW_MODEL_API_KEY="<你的 key>"
+$env:MYCLAW_MODEL_NAME="<你的模型名>"
+.\scripts\run-terminal.ps1
+```
+
+使用的环境变量固定为：
+
+- `MYCLAW_MODEL_PROVIDER`
+- `MYCLAW_MODEL_BASE_URL`
+- `MYCLAW_MODEL_API_KEY`
+- `MYCLAW_MODEL_NAME`
 
 ### 1. 微信扫码登录
 
@@ -45,7 +91,14 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 ### 3. 常用消息
 
 - `记住：Windows 版本先做微信接口`
+- `请帮我记住这个东西：未来要支持 macOS`
 - `/remember 未来要支持 macOS`
+- `/notice 2小时后 喝水`
+- `/notice 每天 09:00 写日报`
+- `/notice 2026-03-30 14:00 交房租`
+- `/notice list`
+- `/notice remove <提醒ID前缀>`
+- `/cron 每天 18:00 健身`
 - `/list`
 - `/stats`
 - `/clear`
@@ -67,6 +120,66 @@ PowerShell:
 
 - `dist/myclaw-windows-amd64.exe`
 - `dist/myclaw-windows-arm64.exe`（使用 `-All` 或 `-Arch arm64`）
+
+### Release 包
+
+`make release` 现在除了编译各平台二进制，还会生成 zip 包：
+
+- `dist/packages/myclaw-windows-amd64.zip`
+- `dist/packages/myclaw-windows-arm64.zip`
+- `dist/packages/myclaw-linux-amd64.zip`
+- `dist/packages/myclaw-linux-arm64.zip`
+- `dist/packages/myclaw-darwin-amd64.zip`
+- `dist/packages/myclaw-darwin-arm64.zip`
+
+Windows zip 包内会包含：
+
+- `myclaw.exe`
+- `run-weixin.ps1`
+- `run-terminal.ps1`
+- `run-all.ps1`
+- `install-autostart.ps1`
+- `uninstall-autostart.ps1`
+- `README.txt`
+
+默认数据目录和日志目录会使用：
+
+- `%LOCALAPPDATA%\myclaw\data`
+- `%LOCALAPPDATA%\myclaw\logs`
+
+这样在 Windows 上解压后就可以直接复制整个目录并运行脚本，不需要 Go 源码环境，也不会因为换了解压目录而丢失微信登录状态。
+如果你之前在旧版本里把登录态存在解压目录下的 `data/weixin-bridge/account.json`，第一次切到新目录启动时也会自动迁移过去。
+
+### Windows 开机自启
+
+先确保你已经编译出 Windows 可执行文件，然后安装用户级开机自启：
+
+```powershell
+.\scripts\install-autostart.ps1
+```
+
+默认行为：
+
+- 登录 Windows 后自动启动 `myclaw`
+- 以隐藏窗口方式运行
+- 自动带上 `-weixin`
+- 数据目录使用 `%LOCALAPPDATA%\myclaw\data`
+- 日志写到 `%LOCALAPPDATA%\myclaw\logs\myclaw.log`
+
+卸载开机自启：
+
+```powershell
+.\scripts\uninstall-autostart.ps1
+```
+
+如果你希望 AI 功能在开机自启后也可用，请把这些变量设成用户级环境变量，而不是只在当前终端窗口里临时设置：
+
+```powershell
+[Environment]::SetEnvironmentVariable("MYCLAW_MODEL_PROVIDER", "openai", "User")
+[Environment]::SetEnvironmentVariable("MYCLAW_MODEL_BASE_URL", "https://api.openai.com/v1", "User")
+[Environment]::SetEnvironmentVariable("MYCLAW_MODEL_API_KEY", "<你的 key>", "User")
+[Environment]::SetEnvironmentVariable("MYCLAW_MODEL_NAME", "<你的模型名>", "User")
+```
 
 ### Linux 交叉编译
 
@@ -117,6 +230,7 @@ Windows PowerShell:
 ## 数据文件
 
 - `data/knowledge/entries.json`: 知识库
+- `data/reminders/items.json`: 提醒数据
 - `data/weixin-bridge/account.json`: 微信登录凭证
 - `data/weixin-bridge/sync_buf`: 微信长轮询游标
 

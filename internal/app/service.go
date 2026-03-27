@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"myclaw/internal/ai"
 	"myclaw/internal/knowledge"
 )
 
@@ -19,11 +20,23 @@ type MessageContext struct {
 }
 
 type Service struct {
-	store *knowledge.Store
+	store     *knowledge.Store
+	aiService aiBackend
+	reminders reminderBackend
 }
 
-func NewService(store *knowledge.Store) *Service {
-	return &Service{store: store}
+type aiBackend interface {
+	IsConfigured(ctx context.Context) (bool, error)
+	RecognizeIntent(ctx context.Context, input string) (ai.IntentDecision, error)
+	Answer(ctx context.Context, question string, entries []knowledge.Entry) (string, error)
+}
+
+func NewService(store *knowledge.Store, aiService aiBackend, reminders reminderBackend) *Service {
+	return &Service{
+		store:     store,
+		aiService: aiService,
+		reminders: reminders,
+	}
 }
 
 func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input string) (string, error) {
@@ -48,7 +61,7 @@ func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input st
 		return fmt.Sprintf("已记住 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes)), nil
 	}
 
-	return s.answerWithAllKnowledge(ctx, text)
+	return s.handleAIMessage(ctx, mc, text)
 }
 
 func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input string) (string, error) {
@@ -63,6 +76,8 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 			"/remember <内容> 或 记住：<内容> — 保存一条知识\n" +
 			"/list — 查看全部知识\n" +
 			"/stats — 查看知识库状态\n" +
+			"/notice — 创建、查看、删除提醒\n" +
+			"/cron — 与 /notice 等价\n" +
 			"/clear — 清空知识库\n" +
 			"/help — 查看帮助\n\n" +
 			"当前版本不会做复杂推理；收到普通问题时，会读取全部知识后直接回复。", nil
@@ -102,8 +117,10 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 			return "", err
 		}
 		return "知识库已清空。", nil
+	case "/notice", "/cron":
+		return s.handleReminderCommand(ctx, mc, input)
 	default:
-		return s.answerWithAllKnowledge(ctx, input)
+		return s.handleAIMessage(ctx, mc, input)
 	}
 }
 
@@ -113,6 +130,54 @@ func (s *Service) answerWithAllKnowledge(ctx context.Context, question string) (
 		return "", err
 	}
 	return formatKnowledgeDump(entries, question)
+}
+
+func (s *Service) handleAIMessage(ctx context.Context, mc MessageContext, text string) (string, error) {
+	if s.aiService == nil {
+		return "模型尚未启用。请先在本地环境变量中配置模型，或使用 `/remember` / `记住：` 明确保存内容。", nil
+	}
+
+	configured, err := s.aiService.IsConfigured(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !configured {
+		return "模型还没有配置完成。请先设置本地环境变量 `MYCLAW_MODEL_PROVIDER`、`MYCLAW_MODEL_BASE_URL`、`MYCLAW_MODEL_API_KEY` 和 `MYCLAW_MODEL_NAME`。", nil
+	}
+
+	decision, err := s.aiService.RecognizeIntent(ctx, text)
+	if err != nil {
+		return "", err
+	}
+
+	switch decision.Intent {
+	case "remember":
+		memoryText := strings.TrimSpace(decision.MemoryText)
+		if memoryText == "" {
+			memoryText = text
+		}
+		entry, err := s.store.Add(ctx, knowledge.Entry{
+			Text:       memoryText,
+			Source:     sourceLabel(mc),
+			RecordedAt: time.Now(),
+		})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("已记住 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes)), nil
+	case "answer":
+		entries, err := s.store.List(ctx)
+		if err != nil {
+			return "", err
+		}
+		question := strings.TrimSpace(decision.Question)
+		if question == "" {
+			question = text
+		}
+		return s.aiService.Answer(ctx, question, entries)
+	default:
+		return fmt.Sprintf("无法识别意图: %s", decision.Intent), nil
+	}
 }
 
 func parseRememberIntent(text string) (string, bool) {

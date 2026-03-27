@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"myclaw/internal/app"
+	"myclaw/internal/reminder"
 )
 
 const maxReplyChunkRunes = 1400
@@ -20,16 +21,18 @@ type BridgeConfig struct {
 }
 
 type Bridge struct {
-	client  *Client
-	service *app.Service
-	config  BridgeConfig
+	client    *Client
+	service   *app.Service
+	reminders *reminder.Manager
+	config    BridgeConfig
 }
 
-func NewBridge(client *Client, service *app.Service, config BridgeConfig) *Bridge {
+func NewBridge(client *Client, service *app.Service, reminders *reminder.Manager, config BridgeConfig) *Bridge {
 	return &Bridge{
-		client:  client,
-		service: service,
-		config:  config,
+		client:    client,
+		service:   service,
+		reminders: reminders,
+		config:    config,
 	}
 }
 
@@ -157,6 +160,15 @@ func (b *Bridge) Run(ctx context.Context) error {
 func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 	text := extractText(msg)
 	log.Printf("[weixin] inbound from=%s text=%s", msg.FromUserID, truncate(text, 80))
+
+	if b.reminders != nil {
+		userID := msg.FromUserID
+		contextToken := msg.ContextToken
+		b.reminders.RegisterNotifier(reminder.Target{Interface: "weixin", UserID: userID}, reminder.NotifierFunc(func(ctx context.Context, item reminder.Reminder) error {
+			text := fmt.Sprintf("提醒时间到了：%s", item.Message)
+			return b.sendChunkedReply(ctx, userID, contextToken, text)
+		}))
+	}
 
 	reply, err := b.service.HandleMessage(ctx, app.MessageContext{
 		UserID:    msg.FromUserID,
