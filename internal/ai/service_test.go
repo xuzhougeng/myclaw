@@ -199,6 +199,35 @@ func TestTranslateToChinese(t *testing.T) {
 	}
 }
 
+func TestTranslateToChineseIncludesSkillContext(t *testing.T) {
+	store := modelconfig.NewStore()
+	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
+	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
+	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
+	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		var req responsesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(req.Instructions, "Loaded skills") {
+			t.Fatalf("expected skill context in instructions, got %q", req.Instructions)
+		}
+		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"你好"}]}]}`), nil
+	})
+
+	ctx := WithSkillContext(context.Background(), "Loaded skills\n\n## writer\nUse concise writing.")
+	reply, err := service.TranslateToChinese(ctx, "hello")
+	if err != nil {
+		t.Fatalf("translate: %v", err)
+	}
+	if reply != "你好" {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
 func TestSummarizeImageFileUsesVisionInput(t *testing.T) {
 	store := modelconfig.NewStore()
 	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")

@@ -15,6 +15,7 @@ import (
 	"myclaw/internal/knowledge"
 	"myclaw/internal/modelconfig"
 	"myclaw/internal/reminder"
+	"myclaw/internal/skilllib"
 	"myclaw/internal/terminal"
 	"myclaw/internal/weixin"
 )
@@ -50,7 +51,8 @@ func main() {
 	aiService := ai.NewService(modelStore)
 	reminderStore := reminder.NewStore(filepath.Join(dataDir, "reminders", "items.json"))
 	reminderManager := reminder.NewManager(reminderStore)
-	service := app.NewService(store, aiService, reminderManager)
+	skillLoader := skilllib.NewLoader(skilllib.DefaultDirs(dataDir)...)
+	service := app.NewServiceWithSkills(store, aiService, reminderManager, skillLoader)
 	bridge := weixin.NewBridge(weixin.NewClient("", ""), service, reminderManager, weixin.BridgeConfig{
 		DataDir: dataDir,
 	})

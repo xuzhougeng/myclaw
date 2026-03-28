@@ -14,6 +14,7 @@ import (
 	"myclaw/internal/fileingest"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/reminder"
+	"myclaw/internal/skilllib"
 )
 
 func TestHandleMessageRememberAndList(t *testing.T) {
@@ -98,6 +99,128 @@ func TestHandleMessageQuestionUsesReviewedKnowledgeSubset(t *testing.T) {
 	}
 	if !strings.Contains(reply, "未来需要支持 macOS") {
 		t.Fatalf("unexpected answer reply: %q", reply)
+	}
+}
+
+func TestSkillsCanBeListedLoadedAndUnloaded(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "skills", "writer")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(strings.TrimSpace(`
+---
+name: writer
+description: 帮助输出更清晰的中文写作
+---
+# Writer
+Use concise Chinese writing.
+`)), 0o644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+
+	store := knowledge.NewStore(filepath.Join(root, "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	service := NewServiceWithSkills(store, nil, reminders, skilllib.NewLoader(filepath.Join(root, "skills")))
+	mc := MessageContext{UserID: "u1", Interface: "terminal"}
+
+	reply, err := service.HandleMessage(context.Background(), mc, "/skills")
+	if err != nil {
+		t.Fatalf("list skills: %v", err)
+	}
+	if !strings.Contains(reply, "writer") {
+		t.Fatalf("expected listed skill, got %q", reply)
+	}
+
+	reply, err = service.HandleMessage(context.Background(), mc, "/show-skill writer")
+	if err != nil {
+		t.Fatalf("show skill: %v", err)
+	}
+	if !strings.Contains(reply, "# Writer") {
+		t.Fatalf("expected skill content, got %q", reply)
+	}
+
+	reply, err = service.HandleMessage(context.Background(), mc, "/load-skill writer")
+	if err != nil {
+		t.Fatalf("load skill: %v", err)
+	}
+	if !strings.Contains(reply, "已加载技能 writer") {
+		t.Fatalf("unexpected load reply: %q", reply)
+	}
+
+	reply, err = service.HandleMessage(context.Background(), mc, "/skills")
+	if err != nil {
+		t.Fatalf("list skills after load: %v", err)
+	}
+	if !strings.Contains(reply, "[已加载]") {
+		t.Fatalf("expected loaded marker, got %q", reply)
+	}
+
+	reply, err = service.HandleMessage(context.Background(), mc, "/page-skills")
+	if err != nil {
+		t.Fatalf("page skills: %v", err)
+	}
+	if !strings.Contains(reply, "writer") {
+		t.Fatalf("expected loaded page skill, got %q", reply)
+	}
+
+	reply, err = service.HandleMessage(context.Background(), mc, "/unload-skill writer")
+	if err != nil {
+		t.Fatalf("unload skill: %v", err)
+	}
+	if !strings.Contains(reply, "已卸载技能 writer") {
+		t.Fatalf("unexpected unload reply: %q", reply)
+	}
+}
+
+func TestLoadedSkillIsInjectedIntoAIContext(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "skills", "translator")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(strings.TrimSpace(`
+---
+name: translator
+description: 翻译时优先保留技术术语
+---
+# Translator
+Preserve technical terms whenever possible.
+`)), 0o644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+
+	store := knowledge.NewStore(filepath.Join(root, "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	service := NewServiceWithSkills(store, fakeAI{
+		configured: true,
+		translationFunc: func(ctx context.Context, input string) string {
+			if input != "hello" {
+				t.Fatalf("unexpected translation input: %q", input)
+			}
+			skillContext := ai.SkillContextFromContext(ctx)
+			if !strings.Contains(skillContext, "translator") || !strings.Contains(skillContext, "Preserve technical terms") {
+				t.Fatalf("skill context missing from request: %q", skillContext)
+			}
+			return "你好"
+		},
+	}, reminders, skilllib.NewLoader(filepath.Join(root, "skills")))
+	mc := MessageContext{UserID: "u1", Interface: "terminal"}
+
+	if _, err := service.HandleMessage(context.Background(), mc, "/load-skill translator"); err != nil {
+		t.Fatalf("load skill: %v", err)
+	}
+
+	reply, err := service.HandleMessage(context.Background(), mc, "/translate hello")
+	if err != nil {
+		t.Fatalf("translate with skill: %v", err)
+	}
+	if reply != "你好" {
+		t.Fatalf("unexpected translate reply: %q", reply)
 	}
 }
 
@@ -709,15 +832,16 @@ func TestHandleMessageUsesAIRouteForAppendLast(t *testing.T) {
 }
 
 type fakeAI struct {
-	configured   bool
-	route        ai.RouteDecision
-	searchPlan   ai.SearchPlan
-	reviewIDs    []string
-	answer       string
-	answerFunc   func(string, []knowledge.Entry) string
-	translation  string
-	pdfSummary   string
-	imageSummary string
+	configured      bool
+	route           ai.RouteDecision
+	searchPlan      ai.SearchPlan
+	reviewIDs       []string
+	answer          string
+	answerFunc      func(string, []knowledge.Entry) string
+	translation     string
+	translationFunc func(context.Context, string) string
+	pdfSummary      string
+	imageSummary    string
 }
 
 func (f fakeAI) IsConfigured(context.Context) (bool, error) {
@@ -743,7 +867,10 @@ func (f fakeAI) Answer(_ context.Context, question string, entries []knowledge.E
 	return f.answer, nil
 }
 
-func (f fakeAI) TranslateToChinese(context.Context, string) (string, error) {
+func (f fakeAI) TranslateToChinese(ctx context.Context, input string) (string, error) {
+	if f.translationFunc != nil {
+		return f.translationFunc(ctx, input), nil
+	}
 	return f.translation, nil
 }
 

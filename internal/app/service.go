@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"myclaw/internal/ai"
 	"myclaw/internal/fileingest"
 	"myclaw/internal/knowledge"
+	"myclaw/internal/skilllib"
 )
 
 const (
@@ -37,9 +40,12 @@ type MessageContext struct {
 }
 
 type Service struct {
-	store     *knowledge.Store
-	aiService aiBackend
-	reminders reminderBackend
+	store           *knowledge.Store
+	aiService       aiBackend
+	reminders       reminderBackend
+	skillLoader     *skilllib.Loader
+	loadedSkillsMu  sync.RWMutex
+	loadedSkillsMap map[string]map[string]skilllib.Skill
 }
 
 type retrievalPlan struct {
@@ -62,10 +68,19 @@ type aiBackend interface {
 }
 
 func NewService(store *knowledge.Store, aiService aiBackend, reminders reminderBackend) *Service {
+	return NewServiceWithSkills(store, aiService, reminders, nil)
+}
+
+func NewServiceWithSkills(store *knowledge.Store, aiService aiBackend, reminders reminderBackend, skillLoader *skilllib.Loader) *Service {
+	if skillLoader == nil {
+		skillLoader = skilllib.NewLoader()
+	}
 	return &Service{
-		store:     store,
-		aiService: aiService,
-		reminders: reminders,
+		store:           store,
+		aiService:       aiService,
+		reminders:       reminders,
+		skillLoader:     skillLoader,
+		loadedSkillsMap: make(map[string]map[string]skilllib.Skill),
 	}
 }
 
@@ -122,6 +137,11 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 			"/remember <内容> 或 记住：<内容> — 保存一条知识\n" +
 			"/remember-file <路径> — 总结图片/PDF并存入知识库\n" +
 			"/append <ID前缀> <内容> — 追加到已有知识\n" +
+			"/skills — 查看技能库和当前会话已加载技能\n" +
+			"/show-skill <技能名> — 查看某个技能内容\n" +
+			"/load-skill <技能名> — 手动为当前会话加载一个技能\n" +
+			"/unload-skill <技能名> — 从当前会话卸载一个技能\n" +
+			"/page-skills — 查看当前会话已加载技能\n" +
 			"/translate <内容> — 翻译成中文\n" +
 			"/debug-search <问题> — 查看关键词检索和候选复核过程\n" +
 			"/forget <ID前缀> — 删除一条知识\n" +
@@ -176,13 +196,32 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 		if reply != "" || err != nil {
 			return reply, err
 		}
-		return s.aiService.TranslateToChinese(ctx, body)
+		return s.aiService.TranslateToChinese(s.withSkillContext(ctx, mc), body)
 	case "/debug-search":
 		if len(fields) < 2 {
 			return "用法: /debug-search <问题>", nil
 		}
 		body := strings.TrimSpace(strings.TrimPrefix(input, fields[0]))
-		return s.debugSearch(ctx, body)
+		return s.debugSearch(s.withSkillContext(ctx, mc), body)
+	case "/skills":
+		return s.listSkills(mc)
+	case "/show-skill":
+		if len(fields) < 2 {
+			return "用法: /show-skill <技能名>", nil
+		}
+		return s.showSkill(fields[1])
+	case "/load-skill":
+		if len(fields) < 2 {
+			return "用法: /load-skill <技能名>", nil
+		}
+		return s.loadSkill(mc, fields[1])
+	case "/unload-skill":
+		if len(fields) < 2 {
+			return "用法: /unload-skill <技能名>", nil
+		}
+		return s.unloadSkill(mc, fields[1])
+	case "/page-skills":
+		return s.listLoadedSkills(mc), nil
 	case "/forget", "/delete":
 		if len(fields) < 2 {
 			return "用法: /forget <知识ID前缀>", nil
@@ -312,6 +351,7 @@ func (s *Service) ingestFilePath(ctx context.Context, mc MessageContext, rawPath
 	if reply != "" || err != nil {
 		return reply, err
 	}
+	ctx = s.withSkillContext(ctx, mc)
 
 	var summary string
 	switch input.Kind {
@@ -363,6 +403,7 @@ func (s *Service) handleAIMessage(ctx context.Context, mc MessageContext, text s
 	if reply, err := s.ensureAIAvailable(ctx); reply != "" || err != nil {
 		return reply, err
 	}
+	ctx = s.withSkillContext(ctx, mc)
 
 	decision, err := s.aiService.RouteCommand(ctx, text)
 	if err != nil {
@@ -841,6 +882,11 @@ func isSlashCommand(text string) bool {
 		"/remember", "/r",
 		"/remember-file", "/ingest",
 		"/append",
+		"/skills",
+		"/show-skill",
+		"/load-skill",
+		"/unload-skill",
+		"/page-skills",
 		"/translate",
 		"/debug-search",
 		"/forget", "/delete",
@@ -852,6 +898,179 @@ func isSlashCommand(text string) bool {
 	default:
 		return false
 	}
+}
+
+func (s *Service) listSkills(mc MessageContext) (string, error) {
+	skills, err := s.skillLoader.List()
+	if err != nil {
+		return "", err
+	}
+
+	active := s.loadedSkillsFor(mc)
+	activeSet := make(map[string]struct{}, len(active))
+	for _, skill := range active {
+		activeSet[strings.ToLower(skill.Name)] = struct{}{}
+	}
+
+	if len(skills) == 0 {
+		var builder strings.Builder
+		builder.WriteString("当前没有可用技能。")
+		dirs := s.skillLoader.Dirs()
+		if len(dirs) > 0 {
+			builder.WriteString("\n请把技能放到以下目录之一：\n")
+			for _, dir := range dirs {
+				builder.WriteString("- ")
+				builder.WriteString(filepath.Join(dir, "<技能名>", "SKILL.md"))
+				builder.WriteString("\n")
+			}
+		}
+		return strings.TrimSpace(builder.String()), nil
+	}
+
+	var builder strings.Builder
+	builder.WriteString("可用技能：\n")
+	for _, skill := range skills {
+		builder.WriteString("- ")
+		builder.WriteString(skill.Name)
+		if _, ok := activeSet[strings.ToLower(skill.Name)]; ok {
+			builder.WriteString(" [已加载]")
+		}
+		if desc := strings.TrimSpace(skill.Description); desc != "" {
+			builder.WriteString("：")
+			builder.WriteString(desc)
+		}
+		builder.WriteString("\n")
+	}
+	return strings.TrimSpace(builder.String()), nil
+}
+
+func (s *Service) showSkill(name string) (string, error) {
+	skill, ok, err := s.skillLoader.Load(name)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return fmt.Sprintf("没有找到技能 %q。先用 /skills 查看可用技能。", strings.TrimSpace(name)), nil
+	}
+	return skill.Content, nil
+}
+
+func (s *Service) loadSkill(mc MessageContext, name string) (string, error) {
+	skill, ok, err := s.skillLoader.Load(name)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return fmt.Sprintf("没有找到技能 %q。先用 /skills 查看可用技能。", strings.TrimSpace(name)), nil
+	}
+
+	key := skillSessionKey(mc)
+	s.loadedSkillsMu.Lock()
+	if s.loadedSkillsMap[key] == nil {
+		s.loadedSkillsMap[key] = make(map[string]skilllib.Skill)
+	}
+	s.loadedSkillsMap[key][strings.ToLower(skill.Name)] = skill
+	s.loadedSkillsMu.Unlock()
+
+	if strings.TrimSpace(skill.Description) == "" {
+		return fmt.Sprintf("已加载技能 %s。", skill.Name), nil
+	}
+	return fmt.Sprintf("已加载技能 %s：%s", skill.Name, skill.Description), nil
+}
+
+func (s *Service) unloadSkill(mc MessageContext, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "请提供要卸载的技能名。", nil
+	}
+
+	key := skillSessionKey(mc)
+	normalized := strings.ToLower(name)
+
+	s.loadedSkillsMu.Lock()
+	defer s.loadedSkillsMu.Unlock()
+
+	if s.loadedSkillsMap[key] == nil {
+		return fmt.Sprintf("当前会话没有加载技能 %q。", name), nil
+	}
+	if _, ok := s.loadedSkillsMap[key][normalized]; !ok {
+		return fmt.Sprintf("当前会话没有加载技能 %q。", name), nil
+	}
+	delete(s.loadedSkillsMap[key], normalized)
+	if len(s.loadedSkillsMap[key]) == 0 {
+		delete(s.loadedSkillsMap, key)
+	}
+	return fmt.Sprintf("已卸载技能 %s。", name), nil
+}
+
+func (s *Service) listLoadedSkills(mc MessageContext) string {
+	active := s.loadedSkillsFor(mc)
+	if len(active) == 0 {
+		return "当前会话还没有加载技能。"
+	}
+
+	var builder strings.Builder
+	builder.WriteString("当前会话已加载技能：\n")
+	for _, skill := range active {
+		builder.WriteString("- ")
+		builder.WriteString(skill.Name)
+		if desc := strings.TrimSpace(skill.Description); desc != "" {
+			builder.WriteString("：")
+			builder.WriteString(desc)
+		}
+		builder.WriteString("\n")
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func (s *Service) loadedSkillsFor(mc MessageContext) []skilllib.Skill {
+	key := skillSessionKey(mc)
+
+	s.loadedSkillsMu.RLock()
+	defer s.loadedSkillsMu.RUnlock()
+
+	current := s.loadedSkillsMap[key]
+	if len(current) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(current))
+	for name := range current {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	out := make([]skilllib.Skill, 0, len(names))
+	for _, name := range names {
+		out = append(out, current[name])
+	}
+	return out
+}
+
+func (s *Service) withSkillContext(ctx context.Context, mc MessageContext) context.Context {
+	skills := s.loadedSkillsFor(mc)
+	if len(skills) == 0 {
+		return ctx
+	}
+
+	var builder strings.Builder
+	builder.WriteString("Loaded skills for this conversation. Apply them only when relevant.\n\n")
+	for _, skill := range skills {
+		builder.WriteString("## ")
+		builder.WriteString(skill.Name)
+		builder.WriteString("\n")
+		builder.WriteString(strings.TrimSpace(skill.Content))
+		builder.WriteString("\n\n")
+	}
+	return ai.WithSkillContext(ctx, strings.TrimSpace(builder.String()))
+}
+
+func skillSessionKey(mc MessageContext) string {
+	key := strings.TrimSpace(sourceLabel(mc))
+	if key == "" {
+		return "default"
+	}
+	return key
 }
 
 func sourceLabel(mc MessageContext) string {

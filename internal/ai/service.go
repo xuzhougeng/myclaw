@@ -404,7 +404,7 @@ func (s *Service) requireConfig(ctx context.Context) (modelconfig.Config, error)
 func (s *Service) generateJSON(ctx context.Context, cfg modelconfig.Config, instructions, input, schemaName string, schema map[string]any, out any) error {
 	req := responsesRequest{
 		Model:        cfg.Model,
-		Instructions: instructions,
+		Instructions: mergeInstructionsWithSkillContext(ctx, instructions),
 		Input: []responseInputMessage{
 			newTextMessage("user", input),
 		},
@@ -442,7 +442,7 @@ func (s *Service) generateText(ctx context.Context, cfg modelconfig.Config, inst
 func (s *Service) generateTextFromContent(ctx context.Context, cfg modelconfig.Config, instructions string, content []responseContentInput) (string, error) {
 	req := responsesRequest{
 		Model:        cfg.Model,
-		Instructions: instructions,
+		Instructions: mergeInstructionsWithSkillContext(ctx, instructions),
 		Input: []responseInputMessage{
 			{
 				Role:    "user",

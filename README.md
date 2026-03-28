@@ -150,6 +150,11 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 - `/append 6d2d7724 它是 Google 出品的一个工具`
 - `给 #6d2d7724 补充：它是 Google 出品的一个工具`
 - `再补充一点：它是 Google 出品的一个工具`
+- `/skills`
+- `/show-skill writer`
+- `/load-skill writer`
+- `/unload-skill writer`
+- `/page-skills`
 - `/translate Puppeteer is a browser automation tool.`
 - `/forget 0015f908`
 - `/notice 2小时后 喝水`
@@ -171,6 +176,48 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 - PDF 会先用 `go-fitz` 提取全文，再做摘要
 - 默认跨平台 release 包使用 `CGO_ENABLED=0`，因此图片可用，但 PDF 会返回“当前构建不包含 PDF 文本提取能力”
 - 如果你要在 Windows 本机启用 PDF，总结请安装可用的 C 工具链后用 `.\scripts\build-windows.ps1 -UseCgo`
+
+## 技能库
+
+现在支持一个本地技能库，但只做人工控制，不做自动技能决策：
+
+- `/skills` 查看技能库和当前会话已加载技能
+- `/show-skill <技能名>` 查看某个技能内容
+- `/load-skill <技能名>` 手动加载一个技能到当前会话
+- `/unload-skill <技能名>` 从当前会话卸载一个技能
+- `/page-skills` 查看当前会话已加载技能
+
+说明：
+
+- 模型不会自己决定加载哪个技能
+- 由人先看 `/skills` 和 `/show-skill`，再手动决定是否 `/load-skill`
+- 技能一旦加载，会影响当前会话里的 AI 路由、翻译、检索计划和回答
+
+默认技能目录：
+
+- `<data-dir>/skills/<技能名>/SKILL.md`
+
+也可以通过环境变量追加额外目录：
+
+- `MYCLAW_SKILLS_DIRS`
+
+示例：
+
+```text
+data/skills/writer/SKILL.md
+```
+
+`SKILL.md` 建议至少包含一个简短 frontmatter：
+
+```md
+---
+name: writer
+description: 帮助输出更清晰的中文写作
+---
+
+# Writer
+给出简洁、结构清晰、少废话的中文输出。
+```
 
 ## 编译
 
