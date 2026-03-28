@@ -183,7 +183,7 @@ func (s *Service) handleAIDecision(ctx context.Context, mc MessageContext, text 
 			}
 			return reply, err
 		case ModeAgent:
-			return "agent 模式暂未启用工具执行。当前可先使用 `direct` 或 `knowledge` 模式。", nil
+			return s.handleAgentQuestion(ctx, mc, question)
 		case ModeDirect:
 			fallthrough
 		default:

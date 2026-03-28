@@ -71,6 +71,7 @@ type aiBackend interface {
 	ReviewAnswerCandidates(ctx context.Context, question string, entries []knowledge.Entry) ([]string, error)
 	Answer(ctx context.Context, question string, entries []knowledge.Entry) (string, error)
 	Chat(ctx context.Context, input string, history []ai.ConversationMessage) (string, error)
+	DecideAgentStep(ctx context.Context, task string, history []ai.ConversationMessage, tools []ai.AgentToolDefinition, results []ai.AgentToolResult) (ai.AgentStepDecision, error)
 	TranslateToChinese(ctx context.Context, input string) (string, error)
 	SummarizePDFText(ctx context.Context, fileName, extractedText string) (string, error)
 	SummarizeImageFile(ctx context.Context, fileName, imageURL string) (string, error)

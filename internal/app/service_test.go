@@ -1030,27 +1030,60 @@ func TestHandleMessageUsesAIRouteForAppendLast(t *testing.T) {
 	}
 }
 
-func TestAgentModeReturnsPlaceholderForQuestions(t *testing.T) {
+func TestAgentModeCanUseKnowledgeSearchTool(t *testing.T) {
 	t.Parallel()
 
 	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
 	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	if _, err := store.Add(context.Background(), knowledge.Entry{
+		ID:         "11111111aaaa1111",
+		Text:       "未来需要支持 macOS。",
+		RecordedAt: time.Date(2026, 3, 27, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+
 	service := NewService(store, fakeAI{
 		configured: true,
 		route: ai.RouteDecision{
 			Command:  "answer",
-			Question: "现在帮我执行一个操作",
+			Question: "我之前记过 macOS 计划吗？",
+		},
+		agentStepFunc: func(_ context.Context, task string, history []ai.ConversationMessage, tools []ai.AgentToolDefinition, results []ai.AgentToolResult) ai.AgentStepDecision {
+			if task != "我之前记过 macOS 计划吗？" {
+				t.Fatalf("unexpected task: %q", task)
+			}
+			if len(history) != 0 {
+				t.Fatalf("expected empty history, got %#v", history)
+			}
+			if len(tools) == 0 {
+				t.Fatalf("expected agent tools")
+			}
+			if len(results) == 0 {
+				return ai.AgentStepDecision{
+					Action:    "tool",
+					ToolName:  "knowledge_search",
+					ToolInput: `{"query":"macOS 计划"}`,
+				}
+			}
+			if len(results) != 1 || !strings.Contains(results[0].Output, "macOS") {
+				t.Fatalf("unexpected tool results: %#v", results)
+			}
+			return ai.AgentStepDecision{
+				Action: "answer",
+				Answer: "你之前记过，知识里提到未来需要支持 macOS。",
+			}
 		},
 	}, reminders)
 	if _, err := service.SetMode(context.Background(), MessageContext{}, ModeAgent); err != nil {
 		t.Fatalf("set mode: %v", err)
 	}
 
-	reply, err := service.HandleMessage(context.Background(), MessageContext{}, "现在帮我执行一个操作")
+	reply, err := service.HandleMessage(context.Background(), MessageContext{}, "我之前记过 macOS 计划吗？")
 	if err != nil {
 		t.Fatalf("handle message: %v", err)
 	}
-	if !strings.Contains(reply, "agent 模式暂未启用工具执行") {
+	if !strings.Contains(reply, "未来需要支持 macOS") {
 		t.Fatalf("unexpected agent reply: %q", reply)
 	}
 }
@@ -1237,6 +1270,8 @@ type fakeAI struct {
 	answerFunc      func(string, []knowledge.Entry) string
 	chat            string
 	chatFunc        func(context.Context, string, []ai.ConversationMessage) string
+	agentStep       ai.AgentStepDecision
+	agentStepFunc   func(context.Context, string, []ai.ConversationMessage, []ai.AgentToolDefinition, []ai.AgentToolResult) ai.AgentStepDecision
 	translation     string
 	translationFunc func(context.Context, string) string
 	pdfSummary      string
@@ -1271,6 +1306,13 @@ func (f fakeAI) Chat(ctx context.Context, input string, history []ai.Conversatio
 		return f.chatFunc(ctx, input, history), nil
 	}
 	return f.chat, nil
+}
+
+func (f fakeAI) DecideAgentStep(ctx context.Context, task string, history []ai.ConversationMessage, tools []ai.AgentToolDefinition, results []ai.AgentToolResult) (ai.AgentStepDecision, error) {
+	if f.agentStepFunc != nil {
+		return f.agentStepFunc(ctx, task, history, tools, results), nil
+	}
+	return f.agentStep, nil
 }
 
 func (f fakeAI) TranslateToChinese(ctx context.Context, input string) (string, error) {
