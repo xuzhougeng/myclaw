@@ -195,6 +195,7 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 	reply, err := b.service.HandleMessage(ctx, app.MessageContext{
 		UserID:    msg.FromUserID,
 		Interface: "weixin",
+		SessionID: weixinSessionID(msg),
 	}, text)
 	if err != nil {
 		log.Printf("[weixin] handle message failed: %v", err)
@@ -217,6 +218,16 @@ func (b *Bridge) sendChunkedReply(ctx context.Context, toUserID, contextToken, t
 		}
 	}
 	return nil
+}
+
+func weixinSessionID(msg WeixinMessage) string {
+	if strings.TrimSpace(msg.ContextToken) != "" {
+		return "weixin:" + strings.TrimSpace(msg.ContextToken)
+	}
+	if strings.TrimSpace(msg.FromUserID) != "" {
+		return "weixin-user:" + strings.TrimSpace(msg.FromUserID)
+	}
+	return "weixin"
 }
 
 func (b *Bridge) finalizeLogin(status *QRCodeStatusResponse) (Account, error) {

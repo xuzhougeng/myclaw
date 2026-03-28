@@ -88,6 +88,7 @@ func (r *REPL) runMessage(ctx context.Context, message string) {
 	reply, err := r.service.HandleMessage(ctx, app.MessageContext{
 		UserID:    "terminal",
 		Interface: "terminal",
+		SessionID: "terminal-repl",
 	}, message)
 	if err != nil {
 		fmt.Fprintf(r.output, "error: %v\n", err)

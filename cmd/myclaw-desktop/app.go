@@ -24,6 +24,7 @@ import (
 const (
 	desktopInterface         = "desktop"
 	desktopUserID            = "primary"
+	desktopChatSessionID     = "desktop-chat"
 	maxKnowledgePreviewRunes = 180
 )
 
@@ -507,6 +508,7 @@ func desktopMessageContext() appsvc.MessageContext {
 	return appsvc.MessageContext{
 		Interface: desktopInterface,
 		UserID:    desktopUserID,
+		SessionID: desktopChatSessionID,
 	}
 }
 

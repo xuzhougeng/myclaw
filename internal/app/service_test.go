@@ -224,6 +224,57 @@ Preserve technical terms whenever possible.
 	}
 }
 
+func TestLoadedSkillsAreScopedBySessionID(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "skills", "writer")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(strings.TrimSpace(`
+---
+name: writer
+description: 帮助输出更清晰的中文写作
+---
+# Writer
+Use concise Chinese writing.
+`)), 0o644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+
+	store := knowledge.NewStore(filepath.Join(root, "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	service := NewServiceWithSkills(store, nil, reminders, skilllib.NewLoader(filepath.Join(root, "skills")))
+
+	mcA := MessageContext{UserID: "u1", Interface: "desktop", SessionID: "page-a"}
+	mcB := MessageContext{UserID: "u1", Interface: "desktop", SessionID: "page-b"}
+
+	reply, err := service.HandleMessage(context.Background(), mcA, "/load-skill writer")
+	if err != nil {
+		t.Fatalf("load skill for page a: %v", err)
+	}
+	if !strings.Contains(reply, "已加载技能 writer") {
+		t.Fatalf("unexpected load reply: %q", reply)
+	}
+
+	reply, err = service.HandleMessage(context.Background(), mcA, "/page-skills")
+	if err != nil {
+		t.Fatalf("page skills for page a: %v", err)
+	}
+	if !strings.Contains(reply, "writer") {
+		t.Fatalf("expected loaded skill in page a, got %q", reply)
+	}
+
+	reply, err = service.HandleMessage(context.Background(), mcB, "/page-skills")
+	if err != nil {
+		t.Fatalf("page skills for page b: %v", err)
+	}
+	if !strings.Contains(reply, "还没有加载技能") {
+		t.Fatalf("expected no loaded skills in page b, got %q", reply)
+	}
+}
+
 func TestDebugSearchShowsKeywordsCandidatesAndReviewedSelection(t *testing.T) {
 	t.Parallel()
 

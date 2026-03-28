@@ -37,6 +37,7 @@ var (
 type MessageContext struct {
 	UserID    string
 	Interface string
+	SessionID string
 }
 
 type Service struct {
@@ -1066,11 +1067,13 @@ func (s *Service) withSkillContext(ctx context.Context, mc MessageContext) conte
 }
 
 func skillSessionKey(mc MessageContext) string {
-	key := strings.TrimSpace(sourceLabel(mc))
-	if key == "" {
-		return "default"
+	if sessionID := strings.TrimSpace(mc.SessionID); sessionID != "" {
+		return "session:" + sessionID
 	}
-	return key
+	if key := strings.TrimSpace(sourceLabel(mc)); key != "" {
+		return "source:" + key
+	}
+	return "default"
 }
 
 func sourceLabel(mc MessageContext) string {

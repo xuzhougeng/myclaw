@@ -191,7 +191,8 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 
 - 模型不会自己决定加载哪个技能
 - 由人先看 `/skills` 和 `/show-skill`，再手动决定是否 `/load-skill`
-- 技能一旦加载，会影响当前会话里的 AI 路由、翻译、检索计划和回答
+- 技能一旦加载，会影响当前页面 / 当前会话里的 AI 路由、翻译、检索计划和回答
+- 现在技能隔离优先按 `SessionID`，没有会话 ID 时才回退到用户维度
 
 默认技能目录：
 
