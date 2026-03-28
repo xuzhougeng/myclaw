@@ -18,6 +18,7 @@ import (
 	"myclaw/internal/projectstate"
 	"myclaw/internal/promptlib"
 	"myclaw/internal/reminder"
+	"myclaw/internal/skilllib"
 	"myclaw/internal/weixin"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -115,6 +116,14 @@ type PromptItem struct {
 type PromptMutation struct {
 	Message string     `json:"message"`
 	Item    PromptItem `json:"item"`
+}
+
+type SkillItem struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Content     string `json:"content"`
+	Dir         string `json:"dir"`
+	Loaded      bool   `json:"loaded"`
 }
 
 type ProjectSummary struct {
@@ -493,6 +502,68 @@ func (a *DesktopApp) ClearPrompts() (MessageResult, error) {
 	return MessageResult{Message: "Prompt 库已清空。"}, nil
 }
 
+func (a *DesktopApp) ListSkills() ([]SkillItem, error) {
+	if a.service == nil {
+		return nil, errors.New("技能服务尚未启用")
+	}
+
+	project, err := a.currentProject(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	available, err := a.service.ListAvailableSkills()
+	if err != nil {
+		return nil, err
+	}
+	loaded := a.service.ListLoadedSkills(desktopMessageContext(project))
+	loadedSet := make(map[string]struct{}, len(loaded))
+	for _, skill := range loaded {
+		loadedSet[strings.ToLower(strings.TrimSpace(skill.Name))] = struct{}{}
+	}
+
+	result := make([]SkillItem, 0, len(available))
+	for _, skill := range available {
+		_, isLoaded := loadedSet[strings.ToLower(strings.TrimSpace(skill.Name))]
+		result = append(result, toSkillItem(skill, isLoaded))
+	}
+	return result, nil
+}
+
+func (a *DesktopApp) LoadSkill(name string) (MessageResult, error) {
+	if a.service == nil {
+		return MessageResult{}, errors.New("技能服务尚未启用")
+	}
+
+	project, err := a.currentProject(context.Background())
+	if err != nil {
+		return MessageResult{}, err
+	}
+
+	message, err := a.service.LoadSkillForSession(desktopMessageContext(project), name)
+	if err != nil {
+		return MessageResult{}, err
+	}
+	return MessageResult{Message: message}, nil
+}
+
+func (a *DesktopApp) UnloadSkill(name string) (MessageResult, error) {
+	if a.service == nil {
+		return MessageResult{}, errors.New("技能服务尚未启用")
+	}
+
+	project, err := a.currentProject(context.Background())
+	if err != nil {
+		return MessageResult{}, err
+	}
+
+	message, err := a.service.UnloadSkillForSession(desktopMessageContext(project), name)
+	if err != nil {
+		return MessageResult{}, err
+	}
+	return MessageResult{Message: message}, nil
+}
+
 func (a *DesktopApp) ConfirmAction(title, message string) (bool, error) {
 	if a.ctx == nil {
 		return false, errors.New("桌面上下文尚未初始化")
@@ -778,6 +849,16 @@ func toPromptItem(prompt promptlib.Prompt) PromptItem {
 		Preview:        preview(content, maxKnowledgePreviewRunes),
 		RecordedAt:     prompt.RecordedAt.Local().Format("2006-01-02 15:04:05"),
 		RecordedAtUnix: prompt.RecordedAt.Unix(),
+	}
+}
+
+func toSkillItem(skill skilllib.Skill, loaded bool) SkillItem {
+	return SkillItem{
+		Name:        strings.TrimSpace(skill.Name),
+		Description: strings.TrimSpace(skill.Description),
+		Content:     strings.TrimSpace(skill.Content),
+		Dir:         strings.TrimSpace(skill.Dir),
+		Loaded:      loaded,
 	}
 }
 

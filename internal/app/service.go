@@ -1050,6 +1050,22 @@ func (s *Service) loadedSkillsFor(mc MessageContext) []skilllib.Skill {
 	return out
 }
 
+func (s *Service) ListAvailableSkills() ([]skilllib.Skill, error) {
+	return s.skillLoader.List()
+}
+
+func (s *Service) ListLoadedSkills(mc MessageContext) []skilllib.Skill {
+	return s.loadedSkillsFor(mc)
+}
+
+func (s *Service) LoadSkillForSession(mc MessageContext, name string) (string, error) {
+	return s.loadSkill(mc, name)
+}
+
+func (s *Service) UnloadSkillForSession(mc MessageContext, name string) (string, error) {
+	return s.unloadSkill(mc, name)
+}
+
 func (s *Service) withSkillContext(ctx context.Context, mc MessageContext) context.Context {
 	skills := s.loadedSkillsFor(mc)
 	if len(skills) == 0 {

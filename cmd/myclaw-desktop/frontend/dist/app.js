@@ -49,6 +49,8 @@ const state = {
   projectState: defaultProjectState(),
   knowledge: [],
   prompts: [],
+  skills: [],
+  selectedSkillName: "",
   filter: "",
   promptFilter: "",
   filePath: "",
@@ -89,6 +91,7 @@ async function init() {
   renderChat();
   renderKnowledge();
   renderPrompts();
+  renderSkills();
   renderModel();
   renderWeixin();
 
@@ -265,6 +268,42 @@ function bindStaticEvents() {
   const clearPrompts = document.getElementById('clear-prompts');
   if (clearPrompts) {
     clearPrompts.addEventListener('click', () => void clearPromptsLibrary());
+  }
+
+  const skillList = document.getElementById('skill-list');
+  if (skillList) {
+    skillList.addEventListener('click', (event) => {
+      const actionTarget = event.target.closest('[data-skill-action]');
+      if (actionTarget) {
+        const name = actionTarget.dataset.skillName || '';
+        if (actionTarget.dataset.skillAction === 'load') {
+          void loadSkill(name);
+        } else if (actionTarget.dataset.skillAction === 'unload') {
+          void unloadSkill(name);
+        }
+        return;
+      }
+
+      const card = event.target.closest('[data-skill-name]');
+      if (!card) return;
+      state.selectedSkillName = card.dataset.skillName || '';
+      renderSkills();
+    });
+  }
+
+  const skillDetailActions = document.getElementById('skill-detail-actions');
+  if (skillDetailActions) {
+    skillDetailActions.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-skill-action]');
+      if (!target) return;
+
+      const name = target.dataset.skillName || '';
+      if (target.dataset.skillAction === 'load') {
+        void loadSkill(name);
+      } else if (target.dataset.skillAction === 'unload') {
+        void unloadSkill(name);
+      }
+    });
   }
 
   // Chat events
@@ -461,6 +500,9 @@ function createWailsBackend(backend) {
     CreatePrompt: (title, content) => backend.CreatePrompt(title, content),
     DeletePrompt: (idOrPrefix) => backend.DeletePrompt(idOrPrefix),
     ClearPrompts: () => backend.ClearPrompts(),
+    ListSkills: () => backend.ListSkills(),
+    LoadSkill: (name) => backend.LoadSkill(name),
+    UnloadSkill: (name) => backend.UnloadSkill(name),
     ConfirmAction: (title, message) => backend.ConfirmAction(title, message),
     OpenImportDialog: () => backend.OpenImportDialog(),
     ImportFile: (path) => backend.ImportFile(path),
@@ -492,6 +534,9 @@ function createHTTPBackend() {
     CreatePrompt: (title, content) => requestJSON('POST', '/api/prompts', { title, content }),
     DeletePrompt: (idOrPrefix) => requestJSON('POST', '/api/prompts/delete', { idOrPrefix }),
     ClearPrompts: () => requestJSON('POST', '/api/prompts/clear'),
+    ListSkills: () => requestJSON('GET', '/api/skills'),
+    LoadSkill: (name) => requestJSON('POST', '/api/skills/load', { name }),
+    UnloadSkill: (name) => requestJSON('POST', '/api/skills/unload', { name }),
     ConfirmAction: async (title, message) => window.confirm(`${title}\n\n${message}`),
     OpenImportDialog: async () => '',
     ImportFile: async () => {
@@ -552,7 +597,7 @@ function startBackendPolling() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshProjectState(), refreshOverview(), refreshKnowledge(), refreshPrompts(), refreshModel(), refreshWeixin()]);
+  await Promise.all([refreshProjectState(), refreshOverview(), refreshKnowledge(), refreshPrompts(), refreshSkills(), refreshModel(), refreshWeixin()]);
 }
 
 async function refreshProjectState() {
@@ -600,6 +645,12 @@ async function refreshKnowledge() {
 async function refreshPrompts() {
   state.prompts = await state.backend.ListPrompts();
   renderPrompts();
+}
+
+async function refreshSkills() {
+  state.skills = normalizeSkills(await state.backend.ListSkills());
+  ensureSelectedSkill();
+  renderSkills();
 }
 
 async function refreshModel() {
@@ -1044,6 +1095,126 @@ function renderPrompts() {
     .join('');
 }
 
+function normalizeSkills(payload) {
+  if (!Array.isArray(payload)) return [];
+  return payload.map((item) => ({
+    name: item.name || '',
+    description: item.description || '',
+    content: item.content || '',
+    dir: item.dir || '',
+    loaded: Boolean(item.loaded),
+  }));
+}
+
+function ensureSelectedSkill() {
+  if (state.skills.length === 0) {
+    state.selectedSkillName = '';
+    return;
+  }
+
+  const existing = state.skills.find((item) => item.name === state.selectedSkillName);
+  if (existing) return;
+
+  const preferred = state.skills.find((item) => item.loaded) || state.skills[0];
+  state.selectedSkillName = preferred ? preferred.name : '';
+}
+
+async function loadSkill(name) {
+  if (!name) return;
+
+  try {
+    const result = await state.backend.LoadSkill(name);
+    await refreshSkills();
+    showBanner(result.message, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function unloadSkill(name) {
+  if (!name) return;
+
+  try {
+    const result = await state.backend.UnloadSkill(name);
+    await refreshSkills();
+    showBanner(result.message, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+function renderSkills() {
+  const list = document.getElementById('skill-list');
+  const loadedCount = document.getElementById('skill-loaded-count');
+  const detailName = document.getElementById('skill-detail-name');
+  const detailDescription = document.getElementById('skill-detail-description');
+  const detailPath = document.getElementById('skill-detail-path');
+  const detailContent = document.getElementById('skill-detail-content');
+  const detailActions = document.getElementById('skill-detail-actions');
+  if (!list || !detailName || !detailDescription || !detailPath || !detailContent || !detailActions) return;
+
+  const skills = [...state.skills].sort((left, right) => {
+    if (left.loaded !== right.loaded) return left.loaded ? -1 : 1;
+    return left.name.localeCompare(right.name, 'zh-CN');
+  });
+  const loadedTotal = skills.filter((item) => item.loaded).length;
+  if (loadedCount) loadedCount.textContent = `${loadedTotal} 个已加载`;
+
+  if (skills.length === 0) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">⌬</div>
+        <h3>还没有技能</h3>
+        <p>把技能放进本地 skills 目录后，这里会自动显示。</p>
+      </div>
+    `;
+    detailName.textContent = '暂无技能';
+    detailDescription.textContent = '当前还没有发现可用 skill。';
+    detailPath.textContent = '—';
+    detailContent.innerHTML = '<p>把技能放进本地 skills 目录后，这里会显示内容。</p>';
+    detailActions.innerHTML = '';
+    return;
+  }
+
+  ensureSelectedSkill();
+  const selected = skills.find((item) => item.name === state.selectedSkillName) || skills[0];
+  if (selected) {
+    state.selectedSkillName = selected.name;
+  }
+
+  list.innerHTML = skills
+    .map((item) => `
+      <article class="skill-item ${item.loaded ? 'loaded' : ''} ${selected && selected.name === item.name ? 'active' : ''}" data-skill-name="${escapeAttribute(item.name)}">
+        <div class="skill-item-top">
+          <div class="skill-item-name">${escapeHTML(item.name)}</div>
+          <span class="skill-item-pill ${item.loaded ? 'loaded' : ''}">${item.loaded ? '已加载' : '未加载'}</span>
+        </div>
+        <p class="skill-item-desc">${escapeHTML(item.description || '这个技能没有填写描述。')}</p>
+        <div class="skill-item-meta">${escapeHTML(item.dir || '未提供目录')}</div>
+        <div class="skill-actions">
+          <button class="btn ${item.loaded ? 'btn-ghost' : 'btn-primary'} btn-sm" data-skill-action="${item.loaded ? 'unload' : 'load'}" data-skill-name="${escapeAttribute(item.name)}">
+            ${item.loaded ? '卸载' : '加载'}
+          </button>
+        </div>
+      </article>
+    `)
+    .join('');
+
+  detailName.textContent = selected.name;
+  detailDescription.textContent = selected.description || '这个技能没有填写描述。';
+  detailPath.textContent = selected.dir || '未提供目录';
+  detailActions.innerHTML = `
+    <button class="btn ${selected.loaded ? 'btn-ghost' : 'btn-primary'} btn-sm" data-skill-action="${selected.loaded ? 'unload' : 'load'}" data-skill-name="${escapeAttribute(selected.name)}">
+      ${selected.loaded ? '卸载技能' : '加载技能'}
+    </button>
+  `;
+
+  const visibleContent = stripFrontmatter(selected.content).trim();
+  detailContent.innerHTML = visibleContent
+    ? renderMarkdown(visibleContent)
+    : '<p>这个技能没有可显示的正文内容。</p>';
+}
+
 async function saveModelConfig() {
   try {
     const result = await state.backend.SaveModelConfig(readModelForm());
@@ -1290,7 +1461,7 @@ function renderChat() {
         <div class="chat-message ${escapeAttribute(message.role)}">
           <div class="chat-avatar">${message.role === 'user' ? '◐' : message.role === 'system' ? '◇' : '○'}</div>
           <div class="chat-bubble">
-            ${escapeHTML(message.text)}
+            <div class="chat-markdown">${renderMarkdown(message.text)}</div>
             <span class="chat-time">${escapeHTML(message.time)}</span>
           </div>
         </div>
@@ -1419,6 +1590,232 @@ function asMessage(error) {
   if (typeof error === 'string') return error;
   if (error.message) return error.message;
   return String(error);
+}
+
+function renderMarkdown(source) {
+  const normalized = String(source ?? '').replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n');
+  const blocks = [];
+
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    const fence = line.match(/^```([\w+-]*)\s*$/);
+    if (fence) {
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !/^```/.test(lines[index])) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      const language = fence[1] ? ` class="language-${escapeAttribute(fence[1])}"` : '';
+      blocks.push(`<pre><code${language}>${escapeHTML(codeLines.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      const level = heading[1].length;
+      blocks.push(`<h${level}>${renderInlineMarkdown(heading[2].trim())}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (/^([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
+      blocks.push('<hr>');
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*>/.test(line)) {
+      const quoteLines = [];
+      while (index < lines.length && /^\s*>/.test(lines[index])) {
+        quoteLines.push(lines[index].replace(/^\s*>\s?/, ''));
+        index += 1;
+      }
+      blocks.push(`<blockquote>${renderMarkdown(quoteLines.join('\n'))}</blockquote>`);
+      continue;
+    }
+
+    const table = parseMarkdownTable(lines, index);
+    if (table) {
+      blocks.push(table.html);
+      index = table.nextIndex;
+      continue;
+    }
+
+    const list = parseMarkdownList(lines, index);
+    if (list) {
+      blocks.push(list.html);
+      index = list.nextIndex;
+      continue;
+    }
+
+    const paragraphLines = [];
+    while (index < lines.length) {
+      const current = lines[index];
+      if (!current.trim()) break;
+      if (
+        /^```/.test(current) ||
+        /^(#{1,6})\s+/.test(current) ||
+        /^([-*_])(?:\s*\1){2,}\s*$/.test(current) ||
+        /^\s*>/.test(current) ||
+        parseMarkdownTable(lines, index) ||
+        parseMarkdownList(lines, index)
+      ) {
+        break;
+      }
+      paragraphLines.push(current.trim());
+      index += 1;
+    }
+    blocks.push(`<p>${renderInlineMarkdown(paragraphLines.join('\n'))}</p>`);
+  }
+
+  return blocks.join('');
+}
+
+function parseMarkdownList(lines, startIndex) {
+  const firstLine = lines[startIndex];
+  const firstMatch = firstLine.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
+  if (!firstMatch) return null;
+
+  const ordered = /\d+\./.test(firstMatch[2]);
+  const itemPattern = ordered ? /^(\s*)\d+\.\s+(.*)$/ : /^(\s*)[-*+]\s+(.*)$/;
+  const items = [];
+  let index = startIndex;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) break;
+
+    const match = line.match(itemPattern);
+    if (!match) break;
+
+    const itemLines = [match[2]];
+    index += 1;
+
+    while (index < lines.length) {
+      const continuation = lines[index];
+      if (!continuation.trim()) break;
+      if (itemPattern.test(continuation)) break;
+      if (
+        /^```/.test(continuation) ||
+        /^(#{1,6})\s+/.test(continuation) ||
+        /^([-*_])(?:\s*\1){2,}\s*$/.test(continuation) ||
+        /^\s*>/.test(continuation)
+      ) {
+        break;
+      }
+      itemLines.push(continuation.trim());
+      index += 1;
+    }
+
+    items.push(`<li>${renderInlineMarkdown(itemLines.join('\n'))}</li>`);
+  }
+
+  if (items.length === 0) return null;
+  const tag = ordered ? 'ol' : 'ul';
+  return {
+    html: `<${tag}>${items.join('')}</${tag}>`,
+    nextIndex: index,
+  };
+}
+
+function parseMarkdownTable(lines, startIndex) {
+  const headerLine = lines[startIndex];
+  const dividerLine = lines[startIndex + 1];
+  if (!headerLine || !dividerLine) return null;
+  if (!/\|/.test(headerLine)) return null;
+  if (!/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(dividerLine)) return null;
+
+  const parseRow = (line) =>
+    line
+      .trim()
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split('|')
+      .map((cell) => cell.trim());
+
+  const headers = parseRow(headerLine);
+  if (headers.length === 0) return null;
+
+  const bodyRows = [];
+  let index = startIndex + 2;
+  while (index < lines.length && /\|/.test(lines[index]) && lines[index].trim()) {
+    bodyRows.push(parseRow(lines[index]));
+    index += 1;
+  }
+
+  const headHTML = `<tr>${headers.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join('')}</tr>`;
+  const bodyHTML = bodyRows
+    .map((row) => `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join('')}</tr>`)
+    .join('');
+
+  return {
+    html: `<table><thead>${headHTML}</thead><tbody>${bodyHTML}</tbody></table>`,
+    nextIndex: index,
+  };
+}
+
+function renderInlineMarkdown(source) {
+  const tokens = [];
+  const stash = (html) => {
+    const key = `%%MDTOKEN${tokens.length}%%`;
+    tokens.push(html);
+    return key;
+  };
+
+  let text = String(source ?? '');
+  text = text.replace(/`([^`\n]+)`/g, (_, code) => stash(`<code>${escapeHTML(code)}</code>`));
+  text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
+    const safeURL = sanitizeURL(url);
+    if (!safeURL) return match;
+    return stash(
+      `<a href="${escapeAttribute(safeURL)}" target="_blank" rel="noreferrer noopener">${escapeHTML(label)}</a>`,
+    );
+  });
+
+  let html = escapeHTML(text);
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
+  html = html.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+  html = html.replace(/_([^_\n]+)_/g, '<em>$1</em>');
+  html = html.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+  html = html.replace(/\n/g, '<br>');
+
+  return html.replace(/%%MDTOKEN(\d+)%%/g, (_, tokenIndex) => tokens[Number(tokenIndex)] || '');
+}
+
+function sanitizeURL(value) {
+  const url = String(value ?? '').trim();
+  if (!url) return '';
+
+  try {
+    const parsed = new URL(url, window.location.href);
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
+      return parsed.href;
+    }
+  } catch (error) {
+    return '';
+  }
+
+  return '';
+}
+
+function stripFrontmatter(source) {
+  const text = String(source ?? '').replace(/\r\n?/g, '\n').trim();
+  if (!text.startsWith('---\n')) return text;
+
+  const boundary = text.indexOf('\n---\n', 4);
+  if (boundary === -1) return text;
+  return text.slice(boundary + 5).trim();
 }
 
 function escapeHTML(value) {
