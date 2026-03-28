@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -64,26 +65,29 @@ type Overview struct {
 }
 
 type ModelSettings struct {
-	Provider              string   `json:"provider"`
-	BaseURL               string   `json:"baseUrl"`
-	APIKey                string   `json:"apiKey"`
-	Model                 string   `json:"model"`
-	Configured            bool     `json:"configured"`
-	Saved                 bool     `json:"saved"`
-	MissingFields         []string `json:"missingFields"`
-	EnvOverrides          []string `json:"envOverrides"`
-	EffectiveProvider     string   `json:"effectiveProvider"`
-	EffectiveBaseURL      string   `json:"effectiveBaseUrl"`
-	EffectiveAPIKeyMasked string   `json:"effectiveApiKeyMasked"`
-	EffectiveModel        string   `json:"effectiveModel"`
-	Message               string   `json:"message"`
+	Profiles              []modelconfig.Summary `json:"profiles"`
+	ActiveProfileID       string                `json:"activeProfileId"`
+	Configured            bool                  `json:"configured"`
+	MissingFields         []string              `json:"missingFields"`
+	EffectiveProfileName  string                `json:"effectiveProfileName"`
+	EffectiveProvider     string                `json:"effectiveProvider"`
+	EffectiveAPIType      string                `json:"effectiveApiType"`
+	EffectiveBaseURL      string                `json:"effectiveBaseUrl"`
+	EffectiveAPIKeyMasked string                `json:"effectiveApiKeyMasked"`
+	EffectiveModel        string                `json:"effectiveModel"`
+	Message               string                `json:"message"`
 }
 
 type ModelConfigInput struct {
-	Provider string `json:"provider"`
-	BaseURL  string `json:"baseUrl"`
-	APIKey   string `json:"apiKey"`
-	Model    string `json:"model"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Provider       string `json:"provider"`
+	APIType        string `json:"apiType"`
+	BaseURL        string `json:"baseUrl"`
+	APIKey         string `json:"apiKey"`
+	Model          string `json:"model"`
+	SetActive      bool   `json:"setActive"`
+	PreserveAPIKey bool   `json:"preserveApiKey"`
 }
 
 type KnowledgeItem struct {
@@ -124,6 +128,11 @@ type SkillItem struct {
 	Content     string `json:"content"`
 	Dir         string `json:"dir"`
 	Loaded      bool   `json:"loaded"`
+}
+
+type SkillMutation struct {
+	Message string    `json:"message"`
+	Item    SkillItem `json:"item"`
 }
 
 type ProjectSummary struct {
@@ -268,37 +277,28 @@ func (a *DesktopApp) GetModelSettings() (ModelSettings, error) {
 		return ModelSettings{}, errors.New("模型服务尚未启用")
 	}
 
+	snapshot, err := a.modelStore.List(context.Background())
+	if err != nil {
+		return ModelSettings{}, err
+	}
 	effective, err := a.aiService.CurrentConfig(context.Background())
 	if err != nil {
 		return ModelSettings{}, err
 	}
-	envOverrides := modelconfig.ActiveEnvOverrides()
-	saved, savedOK, err := a.modelStore.LoadSaved(context.Background())
-	if err != nil {
-		return ModelSettings{}, err
-	}
-	editable := effective
-	if savedOK {
-		editable = saved
-	} else {
-		editable.APIKey = ""
-	}
 
 	missing := effective.MissingFields()
 	settings := ModelSettings{
-		Provider:              editable.Provider,
-		BaseURL:               editable.BaseURL,
-		APIKey:                editable.APIKey,
-		Model:                 editable.Model,
-		Configured:            len(missing) == 0,
-		Saved:                 savedOK,
+		Profiles:              snapshot.Profiles,
+		ActiveProfileID:       snapshot.ActiveProfileID,
+		Configured:            snapshot.ActiveProfileID != "" && len(missing) == 0,
 		MissingFields:         missing,
-		EnvOverrides:          envOverrides,
+		EffectiveProfileName:  effective.Name,
 		EffectiveProvider:     effective.Provider,
+		EffectiveAPIType:      effective.APIType,
 		EffectiveBaseURL:      effective.BaseURL,
 		EffectiveAPIKeyMasked: modelconfig.MaskSecret(effective.APIKey),
 		EffectiveModel:        effective.Model,
-		Message:               desktopModelMessage(savedOK, envOverrides, missing),
+		Message:               desktopModelMessage(snapshot, missing),
 	}
 	return settings, nil
 }
@@ -309,32 +309,69 @@ func (a *DesktopApp) SaveModelConfig(input ModelConfigInput) (ModelSettings, err
 	}
 
 	cfg := modelconfig.Config{
+		ID:       input.ID,
+		Name:     input.Name,
 		Provider: input.Provider,
+		APIType:  input.APIType,
 		BaseURL:  input.BaseURL,
 		APIKey:   input.APIKey,
 		Model:    input.Model,
-	}.Normalize()
-	if err := a.modelStore.Save(context.Background(), cfg); err != nil {
+	}
+	if _, err := a.modelStore.Save(context.Background(), cfg, modelconfig.SaveOptions{
+		SetActive:      input.SetActive,
+		PreserveAPIKey: input.PreserveAPIKey,
+	}); err != nil {
 		return ModelSettings{}, err
 	}
 	return a.GetModelSettings()
 }
 
-func (a *DesktopApp) ClearModelConfig() (MessageResult, error) {
+func (a *DesktopApp) DeleteModelConfig(id string) (ModelSettings, error) {
 	if a.modelStore == nil {
-		return MessageResult{}, errors.New("模型配置存储尚未启用")
+		return ModelSettings{}, errors.New("模型配置存储尚未启用")
 	}
-	if err := a.modelStore.Clear(context.Background()); err != nil {
-		return MessageResult{}, err
+	deleted, err := a.modelStore.Delete(context.Background(), id)
+	if err != nil {
+		return ModelSettings{}, err
 	}
-	return MessageResult{Message: "已清空本地模型配置。"}, nil
+	if !deleted {
+		return ModelSettings{}, errors.New("未找到要删除的模型 profile")
+	}
+	return a.GetModelSettings()
 }
 
-func (a *DesktopApp) TestModelConnection() (MessageResult, error) {
+func (a *DesktopApp) SetActiveModel(id string) (ModelSettings, error) {
+	if a.modelStore == nil {
+		return ModelSettings{}, errors.New("模型配置存储尚未启用")
+	}
+	if err := a.modelStore.SetActive(context.Background(), id); err != nil {
+		return ModelSettings{}, err
+	}
+	return a.GetModelSettings()
+}
+
+func (a *DesktopApp) TestModelConnection(id string) (MessageResult, error) {
 	if a.aiService == nil {
 		return MessageResult{}, errors.New("模型服务尚未启用")
 	}
-	result, err := a.aiService.TestConnection(context.Background())
+
+	ctx := context.Background()
+	cfg, err := a.aiService.CurrentConfig(ctx)
+	if err != nil {
+		return MessageResult{}, err
+	}
+	if strings.TrimSpace(id) != "" {
+		selected, ok, err := a.modelStore.Get(ctx, id)
+		if err != nil {
+			return MessageResult{}, err
+		}
+		if !ok {
+			return MessageResult{}, errors.New("未找到要测试的模型 profile")
+		}
+		cfg = selected
+	}
+
+	result, err := a.aiService.TestConfig(ctx, cfg)
 	if err != nil {
 		return MessageResult{}, err
 	}
@@ -604,6 +641,23 @@ func (a *DesktopApp) OpenImportDialog() (string, error) {
 	})
 }
 
+func (a *DesktopApp) OpenSkillImportDialog() (string, error) {
+	if a.ctx == nil {
+		return "", errors.New("桌面上下文尚未初始化")
+	}
+
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            "选择要导入的 skill zip",
+		DefaultDirectory: a.defaultDialogDirectory(),
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "ZIP Files",
+				Pattern:     "*.zip",
+			},
+		},
+	})
+}
+
 func (a *DesktopApp) ImportFile(path string) (KnowledgeMutation, error) {
 	projectCtx, _, err := a.projectContext(context.Background())
 	if err != nil {
@@ -617,6 +671,37 @@ func (a *DesktopApp) ImportFile(path string) (KnowledgeMutation, error) {
 	return KnowledgeMutation{
 		Message: fmt.Sprintf("已导入文件并写入 #%s", shortID(entry.ID)),
 		Item:    toKnowledgeItem(entry),
+	}, nil
+}
+
+func (a *DesktopApp) ImportSkillArchive(path string) (SkillMutation, error) {
+	if a.service == nil {
+		return SkillMutation{}, errors.New("技能服务尚未启用")
+	}
+
+	pkg, err := skilllib.InspectArchive(path)
+	if err != nil {
+		return SkillMutation{}, err
+	}
+
+	available, err := a.service.ListAvailableSkills()
+	if err != nil {
+		return SkillMutation{}, err
+	}
+	for _, skill := range available {
+		if !strings.EqualFold(strings.TrimSpace(skill.Name), strings.TrimSpace(pkg.Skill.Name)) {
+			continue
+		}
+		return SkillMutation{}, fmt.Errorf("skill %q 已存在，请先删除或更换 frontmatter name。", pkg.Skill.Name)
+	}
+
+	imported, err := skilllib.ImportArchive(path, filepath.Join(a.dataDir, "skills"))
+	if err != nil {
+		return SkillMutation{}, err
+	}
+	return SkillMutation{
+		Message: fmt.Sprintf("已导入 skill %s。", imported.Name),
+		Item:    toSkillItem(imported, false),
 	}, nil
 }
 
@@ -899,17 +984,15 @@ func preview(text string, maxRunes int) string {
 	return string(runes[:maxRunes]) + "..."
 }
 
-func desktopModelMessage(saved bool, envOverrides []string, missing []string) string {
+func desktopModelMessage(snapshot modelconfig.Snapshot, missing []string) string {
 	switch {
-	case len(envOverrides) > 0 && len(missing) == 0:
-		return "当前运行时配置由环境变量覆盖，本地保存的值仅作为备用。"
-	case len(envOverrides) > 0:
-		return "检测到环境变量覆盖，但当前模型配置仍不完整。"
-	case saved && len(missing) == 0:
-		return "本地模型配置已保存并生效。"
-	case saved:
-		return "本地模型配置已保存，但仍有缺失字段。"
+	case len(snapshot.Profiles) == 0:
+		return "尚未保存任何模型 profile。"
+	case snapshot.ActiveProfileID == "":
+		return "已保存模型 profile，但尚未选择活跃模型。"
+	case len(missing) == 0:
+		return fmt.Sprintf("本地已保存 %d 个模型 profile，当前活跃模型已生效。", len(snapshot.Profiles))
 	default:
-		return "尚未保存本地模型配置。"
+		return "当前活跃模型 profile 已保存，但配置仍不完整。"
 	}
 }

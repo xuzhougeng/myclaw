@@ -223,6 +223,15 @@ func (s desktopHTTPDevServer) registerAPI(mux *http.ServeMux) {
 		s.writeResult(w, result, err)
 	})
 
+	mux.HandleFunc("/api/skills/upload", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			s.writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		result, err := s.handleSkillUpload(r)
+		s.writeResult(w, result, err)
+	})
+
 	mux.HandleFunc("/api/chat", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			s.writeMethodNotAllowed(w, http.MethodPost)
@@ -267,16 +276,46 @@ func (s desktopHTTPDevServer) registerAPI(mux *http.ServeMux) {
 			s.writeMethodNotAllowed(w, http.MethodPost)
 			return
 		}
-		result, err := s.app.TestModelConnection()
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := decodeJSONBody(r, &body); err != nil && !errors.Is(err, io.EOF) {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := s.app.TestModelConnection(body.ID)
 		s.writeResult(w, result, err)
 	})
 
-	mux.HandleFunc("/api/model/clear", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/model/delete", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			s.writeMethodNotAllowed(w, http.MethodPost)
 			return
 		}
-		result, err := s.app.ClearModelConfig()
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := decodeJSONBody(r, &body); err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := s.app.DeleteModelConfig(body.ID)
+		s.writeResult(w, result, err)
+	})
+
+	mux.HandleFunc("/api/model/active", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			s.writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := decodeJSONBody(r, &body); err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := s.app.SetActiveModel(body.ID)
 		s.writeResult(w, result, err)
 	})
 
@@ -373,6 +412,26 @@ func (s desktopHTTPDevServer) handleImportUpload(r *http.Request) (KnowledgeMuta
 	defer os.RemoveAll(filepath.Dir(tempPath))
 
 	return s.app.ImportFile(tempPath)
+}
+
+func (s desktopHTTPDevServer) handleSkillUpload(r *http.Request) (SkillMutation, error) {
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		return SkillMutation{}, err
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		return SkillMutation{}, err
+	}
+	defer file.Close()
+
+	tempPath, err := writeUploadedTempFile(file, header)
+	if err != nil {
+		return SkillMutation{}, err
+	}
+	defer os.RemoveAll(filepath.Dir(tempPath))
+
+	return s.app.ImportSkillArchive(tempPath)
 }
 
 func (s desktopHTTPDevServer) writeResult(w http.ResponseWriter, payload any, err error) {

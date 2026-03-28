@@ -47,7 +47,7 @@ func main() {
 	}
 
 	store := knowledge.NewStore(filepath.Join(dataDir, "knowledge", "entries.json"))
-	modelStore := modelconfig.NewStore()
+	modelStore := modelconfig.NewStore(filepath.Join(dataDir, "model", "profiles.db"))
 	aiService := ai.NewService(modelStore)
 	reminderStore := reminder.NewStore(filepath.Join(dataDir, "reminders", "items.json"))
 	reminderManager := reminder.NewManager(reminderStore)
@@ -127,6 +127,8 @@ var migratableDataFiles = []string{
 	filepath.Join("prompts", "items.json"),
 	filepath.Join("projects", "active.json"),
 	filepath.Join("model", "config.json"),
+	filepath.Join("model", "profiles.db"),
+	filepath.Join("model", "secret.key"),
 	filepath.Join("reminders", "items.json"),
 	filepath.Join("weixin-bridge", "account.json"),
 	filepath.Join("weixin-bridge", "sync_buf"),
@@ -222,7 +224,11 @@ func moveFile(sourcePath, targetPath string) error {
 	}
 	defer sourceFile.Close()
 
-	targetFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(sourcePath); err == nil {
+		mode = info.Mode().Perm()
+	}
+	targetFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}

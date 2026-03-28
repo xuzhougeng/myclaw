@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,6 +63,26 @@ func (s *Service) TestConnection(ctx context.Context) (string, error) {
 	cfg, err := s.requireConfig(ctx)
 	if err != nil {
 		return "", err
+	}
+	return s.TestConfig(ctx, cfg)
+}
+
+func (s *Service) TestConfig(ctx context.Context, cfg modelconfig.Config) (string, error) {
+	cfg = cfg.Normalize()
+	if missing := cfg.MissingFields(); len(missing) > 0 {
+		return "", fmt.Errorf("model is not configured, missing: %s", strings.Join(missing, ", "))
+	}
+	switch cfg.Provider {
+	case modelconfig.ProviderOpenAI:
+		if cfg.APIType != modelconfig.APITypeResponses && cfg.APIType != modelconfig.APITypeChatCompletions {
+			return "", fmt.Errorf("unsupported openai api type %q", cfg.APIType)
+		}
+	case modelconfig.ProviderAnthropic:
+		if cfg.APIType != modelconfig.APITypeMessages {
+			return "", fmt.Errorf("unsupported anthropic api type %q", cfg.APIType)
+		}
+	default:
+		return "", fmt.Errorf("unsupported model provider %q", cfg.Provider)
 	}
 	return s.generateText(ctx, cfg, "You are a connectivity test endpoint.", "Reply with exactly OK.")
 }
@@ -392,39 +413,52 @@ func (s *Service) requireConfig(ctx context.Context) (modelconfig.Config, error)
 	if err != nil {
 		return modelconfig.Config{}, err
 	}
-	if cfg.Provider != "openai" {
-		return modelconfig.Config{}, fmt.Errorf("unsupported model provider %q", cfg.Provider)
-	}
 	if missing := cfg.MissingFields(); len(missing) > 0 {
 		return modelconfig.Config{}, fmt.Errorf("model is not configured, missing: %s", strings.Join(missing, ", "))
+	}
+	switch cfg.Provider {
+	case modelconfig.ProviderOpenAI:
+		if cfg.APIType != modelconfig.APITypeResponses && cfg.APIType != modelconfig.APITypeChatCompletions {
+			return modelconfig.Config{}, fmt.Errorf("unsupported openai api type %q", cfg.APIType)
+		}
+	case modelconfig.ProviderAnthropic:
+		if cfg.APIType != modelconfig.APITypeMessages {
+			return modelconfig.Config{}, fmt.Errorf("unsupported anthropic api type %q", cfg.APIType)
+		}
+	default:
+		return modelconfig.Config{}, fmt.Errorf("unsupported model provider %q", cfg.Provider)
 	}
 	return cfg, nil
 }
 
+type generationRequest struct {
+	Instructions    string
+	Input           []responseInputMessage
+	SchemaName      string
+	Schema          map[string]any
+	MaxOutputTokens int
+}
+
+func (r generationRequest) WantsJSON() bool {
+	return strings.TrimSpace(r.SchemaName) != "" && len(r.Schema) > 0
+}
+
 func (s *Service) generateJSON(ctx context.Context, cfg modelconfig.Config, instructions, input, schemaName string, schema map[string]any, out any) error {
-	req := responsesRequest{
-		Model:        cfg.Model,
+	req := generationRequest{
 		Instructions: mergeInstructionsWithSkillContext(ctx, instructions),
 		Input: []responseInputMessage{
 			newTextMessage("user", input),
 		},
-		Text: &responseTextOptions{
-			Format: responseFormat{
-				Type:        "json_schema",
-				Name:        schemaName,
-				Schema:      schema,
-				Strict:      true,
-				Description: "Structured response for myclaw",
-			},
-		},
+		SchemaName:      schemaName,
+		Schema:          schema,
 		MaxOutputTokens: 800,
 	}
 
-	text, err := s.createResponse(ctx, cfg, req)
+	text, err := s.generate(ctx, cfg, req)
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal([]byte(text), out); err != nil {
+	if err := decodeStructuredResponse(text, out); err != nil {
 		return fmt.Errorf("decode structured response: %w", err)
 	}
 	return nil
@@ -440,8 +474,7 @@ func (s *Service) generateText(ctx context.Context, cfg modelconfig.Config, inst
 }
 
 func (s *Service) generateTextFromContent(ctx context.Context, cfg modelconfig.Config, instructions string, content []responseContentInput) (string, error) {
-	req := responsesRequest{
-		Model:        cfg.Model,
+	req := generationRequest{
 		Instructions: mergeInstructionsWithSkillContext(ctx, instructions),
 		Input: []responseInputMessage{
 			{
@@ -449,32 +482,68 @@ func (s *Service) generateTextFromContent(ctx context.Context, cfg modelconfig.C
 				Content: content,
 			},
 		},
-		Text: &responseTextOptions{
+		MaxOutputTokens: 1500,
+	}
+	return s.generate(ctx, cfg, req)
+}
+
+func (s *Service) generate(ctx context.Context, cfg modelconfig.Config, req generationRequest) (string, error) {
+	switch cfg.Provider {
+	case modelconfig.ProviderOpenAI:
+		switch cfg.APIType {
+		case modelconfig.APITypeResponses:
+			return s.createOpenAIResponse(ctx, cfg, req)
+		case modelconfig.APITypeChatCompletions:
+			return s.createOpenAIChatCompletion(ctx, cfg, req)
+		}
+	case modelconfig.ProviderAnthropic:
+		if cfg.APIType == modelconfig.APITypeMessages {
+			return s.createAnthropicMessage(ctx, cfg, req)
+		}
+	}
+	return "", fmt.Errorf("unsupported provider/api combination %q/%q", cfg.Provider, cfg.APIType)
+}
+
+func (s *Service) createOpenAIResponse(ctx context.Context, cfg modelconfig.Config, req generationRequest) (string, error) {
+	reqBody := responsesRequest{
+		Model:           cfg.Model,
+		Instructions:    req.Instructions,
+		Input:           req.Input,
+		MaxOutputTokens: req.MaxOutputTokens,
+	}
+	if req.WantsJSON() {
+		reqBody.Text = &responseTextOptions{
+			Format: responseFormat{
+				Type:        "json_schema",
+				Name:        req.SchemaName,
+				Schema:      req.Schema,
+				Strict:      true,
+				Description: "Structured response for myclaw",
+			},
+		}
+	} else {
+		reqBody.Text = &responseTextOptions{
 			Format: responseFormat{
 				Type: "text",
 			},
 			Verbosity: "low",
-		},
-		MaxOutputTokens: 1500,
+		}
 	}
-	return s.createResponse(ctx, cfg, req)
-}
 
-func (s *Service) createResponse(ctx context.Context, cfg modelconfig.Config, reqBody responsesRequest) (string, error) {
 	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", err
 	}
 
 	endpoint := strings.TrimRight(cfg.BaseURL, "/") + path.Join("/", "responses")
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	req.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
 		return "", err
 	}
@@ -490,6 +559,107 @@ func (s *Service) createResponse(ctx context.Context, cfg modelconfig.Config, re
 	}
 
 	var result responsesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	text := strings.TrimSpace(result.OutputText())
+	if text == "" {
+		return "", fmt.Errorf("model returned empty output")
+	}
+	return text, nil
+}
+
+func (s *Service) createOpenAIChatCompletion(ctx context.Context, cfg modelconfig.Config, req generationRequest) (string, error) {
+	reqBody := chatCompletionsRequest{
+		Model:     cfg.Model,
+		Messages:  buildChatCompletionMessages(req),
+		MaxTokens: req.MaxOutputTokens,
+	}
+	if req.WantsJSON() {
+		reqBody.ResponseFormat = &chatCompletionsResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &chatCompletionsJSONSchema{
+				Name:   req.SchemaName,
+				Schema: req.Schema,
+				Strict: true,
+			},
+		}
+	}
+
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	endpoint := strings.TrimRight(cfg.BaseURL, "/") + path.Join("/", "chat", "completions")
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		var apiErr openAIErrorResponse
+		if err := json.Unmarshal(body, &apiErr); err == nil && strings.TrimSpace(apiErr.Error.Message) != "" {
+			return "", fmt.Errorf("openai chat completions api returned %d: %s", resp.StatusCode, apiErr.Error.Message)
+		}
+		return "", fmt.Errorf("openai chat completions api returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var result chatCompletionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	text := strings.TrimSpace(result.OutputText())
+	if text == "" {
+		return "", fmt.Errorf("model returned empty output")
+	}
+	return text, nil
+}
+
+func (s *Service) createAnthropicMessage(ctx context.Context, cfg modelconfig.Config, req generationRequest) (string, error) {
+	reqBody, err := buildAnthropicRequest(cfg.Model, req)
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	endpoint := strings.TrimRight(cfg.BaseURL, "/") + path.Join("/", "messages")
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Api-Key", cfg.APIKey)
+	httpReq.Header.Set("Anthropic-Version", "2023-06-01")
+
+	resp, err := s.httpClient.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		var apiErr anthropicErrorResponse
+		if err := json.Unmarshal(body, &apiErr); err == nil && strings.TrimSpace(apiErr.Error.Message) != "" {
+			return "", fmt.Errorf("anthropic messages api returned %d: %s", resp.StatusCode, apiErr.Error.Message)
+		}
+		return "", fmt.Errorf("anthropic messages api returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var result anthropicMessagesResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
@@ -647,4 +817,277 @@ type openAIErrorResponse struct {
 	Error struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+type chatCompletionsRequest struct {
+	Model          string                         `json:"model"`
+	Messages       []chatCompletionsMessage       `json:"messages"`
+	ResponseFormat *chatCompletionsResponseFormat `json:"response_format,omitempty"`
+	MaxTokens      int                            `json:"max_tokens,omitempty"`
+}
+
+type chatCompletionsMessage struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
+}
+
+type chatCompletionsContentPart struct {
+	Type     string                       `json:"type"`
+	Text     string                       `json:"text,omitempty"`
+	ImageURL *chatCompletionsImageURLPart `json:"image_url,omitempty"`
+}
+
+type chatCompletionsImageURLPart struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type chatCompletionsResponseFormat struct {
+	Type       string                     `json:"type"`
+	JSONSchema *chatCompletionsJSONSchema `json:"json_schema,omitempty"`
+}
+
+type chatCompletionsJSONSchema struct {
+	Name   string         `json:"name"`
+	Schema map[string]any `json:"schema"`
+	Strict bool           `json:"strict,omitempty"`
+}
+
+type chatCompletionsResponse struct {
+	Choices []chatCompletionsChoice `json:"choices"`
+}
+
+type chatCompletionsChoice struct {
+	Message chatCompletionsOutputMessage `json:"message"`
+}
+
+type chatCompletionsOutputMessage struct {
+	Content string `json:"content"`
+}
+
+func (r chatCompletionsResponse) OutputText() string {
+	if len(r.Choices) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(r.Choices[0].Message.Content)
+}
+
+type anthropicMessagesRequest struct {
+	Model     string                    `json:"model"`
+	System    string                    `json:"system,omitempty"`
+	Messages  []anthropicMessageRequest `json:"messages"`
+	MaxTokens int                       `json:"max_tokens"`
+}
+
+type anthropicMessageRequest struct {
+	Role    string                 `json:"role"`
+	Content []anthropicContentPart `json:"content"`
+}
+
+type anthropicContentPart struct {
+	Type   string                `json:"type"`
+	Text   string                `json:"text,omitempty"`
+	Source *anthropicImageSource `json:"source,omitempty"`
+}
+
+type anthropicImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
+type anthropicMessagesResponse struct {
+	Content []anthropicTextBlock `json:"content"`
+}
+
+type anthropicTextBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+func (r anthropicMessagesResponse) OutputText() string {
+	var parts []string
+	for _, item := range r.Content {
+		if item.Type == "text" && strings.TrimSpace(item.Text) != "" {
+			parts = append(parts, strings.TrimSpace(item.Text))
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+type anthropicErrorResponse struct {
+	Error struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func buildChatCompletionMessages(req generationRequest) []chatCompletionsMessage {
+	messages := make([]chatCompletionsMessage, 0, len(req.Input)+1)
+	if strings.TrimSpace(req.Instructions) != "" {
+		messages = append(messages, chatCompletionsMessage{
+			Role:    "system",
+			Content: req.Instructions,
+		})
+	}
+	for _, message := range req.Input {
+		messages = append(messages, chatCompletionsMessage{
+			Role:    message.Role,
+			Content: chatCompletionContent(message.Content),
+		})
+	}
+	return messages
+}
+
+func chatCompletionContent(content []responseContentInput) any {
+	if len(content) == 1 && content[0].Type == "input_text" {
+		return content[0].Text
+	}
+	parts := make([]chatCompletionsContentPart, 0, len(content))
+	for _, item := range content {
+		switch item.Type {
+		case "input_text":
+			parts = append(parts, chatCompletionsContentPart{
+				Type: "text",
+				Text: item.Text,
+			})
+		case "input_image":
+			parts = append(parts, chatCompletionsContentPart{
+				Type: "image_url",
+				ImageURL: &chatCompletionsImageURLPart{
+					URL:    item.ImageURL,
+					Detail: item.Detail,
+				},
+			})
+		}
+	}
+	return parts
+}
+
+func buildAnthropicRequest(model string, req generationRequest) (anthropicMessagesRequest, error) {
+	request := anthropicMessagesRequest{
+		Model:     model,
+		System:    anthropicSystemPrompt(req),
+		Messages:  make([]anthropicMessageRequest, 0, len(req.Input)),
+		MaxTokens: req.MaxOutputTokens,
+	}
+	for _, message := range req.Input {
+		content, err := anthropicContent(message.Content)
+		if err != nil {
+			return anthropicMessagesRequest{}, err
+		}
+		request.Messages = append(request.Messages, anthropicMessageRequest{
+			Role:    message.Role,
+			Content: content,
+		})
+	}
+	return request, nil
+}
+
+func anthropicSystemPrompt(req generationRequest) string {
+	prompt := strings.TrimSpace(req.Instructions)
+	if !req.WantsJSON() {
+		return prompt
+	}
+	schemaText, err := json.MarshalIndent(req.Schema, "", "  ")
+	if err != nil {
+		return strings.TrimSpace(prompt + "\n\nReturn only valid JSON.")
+	}
+	extra := "Return only valid JSON that exactly matches this JSON schema:\n" + string(schemaText)
+	if prompt == "" {
+		return extra
+	}
+	return strings.TrimSpace(prompt + "\n\n" + extra)
+}
+
+func anthropicContent(content []responseContentInput) ([]anthropicContentPart, error) {
+	parts := make([]anthropicContentPart, 0, len(content))
+	for _, item := range content {
+		switch item.Type {
+		case "input_text":
+			parts = append(parts, anthropicContentPart{
+				Type: "text",
+				Text: item.Text,
+			})
+		case "input_image":
+			mediaType, data, err := parseDataURL(item.ImageURL)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, anthropicContentPart{
+				Type: "image",
+				Source: &anthropicImageSource{
+					Type:      "base64",
+					MediaType: mediaType,
+					Data:      data,
+				},
+			})
+		}
+	}
+	return parts, nil
+}
+
+func parseDataURL(value string) (string, string, error) {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "data:") {
+		return "", "", fmt.Errorf("anthropic image input requires data url content")
+	}
+	header, data, ok := strings.Cut(value, ",")
+	if !ok {
+		return "", "", fmt.Errorf("invalid data url image content")
+	}
+	mediaType := strings.TrimPrefix(header, "data:")
+	if !strings.HasSuffix(strings.ToLower(mediaType), ";base64") {
+		return "", "", fmt.Errorf("anthropic image input requires base64 data url content")
+	}
+	mediaType = strings.TrimSuffix(mediaType, ";base64")
+	if mediaType == "" {
+		mediaType = "application/octet-stream"
+	}
+	if _, err := base64.StdEncoding.DecodeString(data); err != nil {
+		return "", "", fmt.Errorf("invalid base64 image content: %w", err)
+	}
+	return mediaType, data, nil
+}
+
+func decodeStructuredResponse(text string, out any) error {
+	candidates := []string{
+		strings.TrimSpace(text),
+		stripCodeFence(text),
+		extractJSONObject(stripCodeFence(text)),
+	}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if err := json.Unmarshal([]byte(candidate), out); err == nil {
+			return nil
+		}
+	}
+	return json.Unmarshal([]byte(strings.TrimSpace(text)), out)
+}
+
+func stripCodeFence(text string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "```") {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) < 3 {
+		return text
+	}
+	if strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+		lines = lines[1 : len(lines)-1]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func extractJSONObject(text string) string {
+	text = strings.TrimSpace(text)
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start == -1 || end == -1 || end <= start {
+		return text
+	}
+	return strings.TrimSpace(text[start : end+1])
 }

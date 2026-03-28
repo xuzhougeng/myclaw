@@ -277,8 +277,15 @@
         <!-- Skills View -->
         <div id="view-skills" class="view">
           <header class="content-header">
-            <h2>Skill库</h2>
-            <p class="subtitle">把本地技能加载到当前 desktop 对话会话里</p>
+            <div class="content-header-row">
+              <div>
+                <h2>Skill库</h2>
+                <p class="subtitle">把本地技能加载到当前 desktop 对话会话里，也支持导入符合定义的 zip skill 包</p>
+              </div>
+              <div class="content-header-actions">
+                <button class="btn btn-primary btn-sm" id="skill-import-trigger">导入 zip</button>
+              </div>
+            </div>
           </header>
           <div class="content-body">
             <div class="skill-layout">
@@ -286,7 +293,7 @@
                 <div class="skill-card-header">
                   <div>
                     <h3>可用技能</h3>
-                    <p>来源于本地 `data/skills` 和 `MYCLAW_SKILLS_DIRS`。</p>
+                    <p>来源于本地 `data/skills` 和 `MYCLAW_SKILLS_DIRS`。导入 zip 时会校验 `SKILL.md`、frontmatter 和目录结构。</p>
                   </div>
                   <div class="skill-badge" id="skill-loaded-count">0 个已加载</div>
                 </div>
@@ -322,23 +329,46 @@
         <div id="view-model" class="view">
           <header class="content-header">
             <h2>模型配置</h2>
-            <p class="subtitle">直接在 desktop 内保存、覆盖和测试模型连接</p>
+            <p class="subtitle">在 desktop 内保存多模型 profile、切换当前模型，并安全保存 API Key</p>
           </header>
           <div class="content-body">
             <div class="model-layout">
               <section class="model-card">
                 <div class="model-card-header">
                   <div>
-                    <h3>连接参数</h3>
-                    <p>保存后会写入本地数据目录，供 desktop 直接使用。</p>
+                    <h3>模型 Profiles</h3>
+                    <p>支持 OpenAI Responses、OpenAI Chat Completions 和 Anthropic Messages。</p>
                   </div>
                   <span class="status-pill off" id="model-status-pill">未配置</span>
                 </div>
 
+                <div class="model-profile-bar">
+                  <label class="form-field form-field-wide">
+                    <span>已保存 Profiles</span>
+                    <select id="model-profile-select"></select>
+                  </label>
+                  <div class="model-actions">
+                    <button class="btn btn-ghost" id="model-new">新建 Profile</button>
+                    <button class="btn btn-ghost" id="model-set-active">设为当前</button>
+                    <button class="btn btn-ghost" id="model-delete">删除 Profile</button>
+                  </div>
+                </div>
+
                 <div class="form-grid">
                   <label class="form-field">
+                    <span>Profile Name</span>
+                    <input id="model-profile-name" type="text" placeholder="例如：Claude 主力 / GPT-4.1 分析" />
+                  </label>
+                  <label class="form-field">
                     <span>Provider</span>
-                    <input id="model-provider" type="text" placeholder="openai" />
+                    <select id="model-provider">
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                    </select>
+                  </label>
+                  <label class="form-field">
+                    <span>API Type</span>
+                    <select id="model-api-type"></select>
                   </label>
                   <label class="form-field">
                     <span>Base URL</span>
@@ -346,7 +376,7 @@
                   </label>
                   <label class="form-field">
                     <span>Model</span>
-                    <input id="model-name" type="text" placeholder="gpt-4.1-mini" />
+                    <input id="model-name" type="text" placeholder="gpt-4.1-mini / claude-3-7-sonnet-latest" />
                   </label>
                   <label class="form-field form-field-wide">
                     <span>API Key</span>
@@ -354,11 +384,11 @@
                   </label>
                 </div>
 
+                <p class="model-inline-note" id="model-api-key-hint">新建 profile 时请输入 API Key；编辑已保存 profile 时留空会保留原 key。</p>
                 <p class="model-message" id="model-message">尚未保存本地模型配置。</p>
                 <div class="model-actions">
-                  <button class="btn btn-primary" id="model-save">保存配置</button>
-                  <button class="btn btn-ghost" id="model-test">测试连接</button>
-                  <button class="btn btn-ghost" id="model-clear">清空本地配置</button>
+                  <button class="btn btn-primary" id="model-save">保存 Profile</button>
+                  <button class="btn btn-ghost" id="model-test">测试所选 Profile</button>
                 </div>
               </section>
 
@@ -366,14 +396,22 @@
                 <div class="model-card-header">
                   <div>
                     <h3>当前生效值</h3>
-                    <p>环境变量存在时，会覆盖本地保存的同名字段。</p>
+                    <p>业务层始终使用当前活跃 profile，不再从模型环境变量读取。</p>
                   </div>
                 </div>
 
                 <div class="model-summary">
                   <div class="model-summary-row">
+                    <span>Profile</span>
+                    <strong id="effective-profile-name">—</strong>
+                  </div>
+                  <div class="model-summary-row">
                     <span>Provider</span>
                     <strong id="effective-provider">—</strong>
+                  </div>
+                  <div class="model-summary-row">
+                    <span>API Type</span>
+                    <strong id="effective-api-type">—</strong>
                   </div>
                   <div class="model-summary-row">
                     <span>Base URL</span>
@@ -387,11 +425,6 @@
                     <span>API Key</span>
                     <strong id="effective-api-key">—</strong>
                   </div>
-                </div>
-
-                <div class="env-override-box" id="model-env-override-box" hidden>
-                  <h4>环境变量覆盖</h4>
-                  <p id="model-env-override-text">—</p>
                 </div>
               </section>
             </div>
@@ -494,6 +527,7 @@
 
       <div id="banner" class="banner" hidden></div>
       <input id="http-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.pdf" hidden />
+      <input id="http-skill-zip-input" type="file" accept=".zip,application/zip" hidden />
     </div>
 
     <script src="./app.js"></script>

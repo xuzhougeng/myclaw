@@ -45,7 +45,7 @@ func main() {
 	store := knowledge.NewStore(filepath.Join(dataDir, "knowledge", "entries.json"))
 	promptStore := promptlib.NewStore(filepath.Join(dataDir, "prompts", "items.json"))
 	projectStore := projectstate.NewStore(filepath.Join(dataDir, "projects", "active.json"))
-	modelStore := modelconfig.NewStore(filepath.Join(dataDir, "model", "config.json"))
+	modelStore := modelconfig.NewStore(filepath.Join(dataDir, "model", "profiles.db"))
 	aiService := ai.NewService(modelStore)
 	reminderStore := reminder.NewStore(filepath.Join(dataDir, "reminders", "items.json"))
 	reminderManager := reminder.NewManager(reminderStore)

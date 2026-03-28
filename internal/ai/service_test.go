@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -36,12 +37,24 @@ func jsonResponse(status int, body string) *http.Response {
 	}
 }
 
-func TestRouteCommand(t *testing.T) {
-	store := modelconfig.NewStore()
-	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
-	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
-	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
-	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+func newConfiguredStore(t *testing.T, cfg modelconfig.Config) *modelconfig.Store {
+	t.Helper()
+
+	store := modelconfig.NewStore(filepath.Join(t.TempDir(), "model", "profiles.db"))
+	if _, err := store.Save(context.Background(), cfg, modelconfig.SaveOptions{SetActive: true}); err != nil {
+		t.Fatalf("save model config: %v", err)
+	}
+	return store
+}
+
+func TestRouteCommandUsesOpenAIResponses(t *testing.T) {
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
 
 	service := NewService(store)
 	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -51,6 +64,9 @@ func TestRouteCommand(t *testing.T) {
 		}
 		if req.Text == nil || req.Text.Format.Type != "json_schema" {
 			t.Fatalf("expected json schema request, got %#v", req.Text)
+		}
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("unexpected endpoint: %s", r.URL.Path)
 		}
 		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"command\":\"remember\",\"memory_text\":\"- 已整理内容\",\"append_text\":\"\",\"knowledge_id\":\"\",\"reminder_spec\":\"\",\"reminder_id\":\"\",\"question\":\"\"}"}]}]}`), nil
 	})
@@ -67,12 +83,92 @@ func TestRouteCommand(t *testing.T) {
 	}
 }
 
+func TestOpenAIChatCompletionsStructuredRequest(t *testing.T) {
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeChatCompletions,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-4o-mini",
+	})
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		var req chatCompletionsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected endpoint: %s", r.URL.Path)
+		}
+		if req.ResponseFormat == nil || req.ResponseFormat.Type != "json_schema" {
+			t.Fatalf("expected chat completions json schema, got %#v", req.ResponseFormat)
+		}
+		if len(req.Messages) < 2 || req.Messages[0].Role != "system" {
+			t.Fatalf("expected system+user messages, got %#v", req.Messages)
+		}
+		return jsonResponse(http.StatusOK, `{"choices":[{"message":{"content":"{\"command\":\"answer\",\"memory_text\":\"\",\"append_text\":\"\",\"knowledge_id\":\"\",\"reminder_spec\":\"\",\"reminder_id\":\"\",\"question\":\"整理一下\"}"}}]}`), nil
+	})
+
+	decision, err := service.RouteCommand(context.Background(), "整理一下")
+	if err != nil {
+		t.Fatalf("route via chat completions: %v", err)
+	}
+	if decision.Command != "answer" || decision.Question != "整理一下" {
+		t.Fatalf("unexpected decision: %#v", decision)
+	}
+}
+
+func TestAnthropicMessagesStructuredRequest(t *testing.T) {
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderAnthropic,
+		APIType:  modelconfig.APITypeMessages,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "anthropic-secret",
+		Model:    "claude-3-7-sonnet-latest",
+	})
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		var req anthropicMessagesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("unexpected endpoint: %s", r.URL.Path)
+		}
+		if r.Header.Get("X-Api-Key") != "anthropic-secret" {
+			t.Fatalf("unexpected anthropic api key header: %q", r.Header.Get("X-Api-Key"))
+		}
+		if r.Header.Get("Anthropic-Version") != "2023-06-01" {
+			t.Fatalf("unexpected anthropic version header: %q", r.Header.Get("Anthropic-Version"))
+		}
+		if !strings.Contains(req.System, "JSON schema") {
+			t.Fatalf("expected schema prompt, got %q", req.System)
+		}
+		if len(req.Messages) == 0 || len(req.Messages[0].Content) == 0 || req.Messages[0].Content[0].Type != "text" {
+			t.Fatalf("unexpected anthropic content: %#v", req.Messages)
+		}
+		return jsonResponse(http.StatusOK, `{"content":[{"type":"text","text":"{\"command\":\"help\",\"memory_text\":\"\",\"append_text\":\"\",\"knowledge_id\":\"\",\"reminder_spec\":\"\",\"reminder_id\":\"\",\"question\":\"\"}"}]}`), nil
+	})
+
+	decision, err := service.RouteCommand(context.Background(), "help")
+	if err != nil {
+		t.Fatalf("route via anthropic: %v", err)
+	}
+	if decision.Command != "help" {
+		t.Fatalf("unexpected decision: %#v", decision)
+	}
+}
+
 func TestAnswerUsesKnowledgeEntries(t *testing.T) {
-	store := modelconfig.NewStore()
-	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
-	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
-	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
-	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
 
 	service := NewService(store)
 	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -98,11 +194,13 @@ func TestAnswerUsesKnowledgeEntries(t *testing.T) {
 }
 
 func TestBuildSearchPlan(t *testing.T) {
-	store := modelconfig.NewStore()
-	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
-	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
-	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
-	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
 
 	service := NewService(store)
 	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -110,11 +208,8 @@ func TestBuildSearchPlan(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.Text == nil || req.Text.Format.Type != "json_schema" {
-			t.Fatalf("expected json schema request, got %#v", req.Text)
-		}
-		if req.Text.Format.Name != "search_plan" {
-			t.Fatalf("unexpected schema name: %#v", req.Text.Format)
+		if req.Text == nil || req.Text.Format.Name != "search_plan" {
+			t.Fatalf("unexpected schema request: %#v", req.Text)
 		}
 		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"queries\":[\"macOS 支持计划\",\"macOS 什么时候做\"],\"keywords\":[\"macOS\",\"支持\"]}"}]}]}`), nil
 	})
@@ -132,11 +227,13 @@ func TestBuildSearchPlan(t *testing.T) {
 }
 
 func TestReviewAnswerCandidates(t *testing.T) {
-	store := modelconfig.NewStore()
-	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
-	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
-	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
-	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
 
 	service := NewService(store)
 	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -169,11 +266,13 @@ func TestReviewAnswerCandidates(t *testing.T) {
 }
 
 func TestTranslateToChinese(t *testing.T) {
-	store := modelconfig.NewStore()
-	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
-	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
-	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
-	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
 
 	service := NewService(store)
 	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -200,11 +299,13 @@ func TestTranslateToChinese(t *testing.T) {
 }
 
 func TestTranslateToChineseIncludesSkillContext(t *testing.T) {
-	store := modelconfig.NewStore()
-	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
-	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
-	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
-	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
 
 	service := NewService(store)
 	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -229,11 +330,13 @@ func TestTranslateToChineseIncludesSkillContext(t *testing.T) {
 }
 
 func TestSummarizeImageFileUsesVisionInput(t *testing.T) {
-	store := modelconfig.NewStore()
-	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
-	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
-	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
-	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
 
 	service := NewService(store)
 	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -259,12 +362,51 @@ func TestSummarizeImageFileUsesVisionInput(t *testing.T) {
 	}
 }
 
+func TestAnthropicSummarizeImageFileUsesBase64ImageSource(t *testing.T) {
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderAnthropic,
+		APIType:  modelconfig.APITypeMessages,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "anthropic-secret",
+		Model:    "claude-3-5-sonnet-latest",
+	})
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		var req anthropicMessagesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if len(req.Messages) == 0 || len(req.Messages[0].Content) < 2 {
+			t.Fatalf("unexpected anthropic request: %#v", req.Messages)
+		}
+		imagePart := req.Messages[0].Content[1]
+		if imagePart.Type != "image" || imagePart.Source == nil {
+			t.Fatalf("expected anthropic image block, got %#v", imagePart)
+		}
+		if imagePart.Source.MediaType != "image/png" || imagePart.Source.Data != "AAAA" {
+			t.Fatalf("unexpected image source: %#v", imagePart.Source)
+		}
+		return jsonResponse(http.StatusOK, `{"content":[{"type":"text","text":"- Anthropic 图像摘要"}]}`), nil
+	})
+
+	reply, err := service.SummarizeImageFile(context.Background(), "sample.png", "data:image/png;base64,AAAA")
+	if err != nil {
+		t.Fatalf("summarize image via anthropic: %v", err)
+	}
+	if !strings.Contains(reply, "Anthropic 图像摘要") {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
 func TestSummarizePDFTextUsesExtractedText(t *testing.T) {
-	store := modelconfig.NewStore()
-	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
-	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
-	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
-	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
 
 	service := NewService(store)
 	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
@@ -294,11 +436,13 @@ func TestSummarizePDFTextUsesExtractedText(t *testing.T) {
 }
 
 func TestCreateResponseReturnsAPIErrors(t *testing.T) {
-	store := modelconfig.NewStore()
-	t.Setenv("MYCLAW_MODEL_PROVIDER", "openai")
-	t.Setenv("MYCLAW_MODEL_BASE_URL", "http://example.invalid/v1")
-	t.Setenv("MYCLAW_MODEL_API_KEY", "secret")
-	t.Setenv("MYCLAW_MODEL_NAME", "gpt-test")
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
 
 	service := NewService(store)
 	service.httpClient = newTestClient(t, func(*http.Request) (*http.Response, error) {

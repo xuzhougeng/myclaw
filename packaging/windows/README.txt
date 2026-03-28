@@ -9,11 +9,7 @@ Files:
 - uninstall-autostart.ps1
 
 Typical usage:
-1. Set user env vars if you want AI features:
-   MYCLAW_MODEL_PROVIDER
-   MYCLAW_MODEL_BASE_URL
-   MYCLAW_MODEL_API_KEY
-   MYCLAW_MODEL_NAME
+1. Run desktop once and save your model profile in the "模型配置" page.
 2. Run:
    .\run-weixin.ps1
    or
@@ -34,3 +30,4 @@ Default data and logs:
 Autostart:
 - install-autostart.ps1 installs a hidden Startup-folder launcher
 - uninstall-autostart.ps1 removes it
+- AI model profiles are reused from %LOCALAPPDATA%\myclaw\data\model

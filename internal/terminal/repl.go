@@ -28,8 +28,7 @@ func NewREPL(service *app.Service, input io.Reader, output io.Writer) *REPL {
 
 func (r *REPL) Run(ctx context.Context) error {
 	fmt.Fprintf(r.output, "myclaw terminal\n")
-	fmt.Fprintln(r.output, "model config is read only from local env vars")
-	fmt.Fprintln(r.output, "required vars: MYCLAW_MODEL_PROVIDER, MYCLAW_MODEL_BASE_URL, MYCLAW_MODEL_API_KEY, MYCLAW_MODEL_NAME")
+	fmt.Fprintln(r.output, "model config is loaded from the local model database under the data directory")
 	fmt.Fprintln(r.output, "type /help for commands")
 
 	scanner := bufio.NewScanner(r.input)

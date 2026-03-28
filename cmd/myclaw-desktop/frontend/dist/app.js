@@ -270,6 +270,21 @@ function bindStaticEvents() {
     clearPrompts.addEventListener('click', () => void clearPromptsLibrary());
   }
 
+  const skillImportTrigger = document.getElementById('skill-import-trigger');
+  if (skillImportTrigger) {
+    skillImportTrigger.addEventListener('click', () => void browseSkillArchive());
+  }
+
+  const skillZipInput = document.getElementById('http-skill-zip-input');
+  if (skillZipInput) {
+    skillZipInput.addEventListener('change', (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (file) {
+        void importSkillArchiveFromFile(file);
+      }
+    });
+  }
+
   const skillList = document.getElementById('skill-list');
   if (skillList) {
     skillList.addEventListener('click', (event) => {
@@ -342,14 +357,34 @@ function bindStaticEvents() {
     modelSave.addEventListener('click', () => void saveModelConfig());
   }
 
+  const modelNew = document.getElementById('model-new');
+  if (modelNew) {
+    modelNew.addEventListener('click', () => createNewModelProfileDraft());
+  }
+
+  const modelSetActive = document.getElementById('model-set-active');
+  if (modelSetActive) {
+    modelSetActive.addEventListener('click', () => void setActiveModelProfile());
+  }
+
   const modelTest = document.getElementById('model-test');
   if (modelTest) {
     modelTest.addEventListener('click', () => void testModelConnection());
   }
 
-  const modelClear = document.getElementById('model-clear');
-  if (modelClear) {
-    modelClear.addEventListener('click', () => void clearModelConfig());
+  const modelDelete = document.getElementById('model-delete');
+  if (modelDelete) {
+    modelDelete.addEventListener('click', () => void deleteModelProfile());
+  }
+
+  const modelProfileSelect = document.getElementById('model-profile-select');
+  if (modelProfileSelect) {
+    modelProfileSelect.addEventListener('change', () => syncModelFormFromSelection(true));
+  }
+
+  const modelProvider = document.getElementById('model-provider');
+  if (modelProvider) {
+    modelProvider.addEventListener('change', () => syncModelProviderFields(true));
   }
 
   // Memory list events
@@ -503,6 +538,9 @@ function createWailsBackend(backend) {
     ListSkills: () => backend.ListSkills(),
     LoadSkill: (name) => backend.LoadSkill(name),
     UnloadSkill: (name) => backend.UnloadSkill(name),
+    OpenSkillImportDialog: () => backend.OpenSkillImportDialog(),
+    ImportSkillArchive: (path) => backend.ImportSkillArchive(path),
+    UploadSkillArchive: () => Promise.reject(new Error('Wails 模式不使用浏览器上传。')),
     ConfirmAction: (title, message) => backend.ConfirmAction(title, message),
     OpenImportDialog: () => backend.OpenImportDialog(),
     ImportFile: (path) => backend.ImportFile(path),
@@ -510,8 +548,9 @@ function createWailsBackend(backend) {
     SendMessage: (input) => backend.SendMessage(input),
     GetModelSettings: () => backend.GetModelSettings(),
     SaveModelConfig: (payload) => backend.SaveModelConfig(payload),
-    TestModelConnection: () => backend.TestModelConnection(),
-    ClearModelConfig: () => backend.ClearModelConfig(),
+    TestModelConnection: (id) => backend.TestModelConnection(id),
+    DeleteModelConfig: (id) => backend.DeleteModelConfig(id),
+    SetActiveModel: (id) => backend.SetActiveModel(id),
     GetWeixinStatus: () => backend.GetWeixinStatus(),
     StartWeixinLogin: () => backend.StartWeixinLogin(),
     CancelWeixinLogin: () => backend.CancelWeixinLogin(),
@@ -537,6 +576,11 @@ function createHTTPBackend() {
     ListSkills: () => requestJSON('GET', '/api/skills'),
     LoadSkill: (name) => requestJSON('POST', '/api/skills/load', { name }),
     UnloadSkill: (name) => requestJSON('POST', '/api/skills/unload', { name }),
+    OpenSkillImportDialog: async () => '',
+    ImportSkillArchive: async () => {
+      throw new Error('HTTP 模式请直接选择 zip 文件上传。');
+    },
+    UploadSkillArchive: (file) => uploadFile('/api/skills/upload', file),
     ConfirmAction: async (title, message) => window.confirm(`${title}\n\n${message}`),
     OpenImportDialog: async () => '',
     ImportFile: async () => {
@@ -546,8 +590,9 @@ function createHTTPBackend() {
     SendMessage: (input) => requestJSON('POST', '/api/chat', { input }),
     GetModelSettings: () => requestJSON('GET', '/api/model'),
     SaveModelConfig: (payload) => requestJSON('POST', '/api/model/save', payload),
-    TestModelConnection: () => requestJSON('POST', '/api/model/test'),
-    ClearModelConfig: () => requestJSON('POST', '/api/model/clear'),
+    TestModelConnection: (id) => requestJSON('POST', '/api/model/test', { id }),
+    DeleteModelConfig: (id) => requestJSON('POST', '/api/model/delete', { id }),
+    SetActiveModel: (id) => requestJSON('POST', '/api/model/active', { id }),
     GetWeixinStatus: () => requestJSON('GET', '/api/weixin/status'),
     StartWeixinLogin: () => requestJSON('POST', '/api/weixin/login'),
     CancelWeixinLogin: () => requestJSON('POST', '/api/weixin/cancel'),
@@ -719,6 +764,57 @@ async function importFile() {
       time: nowLabel(),
     });
     renderChat();
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function browseSkillArchive() {
+  if (state.backendMode === 'http') {
+    const input = document.getElementById('http-skill-zip-input');
+    if (input) {
+      input.value = '';
+      input.click();
+    }
+    return;
+  }
+
+  try {
+    const selected = await state.backend.OpenSkillImportDialog();
+    if (!selected) return;
+    await importSkillArchiveFromPath(selected);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function importSkillArchiveFromPath(path) {
+  if (!path) return;
+
+  try {
+    const result = await state.backend.ImportSkillArchive(path);
+    if (result && result.item && result.item.name) {
+      state.selectedSkillName = result.item.name;
+    }
+    await refreshSkills();
+    showBanner(result.message || 'skill 已导入。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function importSkillArchiveFromFile(file) {
+  if (!file) return;
+
+  try {
+    const result = await state.backend.UploadSkillArchive(file);
+    if (result && result.item && result.item.name) {
+      state.selectedSkillName = result.item.name;
+    }
+    const input = document.getElementById('http-skill-zip-input');
+    if (input) input.value = '';
+    await refreshSkills();
+    showBanner(result.message || 'skill 已导入。', false);
   } catch (error) {
     showBanner(asMessage(error), true);
   }
@@ -1215,21 +1311,151 @@ function renderSkills() {
     : '<p>这个技能没有可显示的正文内容。</p>';
 }
 
+function selectedModelProfileId() {
+  return document.getElementById('model-profile-select')?.value || '';
+}
+
+function selectedModelProfile() {
+  const selectedId = selectedModelProfileId();
+  return (state.model.profiles || []).find((item) => item.id === selectedId) || null;
+}
+
+function modelProviderDefaults(provider) {
+  return MODEL_PROVIDER_DEFAULTS[provider] || MODEL_PROVIDER_DEFAULTS.openai;
+}
+
+function syncModelProviderFields(forceBaseUrl) {
+  const provider = document.getElementById('model-provider');
+  const apiType = document.getElementById('model-api-type');
+  const baseUrl = document.getElementById('model-base-url');
+  if (!provider || !apiType || !baseUrl) return;
+
+  const providerValue = provider.value || 'openai';
+  const options = MODEL_API_TYPE_OPTIONS[providerValue] || MODEL_API_TYPE_OPTIONS.openai;
+  const previousAPIType = apiType.value;
+  const previousBaseURL = baseUrl.value.trim();
+
+  apiType.innerHTML = options
+    .map((item) => `<option value="${escapeAttribute(item.value)}">${escapeHTML(item.label)}</option>`)
+    .join('');
+
+  if (options.some((item) => item.value === previousAPIType)) {
+    apiType.value = previousAPIType;
+  } else {
+    apiType.value = options[0]?.value || '';
+  }
+
+  const defaults = modelProviderDefaults(providerValue);
+  const knownDefaults = Object.values(MODEL_PROVIDER_DEFAULTS).map((item) => item.baseUrl);
+  if (forceBaseUrl || !previousBaseURL || knownDefaults.includes(previousBaseURL)) {
+    baseUrl.value = defaults.baseUrl;
+  }
+}
+
+function populateModelForm(profile) {
+  const name = document.getElementById('model-profile-name');
+  const provider = document.getElementById('model-provider');
+  const apiType = document.getElementById('model-api-type');
+  const baseUrl = document.getElementById('model-base-url');
+  const model = document.getElementById('model-name');
+  const apiKey = document.getElementById('model-api-key');
+  const apiKeyHint = document.getElementById('model-api-key-hint');
+
+  const source = profile || {
+    name: '',
+    provider: 'openai',
+    apiType: 'responses',
+    baseUrl: MODEL_PROVIDER_DEFAULTS.openai.baseUrl,
+    model: '',
+    hasApiKey: false,
+    apiKeyMasked: '(empty)',
+  };
+
+  if (name) name.value = source.name || '';
+  if (provider) provider.value = source.provider || 'openai';
+  syncModelProviderFields(!profile);
+  if (apiType) apiType.value = source.apiType || modelProviderDefaults(source.provider || 'openai').apiType;
+  if (baseUrl) baseUrl.value = source.baseUrl || modelProviderDefaults(source.provider || 'openai').baseUrl;
+  if (model) model.value = source.model || '';
+  if (apiKey) apiKey.value = '';
+
+  if (apiKeyHint) {
+    apiKeyHint.textContent = profile && profile.hasApiKey
+      ? `已保存 API Key：${profile.apiKeyMasked || '********'}。输入新值会覆盖；留空会保留原 key。`
+      : '新建 profile 时请输入 API Key；编辑已保存 profile 时留空会保留原 key。';
+  }
+}
+
+function syncModelFormFromSelection(fromUser) {
+  const profile = selectedModelProfile();
+  populateModelForm(profile);
+  if (fromUser && profile) {
+    showBanner(`已切换到 profile：${profile.name || profile.model || profile.id}`, false);
+  }
+}
+
+function createNewModelProfileDraft() {
+  const profileSelect = document.getElementById('model-profile-select');
+  if (profileSelect) {
+    profileSelect.value = '';
+  }
+  populateModelForm(null);
+}
+
+function readModelForm() {
+  const selected = selectedModelProfile();
+  const profileSelect = document.getElementById('model-profile-select');
+  return {
+    id: profileSelect?.value || '',
+    name: document.getElementById('model-profile-name')?.value.trim() || '',
+    provider: document.getElementById('model-provider')?.value.trim() || '',
+    apiType: document.getElementById('model-api-type')?.value.trim() || '',
+    baseUrl: document.getElementById('model-base-url')?.value.trim() || '',
+    apiKey: document.getElementById('model-api-key')?.value.trim() || '',
+    model: document.getElementById('model-name')?.value.trim() || '',
+    setActive: false,
+    preserveApiKey: Boolean(selected?.hasApiKey) && !(document.getElementById('model-api-key')?.value.trim()),
+  };
+}
+
 async function saveModelConfig() {
   try {
     const result = await state.backend.SaveModelConfig(readModelForm());
     state.model = normalizeModelSettings(result);
     renderModel();
     await refreshOverview();
-    showBanner('模型配置已保存。', false);
+    showBanner('模型 profile 已保存。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function setActiveModelProfile() {
+  const selected = selectedModelProfile();
+  if (!selected) {
+    showBanner('请先选择已保存的 profile。', true);
+    return;
+  }
+
+  try {
+    state.model = normalizeModelSettings(await state.backend.SetActiveModel(selected.id));
+    renderModel();
+    await refreshOverview();
+    showBanner(`已切换当前模型到 ${selected.name || selected.model || selected.id}。`, false);
   } catch (error) {
     showBanner(asMessage(error), true);
   }
 }
 
 async function testModelConnection() {
+  const selected = selectedModelProfile();
+  if (!selected && (state.model.profiles || []).length > 0) {
+    showBanner('请先选择要测试的 profile。', true);
+    return;
+  }
+
   try {
-    const result = await state.backend.TestModelConnection();
+    const result = await state.backend.TestModelConnection(selected?.id || state.model.activeProfileId || '');
     await refreshAll();
     showBanner(result.message, false);
   } catch (error) {
@@ -1237,46 +1463,53 @@ async function testModelConnection() {
   }
 }
 
-async function clearModelConfig() {
+async function deleteModelProfile() {
+  const selected = selectedModelProfile();
+  if (!selected) {
+    showBanner('请先选择要删除的 profile。', true);
+    return;
+  }
+
   try {
-    const ok = await state.backend.ConfirmAction('清空模型配置', '确认清空本地保存的模型配置吗？');
+    const ok = await state.backend.ConfirmAction('删除模型 Profile', `确认删除 ${selected.name || selected.model || selected.id} 吗？`);
     if (!ok) return;
 
-    const result = await state.backend.ClearModelConfig();
-    await refreshAll();
-    showBanner(result.message, false);
+    state.model = normalizeModelSettings(await state.backend.DeleteModelConfig(selected.id));
+    renderModel();
+    await refreshOverview();
+    showBanner('模型 profile 已删除。', false);
   } catch (error) {
     showBanner(asMessage(error), true);
   }
-}
-
-function readModelForm() {
-  return {
-    provider: document.getElementById('model-provider')?.value.trim() || '',
-    baseUrl: document.getElementById('model-base-url')?.value.trim() || '',
-    apiKey: document.getElementById('model-api-key')?.value.trim() || '',
-    model: document.getElementById('model-name')?.value.trim() || '',
-  };
 }
 
 function renderModel() {
-  const provider = document.getElementById('model-provider');
-  const baseUrl = document.getElementById('model-base-url');
-  const apiKey = document.getElementById('model-api-key');
-  const model = document.getElementById('model-name');
+  const profileSelect = document.getElementById('model-profile-select');
   const pill = document.getElementById('model-status-pill');
   const message = document.getElementById('model-message');
+  const effectiveProfileName = document.getElementById('effective-profile-name');
   const effectiveProvider = document.getElementById('effective-provider');
+  const effectiveAPIType = document.getElementById('effective-api-type');
   const effectiveBaseUrl = document.getElementById('effective-base-url');
   const effectiveModel = document.getElementById('effective-model');
   const effectiveApiKey = document.getElementById('effective-api-key');
-  const envOverrideBox = document.getElementById('model-env-override-box');
-  const envOverrideText = document.getElementById('model-env-override-text');
 
-  if (provider && document.activeElement !== provider) provider.value = state.model.provider || '';
-  if (baseUrl && document.activeElement !== baseUrl) baseUrl.value = state.model.baseUrl || '';
-  if (apiKey && document.activeElement !== apiKey) apiKey.value = state.model.apiKey || '';
-  if (model && document.activeElement !== model) model.value = state.model.model || '';
+  const profiles = state.model.profiles || [];
+  const previousSelectedId = profileSelect?.value || '';
+  const nextSelectedId = profiles.some((item) => item.id === previousSelectedId)
+    ? previousSelectedId
+    : state.model.activeProfileId || '';
+
+  if (profileSelect) {
+    profileSelect.innerHTML = ['<option value="">新建 Profile</option>']
+      .concat(
+        profiles.map((item) => `
+          <option value="${escapeAttribute(item.id)}">${escapeHTML(item.name || item.model || item.id)}${item.active ? ' · 当前' : ''}</option>
+        `),
+      )
+      .join('');
+    profileSelect.value = nextSelectedId;
+  }
 
   if (pill) {
     pill.className = `status-pill ${state.model.configured ? 'on' : 'off'}`;
@@ -1286,21 +1519,17 @@ function renderModel() {
     const missing = (state.model.missingFields || []).length > 0
       ? ` 缺少：${state.model.missingFields.join('、')}。`
       : '';
-    message.textContent = `${state.model.message || '尚未保存本地模型配置。'}${missing}`;
+    message.textContent = `${state.model.message || '尚未保存任何模型 profile。'}${missing}`;
   }
 
+  if (effectiveProfileName) effectiveProfileName.textContent = state.model.effectiveProfileName || '—';
   if (effectiveProvider) effectiveProvider.textContent = state.model.effectiveProvider || '—';
+  if (effectiveAPIType) effectiveAPIType.textContent = state.model.effectiveApiType || '—';
   if (effectiveBaseUrl) effectiveBaseUrl.textContent = state.model.effectiveBaseUrl || '—';
   if (effectiveModel) effectiveModel.textContent = state.model.effectiveModel || '—';
   if (effectiveApiKey) effectiveApiKey.textContent = state.model.effectiveApiKeyMasked || '—';
 
-  if (envOverrideBox) {
-    const overrides = state.model.envOverrides || [];
-    envOverrideBox.hidden = overrides.length === 0;
-    if (!envOverrideBox.hidden && envOverrideText) {
-      envOverrideText.textContent = `以下字段当前由环境变量覆盖：${overrides.join('、')}。`;
-    }
-  }
+  populateModelForm((profiles || []).find((item) => item.id === nextSelectedId) || null);
 }
 
 async function startWeixinLogin() {
@@ -1514,30 +1743,63 @@ function normalizeProjectState(payload) {
   };
 }
 
+const MODEL_PROVIDER_DEFAULTS = {
+  openai: {
+    apiType: 'responses',
+    baseUrl: 'https://api.openai.com/v1',
+  },
+  anthropic: {
+    apiType: 'messages',
+    baseUrl: 'https://api.anthropic.com/v1',
+  },
+};
+
+const MODEL_API_TYPE_OPTIONS = {
+  openai: [
+    { value: 'responses', label: 'Responses (new)' },
+    { value: 'chat_completions', label: 'Chat Completions (legacy)' },
+  ],
+  anthropic: [
+    { value: 'messages', label: 'Messages' },
+  ],
+};
+
 function defaultModelState() {
   return {
-    provider: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    apiKey: '',
-    model: '',
+    profiles: [],
+    activeProfileId: '',
     configured: false,
-    saved: false,
     missingFields: [],
-    envOverrides: [],
+    effectiveProfileName: '—',
     effectiveProvider: 'openai',
+    effectiveApiType: 'responses',
     effectiveBaseUrl: 'https://api.openai.com/v1',
     effectiveApiKeyMasked: '(empty)',
     effectiveModel: '',
-    message: '尚未保存本地模型配置。',
+    message: '尚未保存任何模型 profile。',
   };
 }
 
 function normalizeModelSettings(payload) {
   const source = Array.isArray(payload) ? payload[0] : payload;
-  return {
+  const stateValue = {
     ...defaultModelState(),
     ...(source || {}),
   };
+  stateValue.profiles = Array.isArray(stateValue.profiles)
+    ? stateValue.profiles.map((item) => ({
+        id: item.id || '',
+        name: item.name || '',
+        provider: item.provider || 'openai',
+        apiType: item.apiType || 'responses',
+        baseUrl: item.baseUrl || MODEL_PROVIDER_DEFAULTS[item.provider || 'openai']?.baseUrl || '',
+        model: item.model || '',
+        hasApiKey: Boolean(item.hasApiKey),
+        apiKeyMasked: item.apiKeyMasked || (item.hasApiKey ? '********' : '(empty)'),
+        active: Boolean(item.active),
+      }))
+    : [];
+  return stateValue;
 }
 
 function defaultWeixinState() {

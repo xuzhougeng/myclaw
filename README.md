@@ -67,31 +67,19 @@ go run ./cmd/myclaw-desktop
 
 如果你显式传了 `-data-dir` 或设置了 `MYCLAW_DATA_DIR`，则以传入值为准。
 
-桌面模式下，模型参数既可以直接在“模型”页面里保存到本地，也可以继续通过环境变量覆盖。先在本地 shell 里设置的方式仍然可用：
+模型配置现在只从本地模型数据库读取，不再从 `MYCLAW_MODEL_*` 环境变量读取。
 
-```bash
-export MYCLAW_MODEL_PROVIDER=openai
-export MYCLAW_MODEL_BASE_URL=https://api.openai.com/v1
-export MYCLAW_MODEL_API_KEY=<你的 key>
-export MYCLAW_MODEL_NAME=<你的模型名>
-```
+- 桌面端会把模型 profile 保存到数据目录下的 `model/profiles.db`
+- API Key 会单独加密后保存，前端只显示掩码，不会回填明文
+- 支持多 profile，并可切换当前活跃模型
+- OpenAI 支持 `responses` 和 `chat_completions`
+- Anthropic 支持 `messages`
 
-Windows PowerShell:
+Windows PowerShell 直接运行 terminal：
 
 ```powershell
-$env:MYCLAW_MODEL_PROVIDER="openai"
-$env:MYCLAW_MODEL_BASE_URL="https://api.openai.com/v1"
-$env:MYCLAW_MODEL_API_KEY="<你的 key>"
-$env:MYCLAW_MODEL_NAME="<你的模型名>"
 .\scripts\run-terminal.ps1
 ```
-
-使用的环境变量固定为：
-
-- `MYCLAW_MODEL_PROVIDER`
-- `MYCLAW_MODEL_BASE_URL`
-- `MYCLAW_MODEL_API_KEY`
-- `MYCLAW_MODEL_NAME`
 
 ### 0.6. 浏览器 HTTP Dev 模式
 
@@ -220,6 +208,13 @@ description: 帮助输出更清晰的中文写作
 给出简洁、结构清晰、少废话的中文输出。
 ```
 
+desktop 端导入 `.zip` skill 包时，会校验这些规则：
+
+- zip 内必须有且仅有一个 `SKILL.md`
+- `SKILL.md` 必须位于 zip 根目录，或位于唯一顶层技能目录下
+- `SKILL.md` 必须包含 frontmatter，且至少有非空的 `name` 和 `description`
+- frontmatter 后还必须有实际的技能说明正文
+
 ## 编译
 
 ### Windows 本机
@@ -326,14 +321,7 @@ wails build -platform windows/amd64 -o myclaw-desktop-amd64.exe -nsis -webview2 
 .\scripts\uninstall-autostart.ps1
 ```
 
-如果你希望 AI 功能在开机自启后也可用，请把这些变量设成用户级环境变量，而不是只在当前终端窗口里临时设置：
-
-```powershell
-[Environment]::SetEnvironmentVariable("MYCLAW_MODEL_PROVIDER", "openai", "User")
-[Environment]::SetEnvironmentVariable("MYCLAW_MODEL_BASE_URL", "https://api.openai.com/v1", "User")
-[Environment]::SetEnvironmentVariable("MYCLAW_MODEL_API_KEY", "<你的 key>", "User")
-[Environment]::SetEnvironmentVariable("MYCLAW_MODEL_NAME", "<你的模型名>", "User")
-```
+如果你希望 AI 功能在开机自启后也可用，只要模型 profile 已经保存在同一个数据目录下即可，无需再配置 `MYCLAW_MODEL_*` 环境变量。
 
 ### Linux 交叉编译
 
