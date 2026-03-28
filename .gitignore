@@ -1,5 +1,7 @@
 # Build artifacts
 /dist/
+/cmd/myclaw-desktop/build/bin/
+/cmd/myclaw-desktop/frontend/wailsjs/
 
 # Runtime data
 /data/
