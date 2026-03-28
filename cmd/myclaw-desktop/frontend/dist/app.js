@@ -47,7 +47,9 @@ const state = {
   backendMode: "",
   overview: null,
   knowledge: [],
+  prompts: [],
   filter: "",
+  promptFilter: "",
   filePath: "",
   fileObject: null,
   appendDrafts: {},
@@ -84,6 +86,7 @@ async function init() {
   renderChatShortcuts();
   renderChat();
   renderKnowledge();
+  renderPrompts();
   renderModel();
   renderWeixin();
 
@@ -218,6 +221,24 @@ function bindStaticEvents() {
     clearMemory.addEventListener('click', () => void clearKnowledge());
   }
 
+  const promptFilter = document.getElementById('prompt-filter');
+  if (promptFilter) {
+    promptFilter.addEventListener('input', (event) => {
+      state.promptFilter = event.target.value.trim().toLowerCase();
+      renderPrompts();
+    });
+  }
+
+  const savePrompt = document.getElementById('save-prompt');
+  if (savePrompt) {
+    savePrompt.addEventListener('click', () => void createPrompt());
+  }
+
+  const clearPrompts = document.getElementById('clear-prompts');
+  if (clearPrompts) {
+    clearPrompts.addEventListener('click', () => void clearPromptsLibrary());
+  }
+
   // Chat events
   const chatSend = document.getElementById('chat-send');
   if (chatSend) {
@@ -293,6 +314,27 @@ function bindStaticEvents() {
       const target = event.target;
       if (!(target instanceof HTMLTextAreaElement) || !target.dataset.id) return;
       state.appendDrafts[target.dataset.id] = target.value;
+    });
+  }
+
+  const promptList = document.getElementById('prompt-list');
+  if (promptList) {
+    promptList.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-action]');
+      if (!target) return;
+
+      const id = target.dataset.id || '';
+      switch (target.dataset.action) {
+        case 'toggle-expand-prompt':
+          togglePromptExpand(id);
+          break;
+        case 'insert-prompt':
+          insertPromptToChat(id);
+          break;
+        case 'delete-prompt':
+          void deletePrompt(id);
+          break;
+      }
     });
   }
 }
@@ -385,6 +427,10 @@ function createWailsBackend(backend) {
     AppendKnowledge: (idOrPrefix, addition) => backend.AppendKnowledge(idOrPrefix, addition),
     DeleteKnowledge: (idOrPrefix) => backend.DeleteKnowledge(idOrPrefix),
     ClearKnowledge: () => backend.ClearKnowledge(),
+    ListPrompts: () => backend.ListPrompts(),
+    CreatePrompt: (title, content) => backend.CreatePrompt(title, content),
+    DeletePrompt: (idOrPrefix) => backend.DeletePrompt(idOrPrefix),
+    ClearPrompts: () => backend.ClearPrompts(),
     ConfirmAction: (title, message) => backend.ConfirmAction(title, message),
     OpenImportDialog: () => backend.OpenImportDialog(),
     ImportFile: (path) => backend.ImportFile(path),
@@ -410,6 +456,10 @@ function createHTTPBackend() {
     AppendKnowledge: (idOrPrefix, addition) => requestJSON('POST', '/api/knowledge/append', { idOrPrefix, addition }),
     DeleteKnowledge: (idOrPrefix) => requestJSON('POST', '/api/knowledge/delete', { idOrPrefix }),
     ClearKnowledge: () => requestJSON('POST', '/api/knowledge/clear'),
+    ListPrompts: () => requestJSON('GET', '/api/prompts'),
+    CreatePrompt: (title, content) => requestJSON('POST', '/api/prompts', { title, content }),
+    DeletePrompt: (idOrPrefix) => requestJSON('POST', '/api/prompts/delete', { idOrPrefix }),
+    ClearPrompts: () => requestJSON('POST', '/api/prompts/clear'),
     ConfirmAction: async (title, message) => window.confirm(`${title}\n\n${message}`),
     OpenImportDialog: async () => '',
     ImportFile: async () => {
@@ -470,7 +520,7 @@ function startBackendPolling() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshOverview(), refreshKnowledge(), refreshModel(), refreshWeixin()]);
+  await Promise.all([refreshOverview(), refreshKnowledge(), refreshPrompts(), refreshModel(), refreshWeixin()]);
 }
 
 async function refreshOverview() {
@@ -480,6 +530,7 @@ async function refreshOverview() {
   const dataDirStat = document.getElementById('data-dir-stat');
   const dataDirPath = document.getElementById('data-dir-path');
   const memoryCountStat = document.getElementById('memory-count-stat');
+  const promptCountStat = document.getElementById('prompt-count-stat');
   const aiStatusStat = document.getElementById('ai-status-stat');
   const aiMessageStat = document.getElementById('ai-message-stat');
   const weixinStatusStat = document.getElementById('weixin-status-stat');
@@ -488,6 +539,7 @@ async function refreshOverview() {
   if (dataDirStat) dataDirStat.textContent = '已配置';
   if (dataDirPath) dataDirPath.textContent = state.overview.dataDir;
   if (memoryCountStat) memoryCountStat.textContent = String(state.overview.knowledgeCount);
+  if (promptCountStat) promptCountStat.textContent = String(state.overview.promptCount || 0);
   if (aiStatusStat) aiStatusStat.textContent = state.overview.aiAvailable ? '已配置' : '未配置';
   if (aiMessageStat) aiMessageStat.textContent = state.overview.aiMessage;
   if (weixinStatusStat) weixinStatusStat.textContent = state.overview.weixinConnected ? '已连接' : '未连接';
@@ -496,14 +548,21 @@ async function refreshOverview() {
   // Update sidebar compact stats
   const aiStatusCompact = document.getElementById('ai-status-compact');
   const memoryCountCompact = document.getElementById('memory-count-compact');
+  const promptCountCompact = document.getElementById('prompt-count-compact');
 
   if (aiStatusCompact) aiStatusCompact.textContent = state.overview.aiAvailable ? 'OK' : '—';
   if (memoryCountCompact) memoryCountCompact.textContent = String(state.overview.knowledgeCount);
+  if (promptCountCompact) promptCountCompact.textContent = String(state.overview.promptCount || 0);
 }
 
 async function refreshKnowledge() {
   state.knowledge = await state.backend.ListKnowledge();
   renderKnowledge();
+}
+
+async function refreshPrompts() {
+  state.prompts = await state.backend.ListPrompts();
+  renderPrompts();
 }
 
 async function refreshModel() {
@@ -648,6 +707,85 @@ async function clearKnowledge() {
   }
 }
 
+async function createPrompt() {
+  const titleInput = document.getElementById('prompt-title-input');
+  const contentInput = document.getElementById('prompt-content-input');
+  const title = titleInput?.value.trim() || '';
+  const content = contentInput?.value.trim() || '';
+
+  if (!title) {
+    showBanner('请输入 Prompt 标题。', true);
+    return;
+  }
+  if (!content) {
+    showBanner('请输入 Prompt 内容。', true);
+    return;
+  }
+
+  try {
+    const result = await state.backend.CreatePrompt(title, content);
+    if (titleInput) titleInput.value = '';
+    if (contentInput) contentInput.value = '';
+    await refreshAll();
+    showBanner(result.message, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+function togglePromptExpand(id) {
+  const content = document.querySelector(`[data-prompt-content-id="${id}"]`);
+  const btn = document.querySelector(`[data-action="toggle-expand-prompt"][data-id="${id}"]`);
+  if (content && btn) {
+    content.classList.toggle('expanded');
+    content.classList.toggle('collapsed');
+    btn.textContent = content.classList.contains('expanded') ? '收起' : '展开';
+  }
+}
+
+function insertPromptToChat(id) {
+  const prompt = state.prompts.find((item) => item.id === id);
+  if (!prompt) {
+    showBanner('没有找到对应的 Prompt。', true);
+    return;
+  }
+
+  const input = document.getElementById('chat-input');
+  if (input) {
+    input.value = prompt.content || '';
+    input.focus();
+  }
+
+  window.navigateTo('chat');
+  showBanner(`已将 Prompt #${prompt.shortId} 放入对话输入框。`, false);
+}
+
+async function deletePrompt(id) {
+  try {
+    const ok = await state.backend.ConfirmAction('删除 Prompt', `确认删除 Prompt #${id.slice(0, 8)} 吗？`);
+    if (!ok) return;
+
+    const result = await state.backend.DeletePrompt(id);
+    await refreshAll();
+    showBanner(result.message, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function clearPromptsLibrary() {
+  try {
+    const ok = await state.backend.ConfirmAction('清空 Prompt 库', '确认清空全部 Prompt 吗？这个动作不可撤销。');
+    if (!ok) return;
+
+    const result = await state.backend.ClearPrompts();
+    await refreshAll();
+    showBanner(result.message, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
 async function sendMessage() {
   const input = document.getElementById('chat-input');
   const text = input?.value.trim();
@@ -750,6 +888,62 @@ function renderKnowledge() {
         </article>
       `;
     })
+    .join('');
+}
+
+function renderPrompts() {
+  const container = document.getElementById('prompt-list');
+  if (!container) return;
+
+  const filtered = state.prompts.filter((item) => {
+    if (!state.promptFilter) return true;
+    const haystack = [item.id, item.shortId, item.title, item.content]
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(state.promptFilter);
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">✦</div>
+        <h3>${state.promptFilter ? '没有找到匹配的 Prompt' : 'Prompt 库为空'}</h3>
+        <p>${state.promptFilter ? '尝试其他关键词' : '把常用提示词模板沉淀在这里。'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filtered
+    .map((item) => `
+      <article class="memory-card">
+        <div class="memory-card-header">
+          <div>
+            <div class="memory-meta">
+              <span class="memory-badge id">#${escapeHTML(item.shortId)}</span>
+            </div>
+            <h3 class="prompt-card-title">${escapeHTML(item.title)}</h3>
+          </div>
+        </div>
+        <div class="memory-content collapsed" data-prompt-content-id="${escapeAttribute(item.id)}">
+          ${escapeHTML(item.content)}
+        </div>
+        <div class="memory-card-footer">
+          <span class="memory-date">${escapeHTML(item.recordedAt)}</span>
+          <div class="memory-actions">
+            <button class="btn btn-ghost btn-sm" data-action="toggle-expand-prompt" data-id="${escapeAttribute(item.id)}">
+              展开
+            </button>
+            <button class="btn btn-ghost btn-sm" data-action="insert-prompt" data-id="${escapeAttribute(item.id)}">
+              插入对话
+            </button>
+            <button class="btn btn-ghost btn-sm" data-action="delete-prompt" data-id="${escapeAttribute(item.id)}">
+              删除
+            </button>
+          </div>
+        </div>
+      </article>
+    `)
     .join('');
 }
 

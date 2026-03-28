@@ -124,6 +124,7 @@ func envOrDefault(key, fallback string) string {
 
 var migratableDataFiles = []string{
 	filepath.Join("knowledge", "entries.json"),
+	filepath.Join("prompts", "items.json"),
 	filepath.Join("model", "config.json"),
 	filepath.Join("reminders", "items.json"),
 	filepath.Join("weixin-bridge", "account.json"),

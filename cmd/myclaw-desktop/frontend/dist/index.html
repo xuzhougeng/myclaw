@@ -30,6 +30,10 @@
             <span class="icon">◈</span>
             <span>记忆库</span>
           </a>
+          <a class="nav-item" data-view="prompts">
+            <span class="icon">✦</span>
+            <span>Prompt库</span>
+          </a>
           <a class="nav-item" data-view="model">
             <span class="icon">◌</span>
             <span>模型</span>
@@ -52,6 +56,10 @@
             <div class="status-compact-row">
               <span>记忆数</span>
               <span class="value" id="memory-count-compact">0</span>
+            </div>
+            <div class="status-compact-row">
+              <span>Prompt</span>
+              <span class="value" id="prompt-count-compact">0</span>
             </div>
           </div>
           <button class="theme-toggle" id="theme-toggle" title="切换主题">
@@ -81,6 +89,11 @@
                 <div class="subtext">知识库总量</div>
               </div>
               <div class="stat-card">
+                <div class="label">Prompt 数量</div>
+                <div class="value" id="prompt-count-stat">0</div>
+                <div class="subtext">常用 Prompt 库</div>
+              </div>
+              <div class="stat-card">
                 <div class="label">模型状态</div>
                 <div class="value" id="ai-status-stat">—</div>
                 <div class="subtext" id="ai-message-stat"></div>
@@ -101,6 +114,10 @@
               <div class="action-card" onclick="navigateTo('memory')">
                 <h3>浏览记忆</h3>
                 <p>查看和管理已存储的记忆</p>
+              </div>
+              <div class="action-card" onclick="navigateTo('prompts')">
+                <h3>Prompt 库</h3>
+                <p>沉淀常用提示词模板</p>
               </div>
               <div class="action-card" onclick="navigateTo('chat')">
                 <h3>开始对话</h3>
@@ -181,6 +198,53 @@
                 <h3>知识库为空</h3>
                 <p>导入文件或直接添加记忆来开始使用</p>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Prompt View -->
+        <div id="view-prompts" class="view">
+          <header class="content-header">
+            <h2>Prompt库</h2>
+            <p class="subtitle">记录你常用、稳定、好复用的 Prompt 模板</p>
+          </header>
+          <div class="content-body">
+            <div class="prompt-layout">
+              <section class="prompt-composer">
+                <div class="prompt-composer-header">
+                  <div>
+                    <h3>新增 Prompt</h3>
+                    <p>适合保存高频使用的提示词模板、写作框架、分析指令。</p>
+                  </div>
+                  <button class="btn btn-danger btn-sm" id="clear-prompts">清空 Prompt 库</button>
+                </div>
+                <label class="form-field">
+                  <span>标题</span>
+                  <input id="prompt-title-input" type="text" placeholder="比如：日报整理 / PR Review / 会议纪要提炼" />
+                </label>
+                <label class="form-field">
+                  <span>Prompt 内容</span>
+                  <textarea id="prompt-content-input" class="prompt-content-input" placeholder="输入完整 Prompt 模板..." rows="10"></textarea>
+                </label>
+                <div class="prompt-composer-actions">
+                  <button class="btn btn-primary" id="save-prompt">保存 Prompt</button>
+                </div>
+              </section>
+
+              <section class="prompt-library">
+                <div class="memory-header">
+                  <div class="memory-search">
+                    <input type="text" id="prompt-filter" placeholder="搜索标题、内容、ID..." />
+                  </div>
+                </div>
+                <div class="prompt-list" id="prompt-list">
+                  <div class="empty-state">
+                    <div class="empty-state-icon">✦</div>
+                    <h3>Prompt 库为空</h3>
+                    <p>把你常用的高质量 Prompt 沉淀在这里。</p>
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
         </div>

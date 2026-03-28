@@ -111,6 +111,52 @@ func (s desktopHTTPDevServer) registerAPI(mux *http.ServeMux) {
 		s.writeResult(w, result, err)
 	})
 
+	mux.HandleFunc("/api/prompts", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			result, err := s.app.ListPrompts()
+			s.writeResult(w, result, err)
+		case http.MethodPost:
+			var body struct {
+				Title   string `json:"title"`
+				Content string `json:"content"`
+			}
+			if err := decodeJSONBody(r, &body); err != nil {
+				s.writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			result, err := s.app.CreatePrompt(body.Title, body.Content)
+			s.writeResult(w, result, err)
+		default:
+			s.writeMethodNotAllowed(w, http.MethodGet, http.MethodPost)
+		}
+	})
+
+	mux.HandleFunc("/api/prompts/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			s.writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		var body struct {
+			IDOrPrefix string `json:"idOrPrefix"`
+		}
+		if err := decodeJSONBody(r, &body); err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := s.app.DeletePrompt(body.IDOrPrefix)
+		s.writeResult(w, result, err)
+	})
+
+	mux.HandleFunc("/api/prompts/clear", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			s.writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		result, err := s.app.ClearPrompts()
+		s.writeResult(w, result, err)
+	})
+
 	mux.HandleFunc("/api/chat", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			s.writeMethodNotAllowed(w, http.MethodPost)

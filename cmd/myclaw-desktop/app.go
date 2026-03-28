@@ -15,6 +15,7 @@ import (
 	"myclaw/internal/fileingest"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/modelconfig"
+	"myclaw/internal/promptlib"
 	"myclaw/internal/reminder"
 	"myclaw/internal/weixin"
 
@@ -32,6 +33,7 @@ type DesktopApp struct {
 	ctx               context.Context
 	dataDir           string
 	store             *knowledge.Store
+	promptStore       *promptlib.Store
 	modelStore        *modelconfig.Store
 	aiService         *ai.Service
 	service           *appsvc.Service
@@ -50,6 +52,7 @@ type Overview struct {
 	AIAvailable     bool   `json:"aiAvailable"`
 	AIMessage       string `json:"aiMessage"`
 	KnowledgeCount  int    `json:"knowledgeCount"`
+	PromptCount     int    `json:"promptCount"`
 	WeixinConnected bool   `json:"weixinConnected"`
 	WeixinMessage   string `json:"weixinMessage"`
 }
@@ -94,6 +97,21 @@ type KnowledgeMutation struct {
 	Item    KnowledgeItem `json:"item"`
 }
 
+type PromptItem struct {
+	ID             string `json:"id"`
+	ShortID        string `json:"shortId"`
+	Title          string `json:"title"`
+	Content        string `json:"content"`
+	Preview        string `json:"preview"`
+	RecordedAt     string `json:"recordedAt"`
+	RecordedAtUnix int64  `json:"recordedAtUnix"`
+}
+
+type PromptMutation struct {
+	Message string     `json:"message"`
+	Item    PromptItem `json:"item"`
+}
+
 type MessageResult struct {
 	Message string `json:"message"`
 }
@@ -107,10 +125,11 @@ type reminderNotifier struct {
 	app *DesktopApp
 }
 
-func NewDesktopApp(dataDir string, store *knowledge.Store, modelStore *modelconfig.Store, aiService *ai.Service, service *appsvc.Service, reminders *reminder.Manager, weixinBridge *weixin.Bridge) *DesktopApp {
+func NewDesktopApp(dataDir string, store *knowledge.Store, promptStore *promptlib.Store, modelStore *modelconfig.Store, aiService *ai.Service, service *appsvc.Service, reminders *reminder.Manager, weixinBridge *weixin.Bridge) *DesktopApp {
 	return &DesktopApp{
 		dataDir:      dataDir,
 		store:        store,
+		promptStore:  promptStore,
 		modelStore:   modelStore,
 		aiService:    aiService,
 		service:      service,
@@ -173,6 +192,10 @@ func (a *DesktopApp) GetOverview() (Overview, error) {
 	if err != nil {
 		return Overview{}, err
 	}
+	prompts, err := a.promptStore.List(context.Background())
+	if err != nil {
+		return Overview{}, err
+	}
 	available, message, err := a.aiStatus(context.Background())
 	if err != nil {
 		return Overview{}, err
@@ -183,6 +206,7 @@ func (a *DesktopApp) GetOverview() (Overview, error) {
 		AIAvailable:     available,
 		AIMessage:       message,
 		KnowledgeCount:  len(entries),
+		PromptCount:     len(prompts),
 		WeixinConnected: weixinStatus.Connected,
 		WeixinMessage:   weixinStatus.Message,
 	}, nil
@@ -341,6 +365,65 @@ func (a *DesktopApp) ClearKnowledge() (MessageResult, error) {
 		return MessageResult{}, err
 	}
 	return MessageResult{Message: "知识库已清空。"}, nil
+}
+
+func (a *DesktopApp) ListPrompts() ([]PromptItem, error) {
+	prompts, err := a.promptStore.List(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	reversePrompts(prompts)
+
+	result := make([]PromptItem, 0, len(prompts))
+	for _, prompt := range prompts {
+		result = append(result, toPromptItem(prompt))
+	}
+	return result, nil
+}
+
+func (a *DesktopApp) CreatePrompt(title, content string) (PromptMutation, error) {
+	title = strings.TrimSpace(title)
+	content = strings.TrimSpace(content)
+	if title == "" {
+		return PromptMutation{}, errors.New("请输入 Prompt 标题。")
+	}
+	if content == "" {
+		return PromptMutation{}, errors.New("请输入 Prompt 内容。")
+	}
+
+	prompt, err := a.promptStore.Add(context.Background(), promptlib.Prompt{
+		Title:      title,
+		Content:    content,
+		RecordedAt: time.Now(),
+	})
+	if err != nil {
+		return PromptMutation{}, err
+	}
+
+	return PromptMutation{
+		Message: fmt.Sprintf("已保存 Prompt #%s", shortID(prompt.ID)),
+		Item:    toPromptItem(prompt),
+	}, nil
+}
+
+func (a *DesktopApp) DeletePrompt(idOrPrefix string) (MessageResult, error) {
+	prompt, ok, err := a.promptStore.Remove(context.Background(), idOrPrefix)
+	if err != nil {
+		return MessageResult{}, err
+	}
+	if !ok {
+		return MessageResult{}, fmt.Errorf("没有找到 Prompt #%s。", strings.TrimPrefix(strings.TrimSpace(idOrPrefix), "#"))
+	}
+	return MessageResult{
+		Message: fmt.Sprintf("已删除 Prompt #%s", shortID(prompt.ID)),
+	}, nil
+}
+
+func (a *DesktopApp) ClearPrompts() (MessageResult, error) {
+	if err := a.promptStore.Clear(context.Background()); err != nil {
+		return MessageResult{}, err
+	}
+	return MessageResult{Message: "Prompt 库已清空。"}, nil
 }
 
 func (a *DesktopApp) ConfirmAction(title, message string) (bool, error) {
@@ -531,9 +614,28 @@ func toKnowledgeItem(entry knowledge.Entry) KnowledgeItem {
 	}
 }
 
+func toPromptItem(prompt promptlib.Prompt) PromptItem {
+	content := strings.TrimSpace(prompt.Content)
+	return PromptItem{
+		ID:             prompt.ID,
+		ShortID:        shortID(prompt.ID),
+		Title:          strings.TrimSpace(prompt.Title),
+		Content:        content,
+		Preview:        preview(content, maxKnowledgePreviewRunes),
+		RecordedAt:     prompt.RecordedAt.Local().Format("2006-01-02 15:04:05"),
+		RecordedAtUnix: prompt.RecordedAt.Unix(),
+	}
+}
+
 func reverseKnowledge(entries []knowledge.Entry) {
 	for left, right := 0, len(entries)-1; left < right; left, right = left+1, right-1 {
 		entries[left], entries[right] = entries[right], entries[left]
+	}
+}
+
+func reversePrompts(prompts []promptlib.Prompt) {
+	for left, right := 0, len(prompts)-1; left < right; left, right = left+1, right-1 {
+		prompts[left], prompts[right] = prompts[right], prompts[left]
 	}
 }
 
