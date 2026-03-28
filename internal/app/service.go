@@ -50,6 +50,7 @@ type Service struct {
 	skillLoader     *skilllib.Loader
 	promptStore     promptBackend
 	sessionStore    *sessionstate.Store
+	toolProviders   *agentToolProviders
 	modeMu          sync.RWMutex
 	modeMap         map[string]Mode
 	loadedSkillsMu  sync.RWMutex
@@ -98,7 +99,7 @@ func NewServiceWithRuntime(store *knowledge.Store, aiService aiBackend, reminder
 	if skillLoader == nil {
 		skillLoader = skilllib.NewLoader()
 	}
-	return &Service{
+	service := &Service{
 		store:           store,
 		aiService:       aiService,
 		reminders:       reminders,
@@ -108,6 +109,9 @@ func NewServiceWithRuntime(store *knowledge.Store, aiService aiBackend, reminder
 		modeMap:         make(map[string]Mode),
 		loadedSkillsMap: make(map[string]map[string]skilllib.Skill),
 	}
+	service.toolProviders = newAgentToolProviders()
+	service.toolProviders.Register(newLocalAgentToolProvider(service))
+	return service
 }
 
 func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input string) (string, error) {

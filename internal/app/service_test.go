@@ -1056,13 +1056,22 @@ func TestAgentModeCanUseKnowledgeSearchTool(t *testing.T) {
 			if len(history) != 0 {
 				t.Fatalf("expected empty history, got %#v", history)
 			}
-			if len(tools) == 0 {
-				t.Fatalf("expected agent tools")
+			var found bool
+			for _, tool := range tools {
+				if tool.Name == "local::knowledge_search" {
+					found = true
+					if tool.Provider != "local" || tool.ProviderKind != "local" {
+						t.Fatalf("unexpected tool provider metadata: %#v", tool)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("expected local knowledge_search tool, got %#v", tools)
 			}
 			if len(results) == 0 {
 				return ai.AgentStepDecision{
 					Action:    "tool",
-					ToolName:  "knowledge_search",
+					ToolName:  "local::knowledge_search",
 					ToolInput: `{"query":"macOS 计划"}`,
 				}
 			}
@@ -1084,6 +1093,141 @@ func TestAgentModeCanUseKnowledgeSearchTool(t *testing.T) {
 		t.Fatalf("handle message: %v", err)
 	}
 	if !strings.Contains(reply, "未来需要支持 macOS") {
+		t.Fatalf("unexpected agent reply: %q", reply)
+	}
+}
+
+func TestAgentToolProvidersExposeProtocolTools(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, fakeAI{configured: true}, reminders)
+	service.RegisterMCPToolProvider("docs", fakeProtocolToolClient{
+		tools: []ProtocolToolSpec{{
+			Name:             "lookup",
+			Description:      "Search MCP docs.",
+			InputJSONExample: `{"query":"tool calls"}`,
+		}},
+	})
+	service.RegisterNCPToolProvider("desktop", fakeProtocolToolClient{
+		tools: []ProtocolToolSpec{{
+			Name:             "open_app",
+			Description:      "Open an app on the local desktop.",
+			InputJSONExample: `{"name":"WeChat"}`,
+		}},
+	})
+	service.RegisterACPToolProvider("wechat", fakeProtocolToolClient{
+		tools: []ProtocolToolSpec{{
+			Name:             "send_message",
+			Description:      "Send a WeChat message through ACP.",
+			InputJSONExample: `{"to":"filehelper","text":"hello"}`,
+		}},
+	})
+
+	definitions, err := service.ListAgentToolDefinitions(context.Background(), MessageContext{})
+	if err != nil {
+		t.Fatalf("list agent tool definitions: %v", err)
+	}
+
+	expected := map[string]struct {
+		provider string
+		kind     string
+	}{
+		"local::knowledge_search":  {provider: "local", kind: "local"},
+		"mcp.docs::lookup":         {provider: "mcp.docs", kind: "mcp"},
+		"ncp.desktop::open_app":    {provider: "ncp.desktop", kind: "ncp"},
+		"acp.wechat::send_message": {provider: "acp.wechat", kind: "acp"},
+	}
+
+	for name, want := range expected {
+		var found *ai.AgentToolDefinition
+		for index := range definitions {
+			if definitions[index].Name == name {
+				found = &definitions[index]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("missing tool definition %q in %#v", name, definitions)
+		}
+		if found.Provider != want.provider || found.ProviderKind != want.kind {
+			t.Fatalf("unexpected provider metadata for %q: %#v", name, *found)
+		}
+	}
+}
+
+func TestAgentModeCanUseMCPToolProvider(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+
+	var executed bool
+	service := NewService(store, fakeAI{
+		configured: true,
+		route: ai.RouteDecision{
+			Command:  "answer",
+			Question: "帮我查一下 MCP 文档里怎么描述 tool calls",
+		},
+		agentStepFunc: func(_ context.Context, task string, _ []ai.ConversationMessage, tools []ai.AgentToolDefinition, results []ai.AgentToolResult) ai.AgentStepDecision {
+			if task != "帮我查一下 MCP 文档里怎么描述 tool calls" {
+				t.Fatalf("unexpected task: %q", task)
+			}
+			var found bool
+			for _, tool := range tools {
+				if tool.Name == "mcp.docs::lookup" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("expected mcp tool, got %#v", tools)
+			}
+			if len(results) == 0 {
+				return ai.AgentStepDecision{
+					Action:    "tool",
+					ToolName:  "mcp.docs::lookup",
+					ToolInput: `{"query":"tool calls"}`,
+				}
+			}
+			if len(results) != 1 || !strings.Contains(results[0].Output, "MCP tool calls let the model") {
+				t.Fatalf("unexpected tool results: %#v", results)
+			}
+			return ai.AgentStepDecision{
+				Action: "answer",
+				Answer: "MCP 文档提到 tool calls 让模型通过协议调用外部能力。",
+			}
+		},
+	}, reminders)
+	service.RegisterMCPToolProvider("docs", fakeProtocolToolClient{
+		tools: []ProtocolToolSpec{{
+			Name:             "lookup",
+			Description:      "Search MCP docs.",
+			InputJSONExample: `{"query":"tool calls"}`,
+		}},
+		execute: func(_ context.Context, _ MessageContext, toolName, rawInput string) (string, error) {
+			executed = true
+			if toolName != "lookup" {
+				t.Fatalf("unexpected tool name: %q", toolName)
+			}
+			if rawInput != `{"query":"tool calls"}` {
+				t.Fatalf("unexpected tool input: %q", rawInput)
+			}
+			return "MCP tool calls let the model invoke external capabilities through the protocol.", nil
+		},
+	})
+	if _, err := service.SetMode(context.Background(), MessageContext{}, ModeAgent); err != nil {
+		t.Fatalf("set mode: %v", err)
+	}
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{}, "帮我查一下 MCP 文档里怎么描述 tool calls")
+	if err != nil {
+		t.Fatalf("handle message: %v", err)
+	}
+	if !executed {
+		t.Fatalf("expected mcp provider to execute")
+	}
+	if !strings.Contains(reply, "tool calls") {
 		t.Fatalf("unexpected agent reply: %q", reply)
 	}
 }
@@ -1328,4 +1472,20 @@ func (f fakeAI) SummarizePDFText(context.Context, string, string) (string, error
 
 func (f fakeAI) SummarizeImageFile(context.Context, string, string) (string, error) {
 	return f.imageSummary, nil
+}
+
+type fakeProtocolToolClient struct {
+	tools   []ProtocolToolSpec
+	execute func(context.Context, MessageContext, string, string) (string, error)
+}
+
+func (f fakeProtocolToolClient) ListProtocolTools(context.Context, MessageContext) ([]ProtocolToolSpec, error) {
+	return append([]ProtocolToolSpec(nil), f.tools...), nil
+}
+
+func (f fakeProtocolToolClient) ExecuteProtocolTool(ctx context.Context, mc MessageContext, toolName, rawInput string) (string, error) {
+	if f.execute != nil {
+		return f.execute(ctx, mc, toolName, rawInput)
+	}
+	return "", nil
 }

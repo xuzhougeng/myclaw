@@ -192,7 +192,7 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 
 - `direct`：默认模式。普通问题直接走 AI，不依赖知识库。
 - `knowledge`：普通问题走知识库检索、候选复核和基于知识库回答。
-- `agent`：工具模式。当前支持一批本地工具，包括知识检索、记忆写入/删除、提醒查看/创建/删除。
+- `agent`：工具模式。默认包含一批本地工具，包括知识检索、记忆写入/删除、提醒查看/创建/删除；工具注册已经抽成 provider，可继续挂接 MCP / NCP / ACP。
 
 切换方式：
 
@@ -206,6 +206,16 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 - `@ai ...`
 - `@kb ...`
 - `@agent ...`
+
+如果需要在代码里扩展 agent 工具，可以在创建 `app.Service` 后注册 provider：
+
+```go
+service.RegisterMCPToolProvider("docs", myMCPClient)
+service.RegisterNCPToolProvider("desktop", myNCPClient)
+service.RegisterACPToolProvider("wechat", myACPClient)
+```
+
+注册后，agent 会看到类似 `mcp.docs::lookup`、`ncp.desktop::open_app`、`acp.wechat::send_message` 这样的工具名，并按 provider 前缀分发执行。
 
 默认技能目录：
 

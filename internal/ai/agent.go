@@ -8,6 +8,8 @@ import (
 
 type AgentToolDefinition struct {
 	Name             string
+	Provider         string
+	ProviderKind     string
 	Description      string
 	InputJSONExample string
 }
@@ -73,6 +75,15 @@ func (s *Service) DecideAgentStep(ctx context.Context, task string, history []Co
 	for _, tool := range tools {
 		prompt.WriteString("- ")
 		prompt.WriteString(tool.Name)
+		if provider := strings.TrimSpace(tool.Provider); provider != "" {
+			prompt.WriteString(" [provider=")
+			prompt.WriteString(provider)
+			if kind := strings.TrimSpace(tool.ProviderKind); kind != "" {
+				prompt.WriteString(", kind=")
+				prompt.WriteString(kind)
+			}
+			prompt.WriteString("]")
+		}
 		prompt.WriteString(": ")
 		prompt.WriteString(strings.TrimSpace(tool.Description))
 		if example := strings.TrimSpace(tool.InputJSONExample); example != "" {
@@ -103,7 +114,7 @@ At each step, decide exactly one of:
 Rules:
 - Use tools when the user is asking to inspect or modify local state, and when tool output is needed before answering.
 - If prior tool results already contain enough information, choose answer.
-- tool_name must match one of the available tools exactly.
+- tool_name must match one of the available tools exactly, including any provider prefix such as local::search or mcp.docs::lookup.
 - tool_input must be a JSON object string such as {"query":"macOS"}.
 - If a tool does not need arguments, return {}.
 - Keep answers concise and practical.
