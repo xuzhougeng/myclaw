@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -662,15 +663,49 @@ func (s *Service) createAnthropicMessage(ctx context.Context, cfg modelconfig.Co
 	if err != nil {
 		return "", err
 	}
-	data, err := json.Marshal(reqBody)
+
+	result, err := s.doAnthropicMessage(ctx, cfg, reqBody)
+	if err != nil && req.WantsJSON() && len(reqBody.Tools) > 0 && shouldRetryAnthropicLegacyJSON(err) {
+		legacyReqBody, legacyErr := buildAnthropicLegacyRequest(cfg.Model, req)
+		if legacyErr != nil {
+			return "", legacyErr
+		}
+		legacyResult, fallbackErr := s.doAnthropicMessage(ctx, cfg, legacyReqBody)
+		if fallbackErr != nil {
+			return "", fmt.Errorf("%v; legacy structured retry failed: %w", err, fallbackErr)
+		}
+		result = legacyResult
+		err = nil
+	}
 	if err != nil {
 		return "", err
+	}
+	if req.WantsJSON() {
+		text, ok, err := result.StructuredOutput()
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return text, nil
+		}
+	}
+	text := strings.TrimSpace(result.OutputText())
+	if text == "" {
+		return "", fmt.Errorf("model returned empty output")
+	}
+	return text, nil
+}
+
+func (s *Service) doAnthropicMessage(ctx context.Context, cfg modelconfig.Config, reqBody anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return anthropicMessagesResponse{}, err
 	}
 
 	endpoint := strings.TrimRight(cfg.BaseURL, "/") + path.Join("/", "messages")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
-		return "", err
+		return anthropicMessagesResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Api-Key", cfg.APIKey)
@@ -678,7 +713,7 @@ func (s *Service) createAnthropicMessage(ctx context.Context, cfg modelconfig.Co
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
-		return "", err
+		return anthropicMessagesResponse{}, err
 	}
 	defer resp.Body.Close()
 
@@ -686,20 +721,30 @@ func (s *Service) createAnthropicMessage(ctx context.Context, cfg modelconfig.Co
 		body, _ := io.ReadAll(resp.Body)
 		var apiErr anthropicErrorResponse
 		if err := json.Unmarshal(body, &apiErr); err == nil && strings.TrimSpace(apiErr.Error.Message) != "" {
-			return "", fmt.Errorf("anthropic messages api returned %d: %s", resp.StatusCode, apiErr.Error.Message)
+			return anthropicMessagesResponse{}, &anthropicAPIError{
+				StatusCode: resp.StatusCode,
+				Message:    strings.TrimSpace(apiErr.Error.Message),
+			}
 		}
-		return "", fmt.Errorf("anthropic messages api returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return anthropicMessagesResponse{}, &anthropicAPIError{
+			StatusCode: resp.StatusCode,
+			Message:    strings.TrimSpace(string(body)),
+		}
 	}
 
 	var result anthropicMessagesResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+		return anthropicMessagesResponse{}, err
 	}
-	text := strings.TrimSpace(result.OutputText())
-	if text == "" {
-		return "", fmt.Errorf("model returned empty output")
+	return result, nil
+}
+
+func shouldRetryAnthropicLegacyJSON(err error) bool {
+	var apiErr *anthropicAPIError
+	if !errors.As(err, &apiErr) {
+		return false
 	}
-	return text, nil
+	return apiErr.StatusCode == http.StatusBadRequest || apiErr.StatusCode == http.StatusUnprocessableEntity
 }
 
 func newTextMessage(role, text string) responseInputMessage {
@@ -928,10 +973,12 @@ func (r chatCompletionsResponse) OutputText() string {
 }
 
 type anthropicMessagesRequest struct {
-	Model     string                    `json:"model"`
-	System    string                    `json:"system,omitempty"`
-	Messages  []anthropicMessageRequest `json:"messages"`
-	MaxTokens int                       `json:"max_tokens"`
+	Model      string                    `json:"model"`
+	System     string                    `json:"system,omitempty"`
+	Messages   []anthropicMessageRequest `json:"messages"`
+	MaxTokens  int                       `json:"max_tokens"`
+	Tools      []anthropicToolDefinition `json:"tools,omitempty"`
+	ToolChoice *anthropicToolChoice      `json:"tool_choice,omitempty"`
 }
 
 type anthropicMessageRequest struct {
@@ -951,13 +998,26 @@ type anthropicImageSource struct {
 	Data      string `json:"data"`
 }
 
-type anthropicMessagesResponse struct {
-	Content []anthropicTextBlock `json:"content"`
+type anthropicToolDefinition struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema"`
 }
 
-type anthropicTextBlock struct {
+type anthropicToolChoice struct {
 	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+type anthropicMessagesResponse struct {
+	Content []anthropicContentBlock `json:"content"`
+}
+
+type anthropicContentBlock struct {
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 func (r anthropicMessagesResponse) OutputText() string {
@@ -970,10 +1030,36 @@ func (r anthropicMessagesResponse) OutputText() string {
 	return strings.Join(parts, "\n")
 }
 
+func (r anthropicMessagesResponse) StructuredOutput() (string, bool, error) {
+	for _, item := range r.Content {
+		if item.Type != "tool_use" {
+			continue
+		}
+		if len(bytes.TrimSpace(item.Input)) == 0 {
+			return "", true, fmt.Errorf("anthropic tool_use returned empty input")
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, item.Input); err != nil {
+			return "", true, fmt.Errorf("compact anthropic tool_use input: %w", err)
+		}
+		return compact.String(), true, nil
+	}
+	return "", false, nil
+}
+
 type anthropicErrorResponse struct {
 	Error struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+type anthropicAPIError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *anthropicAPIError) Error() string {
+	return fmt.Sprintf("anthropic messages api returned %d: %s", e.StatusCode, e.Message)
 }
 
 func buildChatCompletionMessages(req generationRequest) []chatCompletionsMessage {
@@ -1019,9 +1105,17 @@ func chatCompletionContent(content []responseContentInput) any {
 }
 
 func buildAnthropicRequest(model string, req generationRequest) (anthropicMessagesRequest, error) {
+	return buildAnthropicRequestWithMode(model, req, req.WantsJSON())
+}
+
+func buildAnthropicLegacyRequest(model string, req generationRequest) (anthropicMessagesRequest, error) {
+	return buildAnthropicRequestWithMode(model, req, false)
+}
+
+func buildAnthropicRequestWithMode(model string, req generationRequest, useStructuredTool bool) (anthropicMessagesRequest, error) {
 	request := anthropicMessagesRequest{
 		Model:     model,
-		System:    anthropicSystemPrompt(req),
+		System:    anthropicSystemPrompt(req, useStructuredTool),
 		Messages:  make([]anthropicMessageRequest, 0, len(req.Input)),
 		MaxTokens: req.MaxOutputTokens,
 	}
@@ -1035,13 +1129,33 @@ func buildAnthropicRequest(model string, req generationRequest) (anthropicMessag
 			Content: content,
 		})
 	}
+	if req.WantsJSON() && useStructuredTool {
+		request.Tools = []anthropicToolDefinition{
+			{
+				Name:        req.SchemaName,
+				Description: "Return the final structured response for myclaw.",
+				InputSchema: req.Schema,
+			},
+		}
+		request.ToolChoice = &anthropicToolChoice{
+			Type: "tool",
+			Name: req.SchemaName,
+		}
+	}
 	return request, nil
 }
 
-func anthropicSystemPrompt(req generationRequest) string {
+func anthropicSystemPrompt(req generationRequest, useStructuredTool bool) string {
 	prompt := strings.TrimSpace(req.Instructions)
 	if !req.WantsJSON() {
 		return prompt
+	}
+	if useStructuredTool {
+		extra := "Return the final structured result by calling the provided tool exactly once. Do not emit explanatory text outside the tool call."
+		if prompt == "" {
+			return extra
+		}
+		return strings.TrimSpace(prompt + "\n\n" + extra)
 	}
 	schemaText, err := json.MarshalIndent(req.Schema, "", "  ")
 	if err != nil {

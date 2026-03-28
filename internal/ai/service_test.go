@@ -143,13 +143,19 @@ func TestAnthropicMessagesStructuredRequest(t *testing.T) {
 		if r.Header.Get("Anthropic-Version") != "2023-06-01" {
 			t.Fatalf("unexpected anthropic version header: %q", r.Header.Get("Anthropic-Version"))
 		}
-		if !strings.Contains(req.System, "JSON schema") {
-			t.Fatalf("expected schema prompt, got %q", req.System)
+		if !strings.Contains(req.System, "provided tool exactly once") {
+			t.Fatalf("expected tool-use prompt, got %q", req.System)
+		}
+		if len(req.Tools) != 1 || req.Tools[0].Name != "route_decision" {
+			t.Fatalf("expected structured tool, got %#v", req.Tools)
+		}
+		if req.ToolChoice == nil || req.ToolChoice.Type != "tool" || req.ToolChoice.Name != "route_decision" {
+			t.Fatalf("expected forced tool choice, got %#v", req.ToolChoice)
 		}
 		if len(req.Messages) == 0 || len(req.Messages[0].Content) == 0 || req.Messages[0].Content[0].Type != "text" {
 			t.Fatalf("unexpected anthropic content: %#v", req.Messages)
 		}
-		return jsonResponse(http.StatusOK, `{"content":[{"type":"text","text":"{\"command\":\"help\",\"memory_text\":\"\",\"append_text\":\"\",\"knowledge_id\":\"\",\"reminder_spec\":\"\",\"reminder_id\":\"\",\"question\":\"\"}"}]}`), nil
+		return jsonResponse(http.StatusOK, `{"content":[{"type":"tool_use","name":"route_decision","input":{"command":"help","memory_text":"","append_text":"","knowledge_id":"","reminder_spec":"","reminder_id":"","question":""}}]}`), nil
 	})
 
 	decision, err := service.RouteCommand(context.Background(), "help")
@@ -158,6 +164,57 @@ func TestAnthropicMessagesStructuredRequest(t *testing.T) {
 	}
 	if decision.Command != "help" {
 		t.Fatalf("unexpected decision: %#v", decision)
+	}
+}
+
+func TestAnthropicMessagesStructuredRequestFallsBackWithoutTools(t *testing.T) {
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderAnthropic,
+		APIType:  modelconfig.APITypeMessages,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "anthropic-secret",
+		Model:    "claude-3-7-sonnet-latest",
+	})
+
+	service := NewService(store)
+	requests := 0
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		requests++
+
+		var req anthropicMessagesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		switch requests {
+		case 1:
+			if len(req.Tools) != 1 || req.ToolChoice == nil {
+				t.Fatalf("expected first anthropic request to use tools, got %#v / %#v", req.Tools, req.ToolChoice)
+			}
+			return jsonResponse(http.StatusBadRequest, `{"error":{"message":"tools are not supported on this upstream"}}`), nil
+		case 2:
+			if len(req.Tools) != 0 || req.ToolChoice != nil {
+				t.Fatalf("expected legacy fallback without tools, got %#v / %#v", req.Tools, req.ToolChoice)
+			}
+			if !strings.Contains(req.System, "JSON schema") {
+				t.Fatalf("expected legacy schema prompt, got %q", req.System)
+			}
+			return jsonResponse(http.StatusOK, `{"content":[{"type":"text","text":"{\"command\":\"help\",\"memory_text\":\"\",\"append_text\":\"\",\"knowledge_id\":\"\",\"reminder_spec\":\"\",\"reminder_id\":\"\",\"question\":\"\"}"}]}`), nil
+		default:
+			t.Fatalf("unexpected extra anthropic request: %d", requests)
+			return nil, nil
+		}
+	})
+
+	decision, err := service.RouteCommand(context.Background(), "help")
+	if err != nil {
+		t.Fatalf("route via anthropic fallback: %v", err)
+	}
+	if decision.Command != "help" {
+		t.Fatalf("unexpected decision after fallback: %#v", decision)
+	}
+	if requests != 2 {
+		t.Fatalf("expected 2 anthropic requests, got %d", requests)
 	}
 }
 
