@@ -18,7 +18,14 @@ type Entry struct {
 	Text       string    `json:"text"`
 	Keywords   []string  `json:"keywords,omitempty"`
 	Source     string    `json:"source,omitempty"`
+	Project    string    `json:"project,omitempty"`
 	RecordedAt time.Time `json:"recorded_at"`
+}
+
+type ProjectInfo struct {
+	Name             string
+	KnowledgeCount   int
+	LatestRecordedAt time.Time
 }
 
 type Store struct {
@@ -30,7 +37,7 @@ func NewStore(path string) *Store {
 	return &Store{path: path}
 }
 
-func (s *Store) Add(_ context.Context, entry Entry) (Entry, error) {
+func (s *Store) Add(ctx context.Context, entry Entry) (Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -45,6 +52,11 @@ func (s *Store) Add(_ context.Context, entry Entry) (Entry, error) {
 	if entry.RecordedAt.IsZero() {
 		entry.RecordedAt = time.Now()
 	}
+	if project := ProjectFromContext(ctx); project != "" {
+		entry.Project = CanonicalProjectName(project)
+	} else if strings.TrimSpace(entry.Project) != "" {
+		entry.Project = CanonicalProjectName(entry.Project)
+	}
 	entry.Keywords = MergeKeywords(entry.Keywords, GenerateKeywords(entry.Text))
 
 	entries = append(entries, entry)
@@ -54,7 +66,7 @@ func (s *Store) Add(_ context.Context, entry Entry) (Entry, error) {
 	return entry, nil
 }
 
-func (s *Store) List(_ context.Context) ([]Entry, error) {
+func (s *Store) List(ctx context.Context) ([]Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -62,6 +74,7 @@ func (s *Store) List(_ context.Context) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
+	entries = filterEntriesByProject(entries, ProjectFromContext(ctx))
 
 	slices.SortFunc(entries, func(a, b Entry) int {
 		switch {
@@ -76,13 +89,31 @@ func (s *Store) List(_ context.Context) ([]Entry, error) {
 	return entries, nil
 }
 
-func (s *Store) Clear(_ context.Context) error {
+func (s *Store) Clear(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.writeAllLocked(nil)
+
+	project := ProjectFromContext(ctx)
+	if project == "" {
+		return s.writeAllLocked(nil)
+	}
+
+	entries, err := s.readAllLocked()
+	if err != nil {
+		return err
+	}
+
+	filtered := make([]Entry, 0, len(entries))
+	for _, entry := range entries {
+		if sameProject(entry.Project, project) {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return s.writeAllLocked(filtered)
 }
 
-func (s *Store) Search(_ context.Context, query string, extraKeywords []string, limit int) ([]SearchResult, error) {
+func (s *Store) Search(ctx context.Context, query string, extraKeywords []string, limit int) ([]SearchResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -90,6 +121,7 @@ func (s *Store) Search(_ context.Context, query string, extraKeywords []string, 
 	if err != nil {
 		return nil, err
 	}
+	entries = filterEntriesByProject(entries, ProjectFromContext(ctx))
 	return RankEntries(entries, query, extraKeywords, limit), nil
 }
 
@@ -122,7 +154,7 @@ func (s *Store) BackfillKeywords(_ context.Context) (int, error) {
 	return updated, nil
 }
 
-func (s *Store) Remove(_ context.Context, idOrPrefix string) (Entry, bool, error) {
+func (s *Store) Remove(ctx context.Context, idOrPrefix string) (Entry, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -132,7 +164,11 @@ func (s *Store) Remove(_ context.Context, idOrPrefix string) (Entry, bool, error
 	}
 
 	match := normalizeEntryID(idOrPrefix)
+	project := ProjectFromContext(ctx)
 	for index, entry := range entries {
+		if project != "" && !sameProject(entry.Project, project) {
+			continue
+		}
 		if strings.HasPrefix(normalizeEntryID(entry.ID), match) {
 			removed := entry
 			entries = append(entries[:index], entries[index+1:]...)
@@ -145,7 +181,7 @@ func (s *Store) Remove(_ context.Context, idOrPrefix string) (Entry, bool, error
 	return Entry{}, false, nil
 }
 
-func (s *Store) Append(_ context.Context, idOrPrefix, addition string) (Entry, bool, error) {
+func (s *Store) Append(ctx context.Context, idOrPrefix, addition string) (Entry, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -155,7 +191,11 @@ func (s *Store) Append(_ context.Context, idOrPrefix, addition string) (Entry, b
 	}
 
 	match := normalizeEntryID(idOrPrefix)
+	project := ProjectFromContext(ctx)
 	for index, entry := range entries {
+		if project != "" && !sameProject(entry.Project, project) {
+			continue
+		}
 		if strings.HasPrefix(normalizeEntryID(entry.ID), match) {
 			entry.Text = mergeEntryText(entry.Text, addition)
 			entry.Keywords = GenerateKeywords(entry.Text)
@@ -169,7 +209,7 @@ func (s *Store) Append(_ context.Context, idOrPrefix, addition string) (Entry, b
 	return Entry{}, false, nil
 }
 
-func (s *Store) AppendLatest(_ context.Context, source, addition string) (Entry, bool, error) {
+func (s *Store) AppendLatest(ctx context.Context, source, addition string) (Entry, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -179,8 +219,12 @@ func (s *Store) AppendLatest(_ context.Context, source, addition string) (Entry,
 	}
 
 	selectedIndex := -1
+	project := ProjectFromContext(ctx)
 	for index, entry := range entries {
 		if strings.TrimSpace(source) != "" && entry.Source != source {
+			continue
+		}
+		if project != "" && !sameProject(entry.Project, project) {
 			continue
 		}
 		if selectedIndex == -1 || entry.RecordedAt.After(entries[selectedIndex].RecordedAt) {
@@ -200,6 +244,51 @@ func (s *Store) AppendLatest(_ context.Context, source, addition string) (Entry,
 		return Entry{}, false, err
 	}
 	return entry, true, nil
+}
+
+func (s *Store) ListProjects(_ context.Context) ([]ProjectInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entries, err := s.readAllLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	projects := make(map[string]ProjectInfo)
+	for _, entry := range entries {
+		key := normalizedProjectKey(entry.Project)
+		info := projects[key]
+		if info.Name == "" {
+			info.Name = CanonicalProjectName(entry.Project)
+		}
+		info.KnowledgeCount++
+		if entry.RecordedAt.After(info.LatestRecordedAt) {
+			info.LatestRecordedAt = entry.RecordedAt
+		}
+		projects[key] = info
+	}
+
+	if len(projects) == 0 {
+		return nil, nil
+	}
+
+	out := make([]ProjectInfo, 0, len(projects))
+	for _, info := range projects {
+		out = append(out, info)
+	}
+
+	slices.SortFunc(out, func(a, b ProjectInfo) int {
+		switch {
+		case a.LatestRecordedAt.After(b.LatestRecordedAt):
+			return -1
+		case a.LatestRecordedAt.Before(b.LatestRecordedAt):
+			return 1
+		default:
+			return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+		}
+	})
+	return out, nil
 }
 
 func (s *Store) readAllLocked() ([]Entry, error) {
@@ -236,6 +325,21 @@ func (s *Store) writeAllLocked(entries []Entry) error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+func filterEntriesByProject(entries []Entry, project string) []Entry {
+	project = strings.TrimSpace(project)
+	if project == "" {
+		return append([]Entry(nil), entries...)
+	}
+
+	filtered := make([]Entry, 0, len(entries))
+	for _, entry := range entries {
+		if sameProject(entry.Project, project) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func newID() string {

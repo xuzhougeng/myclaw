@@ -263,6 +263,96 @@ select {
   overflow: hidden;
 }
 
+.project-toolbar {
+  padding: 18px 24px 16px;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(circle at top left, var(--accent-glow), transparent 42%),
+    var(--bg-deep);
+  display: grid;
+  gap: 14px;
+}
+
+.project-toolbar-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-toolbar-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.project-toolbar-value {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  color: var(--text-primary);
+}
+
+.project-toolbar-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.project-toolbar-switch {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.project-toolbar-switch input {
+  flex: 1;
+  padding: 11px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+}
+
+.project-toolbar-switch input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.project-chip-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.project-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.project-chip:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.project-chip.active {
+  border-color: rgba(196, 122, 92, 0.28);
+  background: var(--accent-glow);
+  color: var(--accent-primary);
+}
+
+.project-chip-meta {
+  font-size: 11px;
+  opacity: 0.72;
+}
+
 .content-header {
   padding: 18px 24px;
   border-bottom: 1px solid var(--border);
@@ -1266,5 +1356,14 @@ select {
 
   .content-body {
     padding: 16px;
+  }
+
+  .project-toolbar {
+    padding: 16px;
+  }
+
+  .project-toolbar-switch {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

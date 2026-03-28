@@ -275,6 +275,57 @@ Use concise Chinese writing.
 	}
 }
 
+func TestHandleMessageScopesAnswerByProject(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+
+	if _, err := store.Add(knowledge.WithProject(context.Background(), "Alpha"), knowledge.Entry{
+		ID:         "11111111aaaa1111",
+		Text:       "Alpha 项目的发布计划是先做桌面端。",
+		RecordedAt: time.Date(2026, 3, 27, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("seed alpha entry: %v", err)
+	}
+	if _, err := store.Add(knowledge.WithProject(context.Background(), "Beta"), knowledge.Entry{
+		ID:         "22222222bbbb2222",
+		Text:       "Beta 项目的发布计划是先做接口层。",
+		RecordedAt: time.Date(2026, 3, 27, 11, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("seed beta entry: %v", err)
+	}
+
+	service := NewService(store, fakeAI{
+		configured: true,
+		route: ai.RouteDecision{
+			Command:  "answer",
+			Question: "项目发布计划是什么？",
+		},
+		searchPlan: ai.SearchPlan{
+			Queries:  []string{"项目发布计划"},
+			Keywords: []string{"项目", "计划"},
+		},
+		answerFunc: func(_ string, entries []knowledge.Entry) string {
+			if len(entries) != 1 {
+				t.Fatalf("expected 1 scoped entry, got %#v", entries)
+			}
+			if entries[0].Project != "Alpha" {
+				t.Fatalf("expected alpha project entry, got %#v", entries[0])
+			}
+			return entries[0].Text
+		},
+	}, reminders)
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{Project: "Alpha"}, "项目发布计划是什么？")
+	if err != nil {
+		t.Fatalf("answer failed: %v", err)
+	}
+	if !strings.Contains(reply, "Alpha 项目的发布计划") {
+		t.Fatalf("unexpected scoped reply: %q", reply)
+	}
+}
+
 func TestDebugSearchShowsKeywordsCandidatesAndReviewedSelection(t *testing.T) {
 	t.Parallel()
 

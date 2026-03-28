@@ -61,6 +61,10 @@
               <span>Prompt</span>
               <span class="value" id="prompt-count-compact">0</span>
             </div>
+            <div class="status-compact-row">
+              <span>项目</span>
+              <span class="value" id="project-name-compact">default</span>
+            </div>
           </div>
           <button class="theme-toggle" id="theme-toggle" title="切换主题">
             <span class="theme-icon">◐</span>
@@ -70,6 +74,19 @@
 
       <!-- Main Content -->
       <main class="main-content">
+        <section class="project-toolbar">
+          <div class="project-toolbar-copy">
+            <div class="project-toolbar-label">当前项目</div>
+            <div class="project-toolbar-value" id="project-name-display">default</div>
+            <div class="project-toolbar-subtitle" id="project-summary-display">0 条记忆会用于当前导入与对话检索</div>
+          </div>
+          <div class="project-toolbar-switch">
+            <input id="project-name-input" type="text" placeholder="输入项目名，比如 myclaw / fastclaw / client-a" />
+            <button class="btn btn-primary" id="project-switch">切换项目</button>
+          </div>
+          <div class="project-chip-list" id="project-list"></div>
+        </section>
+
         <!-- Dashboard View -->
         <div id="view-dashboard" class="view active">
           <header class="content-header">
@@ -86,7 +103,7 @@
               <div class="stat-card">
                 <div class="label">记忆条数</div>
                 <div class="value" id="memory-count-stat">0</div>
-                <div class="subtext">知识库总量</div>
+                <div class="subtext">当前项目知识量</div>
               </div>
               <div class="stat-card">
                 <div class="label">Prompt 数量</div>
@@ -382,7 +399,7 @@
         <div id="view-chat" class="view">
           <header class="content-header">
             <h2>对话</h2>
-            <p class="subtitle">与 AI 助手交流</p>
+            <p class="subtitle">与 AI 助手交流，默认只检索当前项目记忆</p>
           </header>
           <div class="content-body">
             <div class="chat-container">

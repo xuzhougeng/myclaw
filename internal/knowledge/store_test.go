@@ -159,6 +159,125 @@ func TestStoreAppendLatestBySource(t *testing.T) {
 	}
 }
 
+func TestStoreScopesEntriesByProject(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	ctx := context.Background()
+	alphaCtx := WithProject(ctx, "Alpha")
+	betaCtx := WithProject(ctx, "Beta")
+
+	if _, err := store.Add(alphaCtx, Entry{
+		ID:         "alpha111aaaa1111",
+		Text:       "alpha memory",
+		RecordedAt: time.Date(2026, 3, 27, 9, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("add alpha entry: %v", err)
+	}
+	if _, err := store.Add(betaCtx, Entry{
+		ID:         "beta2222bbbb2222",
+		Text:       "beta memory",
+		RecordedAt: time.Date(2026, 3, 27, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("add beta entry: %v", err)
+	}
+
+	alphaEntries, err := store.List(alphaCtx)
+	if err != nil {
+		t.Fatalf("list alpha: %v", err)
+	}
+	if len(alphaEntries) != 1 || alphaEntries[0].Text != "alpha memory" {
+		t.Fatalf("unexpected alpha entries: %#v", alphaEntries)
+	}
+
+	betaEntries, err := store.List(betaCtx)
+	if err != nil {
+		t.Fatalf("list beta: %v", err)
+	}
+	if len(betaEntries) != 1 || betaEntries[0].Text != "beta memory" {
+		t.Fatalf("unexpected beta entries: %#v", betaEntries)
+	}
+
+	allEntries, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(allEntries) != 2 {
+		t.Fatalf("expected 2 global entries, got %d", len(allEntries))
+	}
+
+	if _, ok, err := store.Remove(alphaCtx, "#beta2222"); err != nil {
+		t.Fatalf("remove beta from alpha scope: %v", err)
+	} else if ok {
+		t.Fatalf("expected beta entry to stay invisible from alpha scope")
+	}
+}
+
+func TestStoreAppendLatestAndProjectsRespectProjectScope(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	ctx := context.Background()
+	alphaCtx := WithProject(ctx, "Alpha")
+	betaCtx := WithProject(ctx, "Beta")
+
+	if _, err := store.Add(alphaCtx, Entry{
+		ID:         "11111111aaaa1111",
+		Text:       "alpha old",
+		Source:     "desktop:primary",
+		RecordedAt: time.Date(2026, 3, 27, 9, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("add alpha old: %v", err)
+	}
+	if _, err := store.Add(alphaCtx, Entry{
+		ID:         "22222222aaaa2222",
+		Text:       "alpha latest",
+		Source:     "desktop:primary",
+		RecordedAt: time.Date(2026, 3, 27, 11, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("add alpha latest: %v", err)
+	}
+	if _, err := store.Add(betaCtx, Entry{
+		ID:         "33333333bbbb3333",
+		Text:       "beta latest",
+		Source:     "desktop:primary",
+		RecordedAt: time.Date(2026, 3, 27, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("add beta latest: %v", err)
+	}
+	if _, err := store.Add(ctx, Entry{
+		ID:         "44444444cccc4444",
+		Text:       "legacy default",
+		RecordedAt: time.Date(2026, 3, 27, 8, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("add legacy default: %v", err)
+	}
+
+	updated, ok, err := store.AppendLatest(alphaCtx, "desktop:primary", "alpha extra")
+	if err != nil {
+		t.Fatalf("append latest alpha: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected alpha latest entry to be appended")
+	}
+	if updated.ID != "22222222aaaa2222" {
+		t.Fatalf("expected alpha latest entry, got %#v", updated)
+	}
+
+	projects, err := store.ListProjects(ctx)
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) != 3 {
+		t.Fatalf("expected 3 projects, got %#v", projects)
+	}
+
+	projectNames := []string{projects[0].Name, projects[1].Name, projects[2].Name}
+	if !slices.Contains(projectNames, "Alpha") || !slices.Contains(projectNames, "Beta") || !slices.Contains(projectNames, DefaultProjectName) {
+		t.Fatalf("unexpected project names: %#v", projects)
+	}
+}
+
 func TestGenerateKeywordsAvoidsBrokenChineseFragments(t *testing.T) {
 	t.Parallel()
 

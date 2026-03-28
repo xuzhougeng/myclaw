@@ -38,6 +38,7 @@ type MessageContext struct {
 	UserID    string
 	Interface string
 	SessionID string
+	Project   string
 }
 
 type Service struct {
@@ -86,6 +87,7 @@ func NewServiceWithSkills(store *knowledge.Store, aiService aiBackend, reminders
 }
 
 func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input string) (string, error) {
+	ctx = withKnowledgeContext(ctx, mc)
 	text := strings.TrimSpace(input)
 	if text == "" {
 		return "我没有收到有效内容。发送“记住：xxx”保存知识，或直接问问题。", nil
@@ -1074,6 +1076,13 @@ func skillSessionKey(mc MessageContext) string {
 		return "source:" + key
 	}
 	return "default"
+}
+
+func withKnowledgeContext(ctx context.Context, mc MessageContext) context.Context {
+	if project := strings.TrimSpace(mc.Project); project != "" {
+		return knowledge.WithProject(ctx, project)
+	}
+	return ctx
 }
 
 func sourceLabel(mc MessageContext) string {

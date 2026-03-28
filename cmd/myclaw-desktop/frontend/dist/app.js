@@ -46,6 +46,7 @@ const state = {
   backend: null,
   backendMode: "",
   overview: null,
+  projectState: defaultProjectState(),
   knowledge: [],
   prompts: [],
   filter: "",
@@ -84,6 +85,7 @@ async function init() {
   bindNavigation();
   bindQuickAddModal();
   renderChatShortcuts();
+  renderProjectState();
   renderChat();
   renderKnowledge();
   renderPrompts();
@@ -165,6 +167,32 @@ function bindStaticEvents() {
   const themeToggle = document.getElementById('theme-toggle');
   if (themeToggle) {
     themeToggle.addEventListener('click', toggleTheme);
+  }
+
+  const projectSwitch = document.getElementById('project-switch');
+  if (projectSwitch) {
+    projectSwitch.addEventListener('click', () => void setActiveProject());
+  }
+
+  const projectNameInput = document.getElementById('project-name-input');
+  if (projectNameInput) {
+    projectNameInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void setActiveProject();
+      }
+    });
+  }
+
+  const projectList = document.getElementById('project-list');
+  if (projectList) {
+    projectList.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-project]');
+      if (!target) return;
+
+      const project = target.dataset.project || '';
+      void setActiveProject(project);
+    });
   }
 
   // File import events
@@ -422,6 +450,8 @@ function createWailsBackend(backend) {
   return {
     mode: 'wails',
     GetOverview: () => backend.GetOverview(),
+    GetProjectState: () => backend.GetProjectState(),
+    SetActiveProject: (name) => backend.SetActiveProject(name),
     ListKnowledge: () => backend.ListKnowledge(),
     CreateKnowledge: (text) => backend.CreateKnowledge(text),
     AppendKnowledge: (idOrPrefix, addition) => backend.AppendKnowledge(idOrPrefix, addition),
@@ -451,6 +481,8 @@ function createHTTPBackend() {
   return {
     mode: 'http',
     GetOverview: () => requestJSON('GET', '/api/overview'),
+    GetProjectState: () => requestJSON('GET', '/api/projects'),
+    SetActiveProject: (name) => requestJSON('POST', '/api/projects/active', { name }),
     ListKnowledge: () => requestJSON('GET', '/api/knowledge'),
     CreateKnowledge: (text) => requestJSON('POST', '/api/knowledge', { text }),
     AppendKnowledge: (idOrPrefix, addition) => requestJSON('POST', '/api/knowledge/append', { idOrPrefix, addition }),
@@ -515,12 +547,17 @@ function startBackendPolling() {
   if (state.backendMode !== 'http') return;
 
   devPollTimer = window.setInterval(() => {
-    void Promise.all([refreshOverview(), refreshModel(), refreshWeixin()]).catch(() => {});
+    void Promise.all([refreshProjectState(), refreshOverview(), refreshModel(), refreshWeixin()]).catch(() => {});
   }, 2000);
 }
 
 async function refreshAll() {
-  await Promise.all([refreshOverview(), refreshKnowledge(), refreshPrompts(), refreshModel(), refreshWeixin()]);
+  await Promise.all([refreshProjectState(), refreshOverview(), refreshKnowledge(), refreshPrompts(), refreshModel(), refreshWeixin()]);
+}
+
+async function refreshProjectState() {
+  state.projectState = normalizeProjectState(await state.backend.GetProjectState());
+  renderProjectState();
 }
 
 async function refreshOverview() {
@@ -707,6 +744,29 @@ async function clearKnowledge() {
   }
 }
 
+async function setActiveProject(nextProject) {
+  const input = document.getElementById('project-name-input');
+  const project = (nextProject ?? input?.value ?? '').trim() || 'default';
+
+  try {
+    const previousProject = state.projectState.activeProject || 'default';
+    state.projectState = normalizeProjectState(await state.backend.SetActiveProject(project));
+    renderProjectState();
+    await refreshAll();
+    if (state.projectState.activeProject !== previousProject) {
+      state.chat.push({
+        role: 'system',
+        text: `已切换到项目 [${state.projectState.activeProject}]，后续导入、记忆和对话检索都会只使用这个项目。`,
+        time: nowLabel(),
+      });
+      renderChat();
+    }
+    showBanner(`已切换到项目 ${state.projectState.activeProject}。`, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
 async function createPrompt() {
   const titleInput = document.getElementById('prompt-title-input');
   const contentInput = document.getElementById('prompt-content-input');
@@ -828,11 +888,12 @@ function renderKnowledge() {
   });
 
   if (filtered.length === 0) {
+    const activeProject = state.projectState.activeProject || 'default';
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-state-icon">◈</div>
-        <h3>${state.filter ? '没有找到匹配的记忆' : '知识库为空'}</h3>
-        <p>${state.filter ? '尝试其他关键词' : '导入文件或直接添加记忆来开始使用'}</p>
+        <h3>${state.filter ? '没有找到匹配的记忆' : `项目 ${escapeHTML(activeProject)} 为空`}</h3>
+        <p>${state.filter ? '尝试其他关键词' : '切换项目或导入文件、直接添加记忆来开始使用'}</p>
       </div>
     `;
     return;
@@ -888,6 +949,42 @@ function renderKnowledge() {
         </article>
       `;
     })
+    .join('');
+}
+
+function renderProjectState() {
+  const activeProject = state.projectState.activeProject || 'default';
+  const activeSummary = (state.projectState.projects || []).find((item) => item.active) || {
+    name: activeProject,
+    knowledgeCount: 0,
+  };
+
+  const compact = document.getElementById('project-name-compact');
+  const display = document.getElementById('project-name-display');
+  const summary = document.getElementById('project-summary-display');
+  const input = document.getElementById('project-name-input');
+  const list = document.getElementById('project-list');
+
+  if (compact) compact.textContent = activeProject;
+  if (display) display.textContent = activeProject;
+  if (summary) summary.textContent = `${activeSummary.knowledgeCount || 0} 条记忆会用于当前导入与对话检索`;
+  if (input && document.activeElement !== input) input.value = activeProject;
+
+  if (!list) return;
+
+  const projects = state.projectState.projects || [];
+  if (projects.length === 0) {
+    list.innerHTML = '';
+    return;
+  }
+
+  list.innerHTML = projects
+    .map((item) => `
+      <button class="project-chip ${item.active ? 'active' : ''}" data-project="${escapeAttribute(item.name)}">
+        <span>${escapeHTML(item.name)}</span>
+        <span class="project-chip-meta">${escapeHTML(String(item.knowledgeCount || 0))} 条</span>
+      </button>
+    `)
     .join('');
 }
 
@@ -1204,6 +1301,47 @@ function renderChat() {
 }
 
 let bannerTimer = 0;
+
+function defaultProjectState() {
+  return {
+    activeProject: 'default',
+    projects: [
+      {
+        name: 'default',
+        knowledgeCount: 0,
+        latestRecordedAt: '',
+        latestRecordedAtUnix: 0,
+        active: true,
+      },
+    ],
+  };
+}
+
+function normalizeProjectState(payload) {
+  const source = Array.isArray(payload) ? payload[0] : payload;
+  const stateValue = {
+    ...defaultProjectState(),
+    ...(source || {}),
+  };
+  const projects = Array.isArray(stateValue.projects)
+    ? stateValue.projects.map((item) => ({
+        name: item.name || 'default',
+        knowledgeCount: Number(item.knowledgeCount || 0),
+        latestRecordedAt: item.latestRecordedAt || '',
+        latestRecordedAtUnix: Number(item.latestRecordedAtUnix || 0),
+        active: Boolean(item.active),
+      }))
+    : [];
+
+  if (projects.length === 0) {
+    return defaultProjectState();
+  }
+
+  return {
+    activeProject: stateValue.activeProject || projects.find((item) => item.active)?.name || 'default',
+    projects,
+  };
+}
 
 function defaultModelState() {
   return {

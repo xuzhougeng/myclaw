@@ -49,6 +49,31 @@ func (s desktopHTTPDevServer) registerAPI(mux *http.ServeMux) {
 		s.writeResult(w, result, err)
 	})
 
+	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			s.writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		result, err := s.app.GetProjectState()
+		s.writeResult(w, result, err)
+	})
+
+	mux.HandleFunc("/api/projects/active", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			s.writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := decodeJSONBody(r, &body); err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := s.app.SetActiveProject(body.Name)
+		s.writeResult(w, result, err)
+	})
+
 	mux.HandleFunc("/api/knowledge", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

@@ -10,6 +10,7 @@ import (
 	appsvc "myclaw/internal/app"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/modelconfig"
+	"myclaw/internal/projectstate"
 	"myclaw/internal/promptlib"
 	"myclaw/internal/reminder"
 	"myclaw/internal/skilllib"
@@ -43,6 +44,7 @@ func main() {
 
 	store := knowledge.NewStore(filepath.Join(dataDir, "knowledge", "entries.json"))
 	promptStore := promptlib.NewStore(filepath.Join(dataDir, "prompts", "items.json"))
+	projectStore := projectstate.NewStore(filepath.Join(dataDir, "projects", "active.json"))
 	modelStore := modelconfig.NewStore(filepath.Join(dataDir, "model", "config.json"))
 	aiService := ai.NewService(modelStore)
 	reminderStore := reminder.NewStore(filepath.Join(dataDir, "reminders", "items.json"))
@@ -52,7 +54,7 @@ func main() {
 	weixinBridge := weixin.NewBridge(weixin.NewClient("", ""), service, reminderManager, weixin.BridgeConfig{
 		DataDir: dataDir,
 	})
-	desktopApp := NewDesktopApp(dataDir, store, promptStore, modelStore, aiService, service, reminderManager, weixinBridge)
+	desktopApp := NewDesktopApp(dataDir, store, promptStore, projectStore, modelStore, aiService, service, reminderManager, weixinBridge)
 
 	if *httpDevFlag {
 		if err := runHTTPDevServer(*httpListenFlag, desktopApp); err != nil {

@@ -15,6 +15,7 @@ import (
 	"myclaw/internal/fileingest"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/modelconfig"
+	"myclaw/internal/projectstate"
 	"myclaw/internal/promptlib"
 	"myclaw/internal/reminder"
 	"myclaw/internal/weixin"
@@ -34,6 +35,7 @@ type DesktopApp struct {
 	dataDir           string
 	store             *knowledge.Store
 	promptStore       *promptlib.Store
+	projectStore      *projectstate.Store
 	modelStore        *modelconfig.Store
 	aiService         *ai.Service
 	service           *appsvc.Service
@@ -41,7 +43,9 @@ type DesktopApp struct {
 	weixinBridge      *weixin.Bridge
 	reminderCancel    context.CancelFunc
 	dialogMu          sync.Mutex
+	projectMu         sync.RWMutex
 	weixinMu          sync.Mutex
+	activeProject     string
 	weixinStatus      WeixinStatus
 	weixinRunCancel   context.CancelFunc
 	weixinLoginCancel context.CancelFunc
@@ -51,6 +55,7 @@ type Overview struct {
 	DataDir         string `json:"dataDir"`
 	AIAvailable     bool   `json:"aiAvailable"`
 	AIMessage       string `json:"aiMessage"`
+	ActiveProject   string `json:"activeProject"`
 	KnowledgeCount  int    `json:"knowledgeCount"`
 	PromptCount     int    `json:"promptCount"`
 	WeixinConnected bool   `json:"weixinConnected"`
@@ -112,6 +117,19 @@ type PromptMutation struct {
 	Item    PromptItem `json:"item"`
 }
 
+type ProjectSummary struct {
+	Name                 string `json:"name"`
+	KnowledgeCount       int    `json:"knowledgeCount"`
+	LatestRecordedAt     string `json:"latestRecordedAt"`
+	LatestRecordedAtUnix int64  `json:"latestRecordedAtUnix"`
+	Active               bool   `json:"active"`
+}
+
+type ProjectState struct {
+	ActiveProject string           `json:"activeProject"`
+	Projects      []ProjectSummary `json:"projects"`
+}
+
 type MessageResult struct {
 	Message string `json:"message"`
 }
@@ -125,11 +143,12 @@ type reminderNotifier struct {
 	app *DesktopApp
 }
 
-func NewDesktopApp(dataDir string, store *knowledge.Store, promptStore *promptlib.Store, modelStore *modelconfig.Store, aiService *ai.Service, service *appsvc.Service, reminders *reminder.Manager, weixinBridge *weixin.Bridge) *DesktopApp {
+func NewDesktopApp(dataDir string, store *knowledge.Store, promptStore *promptlib.Store, projectStore *projectstate.Store, modelStore *modelconfig.Store, aiService *ai.Service, service *appsvc.Service, reminders *reminder.Manager, weixinBridge *weixin.Bridge) *DesktopApp {
 	return &DesktopApp{
 		dataDir:      dataDir,
 		store:        store,
 		promptStore:  promptStore,
+		projectStore: projectStore,
 		modelStore:   modelStore,
 		aiService:    aiService,
 		service:      service,
@@ -188,7 +207,12 @@ func (n reminderNotifier) Notify(_ context.Context, reminderItem reminder.Remind
 }
 
 func (a *DesktopApp) GetOverview() (Overview, error) {
-	entries, err := a.store.List(context.Background())
+	projectCtx, project, err := a.projectContext(context.Background())
+	if err != nil {
+		return Overview{}, err
+	}
+
+	entries, err := a.store.List(projectCtx)
 	if err != nil {
 		return Overview{}, err
 	}
@@ -205,11 +229,29 @@ func (a *DesktopApp) GetOverview() (Overview, error) {
 		DataDir:         a.dataDir,
 		AIAvailable:     available,
 		AIMessage:       message,
+		ActiveProject:   project,
 		KnowledgeCount:  len(entries),
 		PromptCount:     len(prompts),
 		WeixinConnected: weixinStatus.Connected,
 		WeixinMessage:   weixinStatus.Message,
 	}, nil
+}
+
+func (a *DesktopApp) GetProjectState() (ProjectState, error) {
+	return a.buildProjectState(context.Background())
+}
+
+func (a *DesktopApp) SetActiveProject(name string) (ProjectState, error) {
+	project := knowledge.CanonicalProjectName(name)
+	if a.projectStore != nil {
+		snapshot, err := a.projectStore.Save(context.Background(), project)
+		if err != nil {
+			return ProjectState{}, err
+		}
+		project = snapshot.ActiveProject
+	}
+	a.rememberActiveProject(project)
+	return a.buildProjectState(context.Background())
 }
 
 func (a *DesktopApp) GetModelSettings() (ModelSettings, error) {
@@ -291,7 +333,12 @@ func (a *DesktopApp) TestModelConnection() (MessageResult, error) {
 }
 
 func (a *DesktopApp) ListKnowledge() ([]KnowledgeItem, error) {
-	entries, err := a.store.List(context.Background())
+	projectCtx, _, err := a.projectContext(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := a.store.List(projectCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +357,12 @@ func (a *DesktopApp) CreateKnowledge(text string) (KnowledgeMutation, error) {
 		return KnowledgeMutation{}, errors.New("请输入要保存的记忆内容。")
 	}
 
-	entry, err := a.store.Add(context.Background(), knowledge.Entry{
+	projectCtx, _, err := a.projectContext(context.Background())
+	if err != nil {
+		return KnowledgeMutation{}, err
+	}
+
+	entry, err := a.store.Add(projectCtx, knowledge.Entry{
 		Text:       text,
 		Source:     desktopSourceLabel(),
 		RecordedAt: time.Now(),
@@ -334,7 +386,12 @@ func (a *DesktopApp) AppendKnowledge(idOrPrefix, addition string) (KnowledgeMuta
 		return KnowledgeMutation{}, errors.New("请输入补充内容。")
 	}
 
-	entry, ok, err := a.store.Append(context.Background(), idOrPrefix, addition)
+	projectCtx, _, err := a.projectContext(context.Background())
+	if err != nil {
+		return KnowledgeMutation{}, err
+	}
+
+	entry, ok, err := a.store.Append(projectCtx, idOrPrefix, addition)
 	if err != nil {
 		return KnowledgeMutation{}, err
 	}
@@ -348,7 +405,12 @@ func (a *DesktopApp) AppendKnowledge(idOrPrefix, addition string) (KnowledgeMuta
 }
 
 func (a *DesktopApp) DeleteKnowledge(idOrPrefix string) (MessageResult, error) {
-	entry, ok, err := a.store.Remove(context.Background(), idOrPrefix)
+	projectCtx, _, err := a.projectContext(context.Background())
+	if err != nil {
+		return MessageResult{}, err
+	}
+
+	entry, ok, err := a.store.Remove(projectCtx, idOrPrefix)
 	if err != nil {
 		return MessageResult{}, err
 	}
@@ -361,10 +423,15 @@ func (a *DesktopApp) DeleteKnowledge(idOrPrefix string) (MessageResult, error) {
 }
 
 func (a *DesktopApp) ClearKnowledge() (MessageResult, error) {
-	if err := a.store.Clear(context.Background()); err != nil {
+	projectCtx, project, err := a.projectContext(context.Background())
+	if err != nil {
 		return MessageResult{}, err
 	}
-	return MessageResult{Message: "知识库已清空。"}, nil
+
+	if err := a.store.Clear(projectCtx); err != nil {
+		return MessageResult{}, err
+	}
+	return MessageResult{Message: fmt.Sprintf("项目 %s 的知识库已清空。", project)}, nil
 }
 
 func (a *DesktopApp) ListPrompts() ([]PromptItem, error) {
@@ -467,7 +534,12 @@ func (a *DesktopApp) OpenImportDialog() (string, error) {
 }
 
 func (a *DesktopApp) ImportFile(path string) (KnowledgeMutation, error) {
-	entry, err := a.ingestFile(context.Background(), path)
+	projectCtx, _, err := a.projectContext(context.Background())
+	if err != nil {
+		return KnowledgeMutation{}, err
+	}
+
+	entry, err := a.ingestFile(projectCtx, path)
 	if err != nil {
 		return KnowledgeMutation{}, err
 	}
@@ -478,7 +550,12 @@ func (a *DesktopApp) ImportFile(path string) (KnowledgeMutation, error) {
 }
 
 func (a *DesktopApp) SendMessage(input string) (ChatResponse, error) {
-	reply, err := a.service.HandleMessage(context.Background(), desktopMessageContext(), input)
+	project, err := a.currentProject(context.Background())
+	if err != nil {
+		return ChatResponse{}, err
+	}
+
+	reply, err := a.service.HandleMessage(context.Background(), desktopMessageContext(project), input)
 	if err != nil {
 		return ChatResponse{}, err
 	}
@@ -587,11 +664,88 @@ func (a *DesktopApp) defaultDialogDirectory() string {
 	return ""
 }
 
-func desktopMessageContext() appsvc.MessageContext {
+func (a *DesktopApp) projectContext(ctx context.Context) (context.Context, string, error) {
+	project, err := a.currentProject(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	return knowledge.WithProject(ctx, project), project, nil
+}
+
+func (a *DesktopApp) currentProject(ctx context.Context) (string, error) {
+	a.projectMu.RLock()
+	current := strings.TrimSpace(a.activeProject)
+	a.projectMu.RUnlock()
+	if current != "" {
+		return current, nil
+	}
+
+	if a.projectStore == nil {
+		current = knowledge.DefaultProjectName
+		a.rememberActiveProject(current)
+		return current, nil
+	}
+
+	snapshot, err := a.projectStore.Load(ctx)
+	if err != nil {
+		return "", err
+	}
+	current = knowledge.CanonicalProjectName(snapshot.ActiveProject)
+	a.rememberActiveProject(current)
+	return current, nil
+}
+
+func (a *DesktopApp) rememberActiveProject(project string) {
+	a.projectMu.Lock()
+	a.activeProject = knowledge.CanonicalProjectName(project)
+	a.projectMu.Unlock()
+}
+
+func (a *DesktopApp) buildProjectState(ctx context.Context) (ProjectState, error) {
+	activeProject, err := a.currentProject(ctx)
+	if err != nil {
+		return ProjectState{}, err
+	}
+
+	infos, err := a.store.ListProjects(context.Background())
+	if err != nil {
+		return ProjectState{}, err
+	}
+
+	projects := make([]ProjectSummary, 0, len(infos)+1)
+	var activeSummary ProjectSummary
+	activeFound := false
+	for _, info := range infos {
+		summary := toProjectSummary(info, activeProject)
+		if summary.Active {
+			activeSummary = summary
+			activeFound = true
+			continue
+		}
+		projects = append(projects, summary)
+	}
+	if activeFound {
+		projects = append([]ProjectSummary{activeSummary}, projects...)
+	} else {
+		projects = append([]ProjectSummary{{
+			Name:           activeProject,
+			KnowledgeCount: 0,
+			Active:         true,
+		}}, projects...)
+	}
+
+	return ProjectState{
+		ActiveProject: activeProject,
+		Projects:      projects,
+	}, nil
+}
+
+func desktopMessageContext(project string) appsvc.MessageContext {
 	return appsvc.MessageContext{
 		Interface: desktopInterface,
 		UserID:    desktopUserID,
 		SessionID: desktopChatSessionID,
+		Project:   project,
 	}
 }
 
@@ -624,6 +778,16 @@ func toPromptItem(prompt promptlib.Prompt) PromptItem {
 		Preview:        preview(content, maxKnowledgePreviewRunes),
 		RecordedAt:     prompt.RecordedAt.Local().Format("2006-01-02 15:04:05"),
 		RecordedAtUnix: prompt.RecordedAt.Unix(),
+	}
+}
+
+func toProjectSummary(info knowledge.ProjectInfo, activeProject string) ProjectSummary {
+	return ProjectSummary{
+		Name:                 knowledge.CanonicalProjectName(info.Name),
+		KnowledgeCount:       info.KnowledgeCount,
+		LatestRecordedAt:     info.LatestRecordedAt.Local().Format("2006-01-02 15:04:05"),
+		LatestRecordedAtUnix: info.LatestRecordedAt.Unix(),
+		Active:               strings.EqualFold(knowledge.CanonicalProjectName(info.Name), knowledge.CanonicalProjectName(activeProject)),
 	}
 }
 
