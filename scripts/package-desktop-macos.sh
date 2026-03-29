@@ -12,6 +12,9 @@ BUILD_DIR="${ROOT_DIR}/cmd/myclaw-desktop/build/bin"
 APP_SRC="${BUILD_DIR}/${APP_NAME}.app"
 APP_BINARY="${APP_SRC}/Contents/MacOS/${APP_NAME}"
 APP_RESOURCES_DIR="${APP_SRC}/Contents/Resources"
+APP_ICON_SRC="${ROOT_DIR}/cmd/myclaw-desktop/build/appicon.png"
+APP_ICON_NAME="appicon.icns"
+APP_ICON_FILE="${APP_RESOURCES_DIR}/${APP_ICON_NAME}"
 DMG_PATH="${DIST_DIR}/${APP_NAME}-macos-${VERSION}.dmg"
 APP_ZIP="${DIST_DIR}/${APP_NAME}-macos-${VERSION}.zip"
 BUILD_PLATFORM="${MACOS_BUILD_PLATFORM:-darwin/arm64}"
@@ -21,6 +24,7 @@ GO_TAGS="${GO_TAGS:-desktop,wv2runtime.download,production}"
 GO_LDFLAGS="${GO_LDFLAGS:--w -s -extldflags '-framework UniformTypeIdentifiers'}"
 
 TMP_DIR=""
+ICON_TMP_DIR=""
 CERT_PATH=""
 KEYCHAIN_PATH=""
 KEYCHAIN_PASSWORD=""
@@ -42,6 +46,7 @@ cleanup() {
 
     [[ -n "${CERT_PATH}" ]] && rm -f "${CERT_PATH}"
     [[ -n "${APP_ZIP}" ]] && rm -f "${APP_ZIP}"
+    [[ -n "${ICON_TMP_DIR}" ]] && rm -rf "${ICON_TMP_DIR}"
     [[ -n "${TMP_DIR}" ]] && rm -rf "${TMP_DIR}"
 }
 
@@ -159,6 +164,50 @@ build_binary() {
     chmod +x "${APP_BINARY}"
 }
 
+render_icon_png() {
+    local size="$1"
+    local output_path="$2"
+
+    sips -s format png -z "${size}" "${size}" "${APP_ICON_SRC}" --out "${output_path}" >/dev/null
+}
+
+create_app_icon() {
+    local icon_tiff=""
+    local iconset_dir=""
+    local -a icon_pngs=()
+
+    if [[ ! -f "${APP_ICON_SRC}" ]]; then
+        echo "Missing macOS app icon source: ${APP_ICON_SRC}" >&2
+        exit 1
+    fi
+
+    ICON_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/${APP_NAME}-iconset.XXXXXX")"
+    iconset_dir="${ICON_TMP_DIR}/png"
+    icon_tiff="${ICON_TMP_DIR}/${APP_ICON_NAME%.icns}.tiff"
+    mkdir -p "${iconset_dir}"
+
+    render_icon_png 16 "${iconset_dir}/icon_16x16.png"
+    render_icon_png 32 "${iconset_dir}/icon_32x32.png"
+    render_icon_png 48 "${iconset_dir}/icon_48x48.png"
+    render_icon_png 128 "${iconset_dir}/icon_128x128.png"
+    render_icon_png 256 "${iconset_dir}/icon_256x256.png"
+    render_icon_png 512 "${iconset_dir}/icon_512x512.png"
+    render_icon_png 1024 "${iconset_dir}/icon_1024x1024.png"
+
+    icon_pngs=(
+        "${iconset_dir}/icon_16x16.png"
+        "${iconset_dir}/icon_32x32.png"
+        "${iconset_dir}/icon_48x48.png"
+        "${iconset_dir}/icon_128x128.png"
+        "${iconset_dir}/icon_256x256.png"
+        "${iconset_dir}/icon_512x512.png"
+        "${iconset_dir}/icon_1024x1024.png"
+    )
+
+    tiffutil -catnosizecheck "${icon_pngs[@]}" -out "${icon_tiff}" >/dev/null
+    tiff2icns "${icon_tiff}" "${APP_ICON_FILE}" >/dev/null
+}
+
 write_info_plist() {
     cat > "${APP_SRC}/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -171,6 +220,8 @@ write_info_plist() {
     <string>${APP_NAME}</string>
     <key>CFBundleIdentifier</key>
     <string>${BUNDLE_ID}</string>
+    <key>CFBundleIconFile</key>
+    <string>${APP_ICON_NAME}</string>
     <key>CFBundleName</key>
     <string>${APP_DISPLAY_NAME}</string>
     <key>CFBundlePackageType</key>
@@ -192,6 +243,7 @@ create_app_bundle() {
     rm -rf "${APP_SRC}"
     mkdir -p "${APP_SRC}/Contents/MacOS" "${APP_RESOURCES_DIR}"
     build_binary
+    create_app_icon
     write_info_plist
     printf 'APPL????' > "${APP_SRC}/Contents/PkgInfo"
 }
