@@ -37,26 +37,36 @@ const (
 )
 
 type Config struct {
-	ID       string `json:"id,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Provider string `json:"provider"`
-	APIType  string `json:"api_type"`
-	BaseURL  string `json:"base_url"`
-	APIKey   string `json:"api_key,omitempty"`
-	Model    string `json:"model"`
+	ID               string   `json:"id,omitempty"`
+	Name             string   `json:"name,omitempty"`
+	Provider         string   `json:"provider"`
+	APIType          string   `json:"api_type"`
+	BaseURL          string   `json:"base_url"`
+	APIKey           string   `json:"api_key,omitempty"`
+	Model            string   `json:"model"`
+	MaxOutputTokens  *int     `json:"max_output_tokens,omitempty"`
+	Temperature      *float64 `json:"temperature,omitempty"`
+	TopP             *float64 `json:"top_p,omitempty"`
+	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
 }
 
 type Summary struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Provider     string    `json:"provider"`
-	APIType      string    `json:"apiType"`
-	BaseURL      string    `json:"baseUrl"`
-	Model        string    `json:"model"`
-	HasAPIKey    bool      `json:"hasApiKey"`
-	APIKeyMasked string    `json:"apiKeyMasked"`
-	Active       bool      `json:"active"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Provider         string    `json:"provider"`
+	APIType          string    `json:"apiType"`
+	BaseURL          string    `json:"baseUrl"`
+	Model            string    `json:"model"`
+	HasAPIKey        bool      `json:"hasApiKey"`
+	APIKeyMasked     string    `json:"apiKeyMasked"`
+	Active           bool      `json:"active"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+	MaxOutputTokens  *int      `json:"maxOutputTokens,omitempty"`
+	Temperature      *float64  `json:"temperature,omitempty"`
+	TopP             *float64  `json:"topP,omitempty"`
+	FrequencyPenalty *float64  `json:"frequencyPenalty,omitempty"`
+	PresencePenalty  *float64  `json:"presencePenalty,omitempty"`
 }
 
 type Snapshot struct {
@@ -84,15 +94,20 @@ type databaseFile struct {
 }
 
 type storedProfile struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Provider        string    `json:"provider"`
-	APIType         string    `json:"api_type"`
-	BaseURL         string    `json:"base_url"`
-	EncryptedAPIKey string    `json:"encrypted_api_key,omitempty"`
-	Model           string    `json:"model"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Provider         string    `json:"provider"`
+	APIType          string    `json:"api_type"`
+	BaseURL          string    `json:"base_url"`
+	EncryptedAPIKey  string    `json:"encrypted_api_key,omitempty"`
+	Model            string    `json:"model"`
+	MaxOutputTokens  *int      `json:"max_output_tokens,omitempty"`
+	Temperature      *float64  `json:"temperature,omitempty"`
+	TopP             *float64  `json:"top_p,omitempty"`
+	FrequencyPenalty *float64  `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64  `json:"presence_penalty,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func NewStore(path ...string) *Store {
@@ -173,16 +188,21 @@ func (s *Store) List(_ context.Context) (Snapshot, error) {
 	for _, profile := range db.Profiles {
 		cfg := profile.config()
 		summaries = append(summaries, Summary{
-			ID:           cfg.ID,
-			Name:         cfg.Name,
-			Provider:     cfg.Provider,
-			APIType:      cfg.APIType,
-			BaseURL:      cfg.BaseURL,
-			Model:        cfg.Model,
-			HasAPIKey:    strings.TrimSpace(profile.EncryptedAPIKey) != "",
-			APIKeyMasked: maskedStoredSecret(profile.EncryptedAPIKey),
-			Active:       profile.ID == db.ActiveProfileID,
-			UpdatedAt:    profile.UpdatedAt,
+			ID:               cfg.ID,
+			Name:             cfg.Name,
+			Provider:         cfg.Provider,
+			APIType:          cfg.APIType,
+			BaseURL:          cfg.BaseURL,
+			Model:            cfg.Model,
+			HasAPIKey:        strings.TrimSpace(profile.EncryptedAPIKey) != "",
+			APIKeyMasked:     maskedStoredSecret(profile.EncryptedAPIKey),
+			Active:           profile.ID == db.ActiveProfileID,
+			UpdatedAt:        profile.UpdatedAt,
+			MaxOutputTokens:  cfg.MaxOutputTokens,
+			Temperature:      cfg.Temperature,
+			TopP:             cfg.TopP,
+			FrequencyPenalty: cfg.FrequencyPenalty,
+			PresencePenalty:  cfg.PresencePenalty,
 		})
 	}
 
@@ -644,15 +664,20 @@ func newStoredProfile(cfg Config, key []byte, now time.Time) (storedProfile, err
 		return storedProfile{}, err
 	}
 	return storedProfile{
-		ID:              cfg.ID,
-		Name:            cfg.Name,
-		Provider:        cfg.Provider,
-		APIType:         cfg.APIType,
-		BaseURL:         cfg.BaseURL,
-		EncryptedAPIKey: encrypted,
-		Model:           cfg.Model,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:               cfg.ID,
+		Name:             cfg.Name,
+		Provider:         cfg.Provider,
+		APIType:          cfg.APIType,
+		BaseURL:          cfg.BaseURL,
+		EncryptedAPIKey:  encrypted,
+		Model:            cfg.Model,
+		MaxOutputTokens:  cfg.MaxOutputTokens,
+		Temperature:      cfg.Temperature,
+		TopP:             cfg.TopP,
+		FrequencyPenalty: cfg.FrequencyPenalty,
+		PresencePenalty:  cfg.PresencePenalty,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}, nil
 }
 
@@ -664,6 +689,11 @@ func updateStoredProfile(profile storedProfile, cfg Config, key []byte, now time
 	profile.APIType = cfg.APIType
 	profile.BaseURL = cfg.BaseURL
 	profile.Model = cfg.Model
+	profile.MaxOutputTokens = cfg.MaxOutputTokens
+	profile.Temperature = cfg.Temperature
+	profile.TopP = cfg.TopP
+	profile.FrequencyPenalty = cfg.FrequencyPenalty
+	profile.PresencePenalty = cfg.PresencePenalty
 	switch cfg.APIKey {
 	case noChangeSecretSentinel:
 	case "":
@@ -684,12 +714,17 @@ func updateStoredProfile(profile storedProfile, cfg Config, key []byte, now time
 
 func (p storedProfile) config() Config {
 	return Config{
-		ID:       p.ID,
-		Name:     p.Name,
-		Provider: p.Provider,
-		APIType:  p.APIType,
-		BaseURL:  p.BaseURL,
-		Model:    p.Model,
+		ID:               p.ID,
+		Name:             p.Name,
+		Provider:         p.Provider,
+		APIType:          p.APIType,
+		BaseURL:          p.BaseURL,
+		Model:            p.Model,
+		MaxOutputTokens:  p.MaxOutputTokens,
+		Temperature:      p.Temperature,
+		TopP:             p.TopP,
+		FrequencyPenalty: p.FrequencyPenalty,
+		PresencePenalty:  p.PresencePenalty,
 	}.Normalize()
 }
 

@@ -1200,6 +1200,34 @@ select {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+.model-advanced-toggle {
+  margin-top: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0;
+}
+
+.model-advanced-toggle summary {
+  cursor: pointer;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.model-advanced-toggle summary:hover {
+  color: var(--text-primary);
+}
+
+.model-advanced-toggle[open] summary {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.model-advanced-toggle > .form-grid {
+  padding: 16px;
+  margin-top: 0;
+}
+
 .model-inline-note {
   margin-top: 14px;
   font-size: 12px;

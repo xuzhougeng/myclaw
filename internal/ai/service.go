@@ -465,11 +465,15 @@ func (s *Service) requireConfig(ctx context.Context) (modelconfig.Config, error)
 }
 
 type generationRequest struct {
-	Instructions    string
-	Input           []responseInputMessage
-	SchemaName      string
-	Schema          map[string]any
-	MaxOutputTokens int
+	Instructions     string
+	Input            []responseInputMessage
+	SchemaName       string
+	Schema           map[string]any
+	MaxOutputTokens  int
+	Temperature      *float64
+	TopP             *float64
+	FrequencyPenalty *float64
+	PresencePenalty  *float64
 }
 
 func (r generationRequest) WantsJSON() bool {
@@ -521,6 +525,21 @@ func (s *Service) generateTextFromContent(ctx context.Context, cfg modelconfig.C
 }
 
 func (s *Service) generate(ctx context.Context, cfg modelconfig.Config, req generationRequest) (string, error) {
+	if cfg.MaxOutputTokens != nil && *cfg.MaxOutputTokens > 0 {
+		req.MaxOutputTokens = *cfg.MaxOutputTokens
+	}
+	if cfg.Temperature != nil && req.Temperature == nil {
+		req.Temperature = cfg.Temperature
+	}
+	if cfg.TopP != nil && req.TopP == nil {
+		req.TopP = cfg.TopP
+	}
+	if cfg.FrequencyPenalty != nil && req.FrequencyPenalty == nil {
+		req.FrequencyPenalty = cfg.FrequencyPenalty
+	}
+	if cfg.PresencePenalty != nil && req.PresencePenalty == nil {
+		req.PresencePenalty = cfg.PresencePenalty
+	}
 	switch cfg.Provider {
 	case modelconfig.ProviderOpenAI:
 		switch cfg.APIType {
@@ -543,6 +562,8 @@ func (s *Service) createOpenAIResponse(ctx context.Context, cfg modelconfig.Conf
 		Instructions:    req.Instructions,
 		Input:           req.Input,
 		MaxOutputTokens: req.MaxOutputTokens,
+		Temperature:     req.Temperature,
+		TopP:            req.TopP,
 	}
 	if req.WantsJSON() {
 		reqBody.Text = &responseTextOptions{
@@ -604,9 +625,13 @@ func (s *Service) createOpenAIResponse(ctx context.Context, cfg modelconfig.Conf
 
 func (s *Service) createOpenAIChatCompletion(ctx context.Context, cfg modelconfig.Config, req generationRequest) (string, error) {
 	reqBody := chatCompletionsRequest{
-		Model:     cfg.Model,
-		Messages:  buildChatCompletionMessages(req),
-		MaxTokens: req.MaxOutputTokens,
+		Model:            cfg.Model,
+		Messages:         buildChatCompletionMessages(req),
+		MaxTokens:        req.MaxOutputTokens,
+		Temperature:      req.Temperature,
+		TopP:             req.TopP,
+		FrequencyPenalty: req.FrequencyPenalty,
+		PresencePenalty:  req.PresencePenalty,
 	}
 	if req.WantsJSON() {
 		reqBody.ResponseFormat = &chatCompletionsResponseFormat{
@@ -765,6 +790,8 @@ type responsesRequest struct {
 	Input           []responseInputMessage `json:"input"`
 	Text            *responseTextOptions   `json:"text,omitempty"`
 	MaxOutputTokens int                    `json:"max_output_tokens,omitempty"`
+	Temperature     *float64               `json:"temperature,omitempty"`
+	TopP            *float64               `json:"top_p,omitempty"`
 }
 
 type responseInputMessage struct {
@@ -920,10 +947,14 @@ type openAIErrorResponse struct {
 }
 
 type chatCompletionsRequest struct {
-	Model          string                         `json:"model"`
-	Messages       []chatCompletionsMessage       `json:"messages"`
-	ResponseFormat *chatCompletionsResponseFormat `json:"response_format,omitempty"`
-	MaxTokens      int                            `json:"max_tokens,omitempty"`
+	Model            string                         `json:"model"`
+	Messages         []chatCompletionsMessage       `json:"messages"`
+	ResponseFormat   *chatCompletionsResponseFormat `json:"response_format,omitempty"`
+	MaxTokens        int                            `json:"max_tokens,omitempty"`
+	Temperature      *float64                       `json:"temperature,omitempty"`
+	TopP             *float64                       `json:"top_p,omitempty"`
+	FrequencyPenalty *float64                       `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64                       `json:"presence_penalty,omitempty"`
 }
 
 type chatCompletionsMessage struct {
@@ -973,12 +1004,14 @@ func (r chatCompletionsResponse) OutputText() string {
 }
 
 type anthropicMessagesRequest struct {
-	Model      string                    `json:"model"`
-	System     string                    `json:"system,omitempty"`
-	Messages   []anthropicMessageRequest `json:"messages"`
-	MaxTokens  int                       `json:"max_tokens"`
-	Tools      []anthropicToolDefinition `json:"tools,omitempty"`
-	ToolChoice *anthropicToolChoice      `json:"tool_choice,omitempty"`
+	Model       string                    `json:"model"`
+	System      string                    `json:"system,omitempty"`
+	Messages    []anthropicMessageRequest `json:"messages"`
+	MaxTokens   int                       `json:"max_tokens"`
+	Tools       []anthropicToolDefinition `json:"tools,omitempty"`
+	ToolChoice  *anthropicToolChoice      `json:"tool_choice,omitempty"`
+	Temperature *float64                  `json:"temperature,omitempty"`
+	TopP        *float64                  `json:"top_p,omitempty"`
 }
 
 type anthropicMessageRequest struct {
@@ -1114,10 +1147,12 @@ func buildAnthropicLegacyRequest(model string, req generationRequest) (anthropic
 
 func buildAnthropicRequestWithMode(model string, req generationRequest, useStructuredTool bool) (anthropicMessagesRequest, error) {
 	request := anthropicMessagesRequest{
-		Model:     model,
-		System:    anthropicSystemPrompt(req, useStructuredTool),
-		Messages:  make([]anthropicMessageRequest, 0, len(req.Input)),
-		MaxTokens: req.MaxOutputTokens,
+		Model:       model,
+		System:      anthropicSystemPrompt(req, useStructuredTool),
+		Messages:    make([]anthropicMessageRequest, 0, len(req.Input)),
+		MaxTokens:   req.MaxOutputTokens,
+		Temperature: req.Temperature,
+		TopP:        req.TopP,
 	}
 	for _, message := range req.Input {
 		content, err := anthropicContent(message.Content)

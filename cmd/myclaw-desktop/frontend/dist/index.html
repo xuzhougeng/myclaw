@@ -414,6 +414,32 @@
                   </label>
                 </div>
 
+                <details class="model-advanced-toggle">
+                  <summary>高级参数</summary>
+                  <div class="form-grid">
+                    <label class="form-field">
+                      <span>最大输出 Tokens</span>
+                      <input id="model-max-output-tokens" type="number" min="1" max="128000" step="1" placeholder="默认：JSON 800 / 文本 1500" />
+                    </label>
+                    <label class="form-field">
+                      <span>Temperature</span>
+                      <input id="model-temperature" type="number" min="0" max="2" step="0.1" placeholder="默认由模型决定" />
+                    </label>
+                    <label class="form-field">
+                      <span>Top P</span>
+                      <input id="model-top-p" type="number" min="0" max="1" step="0.05" placeholder="默认由模型决定" />
+                    </label>
+                    <label class="form-field">
+                      <span>Frequency Penalty</span>
+                      <input id="model-frequency-penalty" type="number" min="-2" max="2" step="0.1" placeholder="仅 OpenAI 兼容 API" />
+                    </label>
+                    <label class="form-field">
+                      <span>Presence Penalty</span>
+                      <input id="model-presence-penalty" type="number" min="-2" max="2" step="0.1" placeholder="仅 OpenAI 兼容 API" />
+                    </label>
+                  </div>
+                </details>
+
                 <p class="model-inline-note" id="model-api-key-hint">新建 profile 时请输入 API Key；编辑已保存 profile 时留空会保留原 key。</p>
                 <p class="model-message" id="model-message">尚未保存本地模型配置。</p>
                 <div class="model-actions">

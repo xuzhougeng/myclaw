@@ -1927,6 +1927,16 @@ function populateModelForm(profile) {
   if (model) model.value = source.model || '';
   if (apiKey) apiKey.value = '';
 
+  const setOptional = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val != null ? val : '';
+  };
+  setOptional('model-max-output-tokens', source.maxOutputTokens);
+  setOptional('model-temperature', source.temperature);
+  setOptional('model-top-p', source.topP);
+  setOptional('model-frequency-penalty', source.frequencyPenalty);
+  setOptional('model-presence-penalty', source.presencePenalty);
+
   if (apiKeyHint) {
     apiKeyHint.textContent = profile && profile.hasApiKey
       ? `已保存 API Key：${profile.apiKeyMasked || '********'}。输入新值会覆盖；留空会保留原 key。`
@@ -1950,6 +1960,15 @@ function createNewModelProfileDraft() {
   populateModelForm(null);
 }
 
+function readOptionalNumber(id) {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  const v = el.value.trim();
+  if (v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function readModelForm() {
   const selected = selectedModelProfile();
   const profileSelect = document.getElementById('model-profile-select');
@@ -1961,6 +1980,11 @@ function readModelForm() {
     baseUrl: document.getElementById('model-base-url')?.value.trim() || '',
     apiKey: document.getElementById('model-api-key')?.value.trim() || '',
     model: document.getElementById('model-name')?.value.trim() || '',
+    maxOutputTokens: readOptionalNumber('model-max-output-tokens'),
+    temperature: readOptionalNumber('model-temperature'),
+    topP: readOptionalNumber('model-top-p'),
+    frequencyPenalty: readOptionalNumber('model-frequency-penalty'),
+    presencePenalty: readOptionalNumber('model-presence-penalty'),
     setActive: false,
     preserveApiKey: Boolean(selected?.hasApiKey) && !(document.getElementById('model-api-key')?.value.trim()),
   };
