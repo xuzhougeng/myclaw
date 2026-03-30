@@ -152,6 +152,76 @@ func TestDesktopSendMessageReturnsAndPersistsUsage(t *testing.T) {
 	}
 }
 
+func TestDesktopChatSessionCanBeRenamed(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "knowledge.json"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "project.json"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "prompts.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	initial, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("get chat state: %v", err)
+	}
+
+	renamed, err := app.RenameChatSession(initial.SessionID, "架构讨论")
+	if err != nil {
+		t.Fatalf("rename chat session: %v", err)
+	}
+	if renamed.Conversations[0].Title != "架构讨论" || !renamed.Conversations[0].CustomTitle {
+		t.Fatalf("unexpected renamed conversation: %#v", renamed.Conversations[0])
+	}
+
+	reloaded, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("reload chat state: %v", err)
+	}
+	if reloaded.Conversations[0].Title != "架构讨论" || !reloaded.Conversations[0].CustomTitle {
+		t.Fatalf("expected persisted custom title, got %#v", reloaded.Conversations[0])
+	}
+}
+
+func TestDesktopDeleteChatSessionFallsBackToRemainingConversation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "knowledge.json"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "project.json"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "prompts.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	first, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("get first chat state: %v", err)
+	}
+	second, err := app.NewChatSession()
+	if err != nil {
+		t.Fatalf("new chat session: %v", err)
+	}
+
+	next, err := app.DeleteChatSession(second.SessionID)
+	if err != nil {
+		t.Fatalf("delete chat session: %v", err)
+	}
+	if next.SessionID != first.SessionID {
+		t.Fatalf("expected fallback to first session %q, got %#v", first.SessionID, next)
+	}
+	if len(next.Conversations) != 1 {
+		t.Fatalf("expected one remaining conversation, got %#v", next.Conversations)
+	}
+	if next.Conversations[0].SessionID != first.SessionID || !next.Conversations[0].Active {
+		t.Fatalf("unexpected remaining conversation: %#v", next.Conversations[0])
+	}
+}
+
 func TestBuildCurrentChatMarkdownExportFormatsConversation(t *testing.T) {
 	t.Parallel()
 

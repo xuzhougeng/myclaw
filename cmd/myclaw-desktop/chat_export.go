@@ -115,7 +115,7 @@ func countChatExportMessages(history []sessionstate.Message) int {
 }
 
 func defaultChatMarkdownFilename(project string, snapshot sessionstate.Snapshot) string {
-	title := sanitizeChatMarkdownFilenameSegment(chatConversationTitle(snapshot.History))
+	title := sanitizeChatMarkdownFilenameSegment(chatConversationTitle(snapshot))
 	if title == "" {
 		title = "conversation"
 	}
@@ -164,7 +164,7 @@ func sanitizeChatMarkdownFilenameSegment(value string) string {
 }
 
 func renderChatMarkdown(project, sessionID string, snapshot sessionstate.Snapshot) string {
-	title := strings.TrimSpace(chatConversationTitle(snapshot.History))
+	title := strings.TrimSpace(chatConversationTitle(snapshot))
 	if title == "" {
 		title = "新对话"
 	}

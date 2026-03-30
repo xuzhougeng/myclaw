@@ -406,6 +406,18 @@ function bindStaticEvents() {
   const chatSessionList = document.getElementById('chat-session-list');
   if (chatSessionList) {
     chatSessionList.addEventListener('click', (event) => {
+      const actionTarget = event.target.closest('[data-chat-session-action]');
+      if (actionTarget) {
+        const sessionId = actionTarget.dataset.chatSessionId || '';
+        if (!sessionId) return;
+        if (actionTarget.dataset.chatSessionAction === 'rename') {
+          void renameChatSession(sessionId);
+        } else if (actionTarget.dataset.chatSessionAction === 'delete') {
+          void deleteChatSession(sessionId);
+        }
+        return;
+      }
+
       const target = event.target.closest('[data-chat-session]');
       if (!target) return;
       const sessionId = target.dataset.chatSession || '';
@@ -767,6 +779,8 @@ function createWailsBackend(backend) {
     ExportChatMarkdown: () => backend.ExportChatMarkdown(),
     NewChatSession: () => backend.NewChatSession(),
     SwitchChatSession: (sessionId) => backend.SwitchChatSession(sessionId),
+    RenameChatSession: (sessionId, title) => backend.RenameChatSession(sessionId, title),
+    DeleteChatSession: (sessionId) => backend.DeleteChatSession(sessionId),
     GetChatPrompt: () => backend.GetChatPrompt(),
     SetChatPrompt: (idOrPrefix) => backend.SetChatPrompt(idOrPrefix),
     ClearChatPrompt: () => backend.ClearChatPrompt(),
@@ -824,6 +838,8 @@ function createHTTPBackend() {
     },
     NewChatSession: () => requestJSON('POST', '/api/chat/session/new'),
     SwitchChatSession: (sessionId) => requestJSON('POST', '/api/chat/session/switch', { sessionId }),
+    RenameChatSession: (sessionId, title) => requestJSON('POST', '/api/chat/session/rename', { sessionId, title }),
+    DeleteChatSession: (sessionId) => requestJSON('POST', '/api/chat/session/delete', { sessionId }),
     GetChatPrompt: () => requestJSON('GET', '/api/chat/prompt'),
     SetChatPrompt: (idOrPrefix) => requestJSON('POST', '/api/chat/prompt', { idOrPrefix }),
     ClearChatPrompt: () => requestJSON('DELETE', '/api/chat/prompt'),
@@ -1477,6 +1493,58 @@ async function switchChatSession(sessionId) {
   try {
     applyChatState(normalizeChatState(await state.backend.SwitchChatSession(nextSessionId)));
     await Promise.all([refreshSkills(), refreshChatPrompt()]);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function renameChatSession(sessionId) {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
+  }
+  const conversation = (state.chatState.conversations || []).find((item) => item.sessionId === sessionId);
+  if (!conversation) return;
+  if (typeof window.prompt !== 'function') {
+    showBanner('当前环境不支持输入弹窗。', true);
+    return;
+  }
+
+  const nextTitle = window.prompt('输入新的对话标题', conversation.title || '');
+  if (nextTitle == null) return;
+
+  const title = nextTitle.trim();
+  if (!title) {
+    showBanner('对话标题不能为空。', true);
+    return;
+  }
+  if (title === (conversation.title || '').trim()) {
+    return;
+  }
+
+  try {
+    applyChatState(normalizeChatState(await state.backend.RenameChatSession(sessionId, title)));
+    showBanner('对话已重命名。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function deleteChatSession(sessionId) {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
+  }
+  const conversation = (state.chatState.conversations || []).find((item) => item.sessionId === sessionId);
+  if (!conversation) return;
+
+  try {
+    const ok = await state.backend.ConfirmAction('删除对话', `确认删除「${conversation.title || '新对话'}」吗？这个动作不可撤销。`);
+    if (!ok) return;
+
+    applyChatState(normalizeChatState(await state.backend.DeleteChatSession(sessionId)));
+    await Promise.all([refreshSkills(), refreshChatPrompt()]);
+    showBanner('对话已删除。', false);
   } catch (error) {
     showBanner(asMessage(error), true);
   }
@@ -2773,17 +2841,39 @@ function renderChatSessions() {
 
   container.innerHTML = conversations
     .map((conversation) => `
-      <button
-        type="button"
-        class="chat-session-item ${conversation.active ? 'active' : ''}"
-        data-chat-session="${escapeAttribute(conversation.sessionId)}"
-      >
-        <div class="chat-session-title-row">
-          <strong>${escapeHTML(conversation.title || '新对话')}</strong>
-          <span>${escapeHTML(conversation.updatedAt || '')}</span>
+      <div class="chat-session-row">
+        <button
+          type="button"
+          class="chat-session-item ${conversation.active ? 'active' : ''}"
+          data-chat-session="${escapeAttribute(conversation.sessionId)}"
+        >
+          <div class="chat-session-title-row">
+            <strong>${escapeHTML(conversation.title || '新对话')}</strong>
+            <span>${escapeHTML(conversation.updatedAt || '')}</span>
+          </div>
+          <div class="chat-session-preview">${escapeHTML(conversation.preview || '还没有消息')}</div>
+        </button>
+        <div class="chat-session-actions">
+          <button
+            type="button"
+            class="chat-session-action"
+            data-chat-session-action="rename"
+            data-chat-session-id="${escapeAttribute(conversation.sessionId)}"
+            title="重命名"
+          >
+            改名
+          </button>
+          <button
+            type="button"
+            class="chat-session-action delete"
+            data-chat-session-action="delete"
+            data-chat-session-id="${escapeAttribute(conversation.sessionId)}"
+            title="删除"
+          >
+            删除
+          </button>
         </div>
-        <div class="chat-session-preview">${escapeHTML(conversation.preview || '还没有消息')}</div>
-      </button>
+      </div>
     `)
     .join('');
 }
@@ -2809,6 +2899,7 @@ function syncCurrentChatConversationFromMessages() {
   const nextConversation = {
     sessionId,
     title: summarizeChatTitle(state.chat),
+    customTitle: Boolean(currentIndex >= 0 && conversations[currentIndex]?.customTitle),
     preview: summarizeChatPreview(state.chat),
     updatedAt: nowLabel(),
     updatedAtUnix: Date.now(),
@@ -2822,6 +2913,9 @@ function syncCurrentChatConversationFromMessages() {
     active: index === currentIndex ? true : false,
   }));
   if (currentIndex >= 0) {
+    if (conversations[currentIndex]?.customTitle) {
+      nextConversation.title = conversations[currentIndex].title || nextConversation.title;
+    }
     nextConversations[currentIndex] = nextConversation;
   } else {
     nextConversations.unshift(nextConversation);
@@ -2929,6 +3023,7 @@ function normalizeChatState(payload) {
     ? next.conversations.map((item) => ({
       sessionId: item?.sessionId || '',
       title: item?.title || '',
+      customTitle: Boolean(item?.customTitle),
       preview: item?.preview || '',
       updatedAt: item?.updatedAt || '',
       updatedAtUnix: Number(item?.updatedAtUnix || 0),

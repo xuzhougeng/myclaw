@@ -21,6 +21,7 @@ const (
 type ChatConversation struct {
 	SessionID     string `json:"sessionId"`
 	Title         string `json:"title"`
+	CustomTitle   bool   `json:"customTitle"`
 	Preview       string `json:"preview"`
 	UpdatedAt     string `json:"updatedAt"`
 	UpdatedAtUnix int64  `json:"updatedAtUnix"`
@@ -93,6 +94,90 @@ func (a *DesktopApp) SwitchChatSession(sessionID string) (ChatState, error) {
 		}
 	}
 	a.rememberChatSession(project, sessionID)
+	return a.buildChatState(context.Background(), project)
+}
+
+func (a *DesktopApp) RenameChatSession(sessionID, title string) (ChatState, error) {
+	if a.sessionStore == nil {
+		return ChatState{}, errors.New("聊天会话存储尚未启用")
+	}
+
+	project, err := a.currentProject(context.Background())
+	if err != nil {
+		return ChatState{}, err
+	}
+
+	sessionID = strings.TrimSpace(sessionID)
+	title = strings.TrimSpace(title)
+	if !isDesktopChatSessionForProject(sessionID, project) {
+		return ChatState{}, errors.New("无效的对话 ID")
+	}
+	if title == "" {
+		return ChatState{}, errors.New("对话标题不能为空")
+	}
+
+	snapshot, ok, err := a.loadChatSessionSnapshot(context.Background(), project, sessionID)
+	if err != nil {
+		return ChatState{}, err
+	}
+	if !ok {
+		return ChatState{}, errors.New("未找到要重命名的对话")
+	}
+
+	snapshot.Title = title
+	if _, err := a.sessionStore.Save(context.Background(), snapshot); err != nil {
+		return ChatState{}, err
+	}
+	a.rememberChatSession(project, sessionID)
+	return a.buildChatState(context.Background(), project)
+}
+
+func (a *DesktopApp) DeleteChatSession(sessionID string) (ChatState, error) {
+	if a.sessionStore == nil {
+		return ChatState{}, errors.New("聊天会话存储尚未启用")
+	}
+
+	project, err := a.currentProject(context.Background())
+	if err != nil {
+		return ChatState{}, err
+	}
+
+	sessionID = strings.TrimSpace(sessionID)
+	if !isDesktopChatSessionForProject(sessionID, project) {
+		return ChatState{}, errors.New("无效的对话 ID")
+	}
+
+	if _, ok, err := a.loadChatSessionSnapshot(context.Background(), project, sessionID); err != nil {
+		return ChatState{}, err
+	} else if !ok {
+		return ChatState{}, errors.New("未找到要删除的对话")
+	}
+
+	currentSessionID, err := a.currentChatSession(context.Background(), project)
+	if err != nil {
+		return ChatState{}, err
+	}
+
+	if err := a.sessionStore.Delete(context.Background(), desktopConversationSnapshotKey(project, sessionID)); err != nil {
+		return ChatState{}, err
+	}
+
+	remaining, err := a.listProjectChatSessions(context.Background(), project)
+	if err != nil {
+		return ChatState{}, err
+	}
+	if len(remaining) == 0 {
+		nextSessionID := newDesktopChatSessionID(project)
+		if err := a.ensureChatSession(context.Background(), project, nextSessionID); err != nil {
+			return ChatState{}, err
+		}
+		a.rememberChatSession(project, nextSessionID)
+		return a.buildChatState(context.Background(), project)
+	}
+
+	if currentSessionID == sessionID || a.rememberedChatSession(project) == sessionID {
+		a.rememberChatSession(project, remaining[0].SessionID)
+	}
 	return a.buildChatState(context.Background(), project)
 }
 
@@ -303,9 +388,11 @@ func toChatConversation(sessionID string, snapshot sessionstate.Snapshot, active
 	if snapshot.UpdatedAt.IsZero() {
 		updatedAt = ""
 	}
+	customTitle := strings.TrimSpace(snapshot.Title) != ""
 	return ChatConversation{
 		SessionID:     sessionID,
-		Title:         chatConversationTitle(snapshot.History),
+		Title:         chatConversationTitle(snapshot),
+		CustomTitle:   customTitle,
 		Preview:       chatConversationPreview(snapshot.History),
 		UpdatedAt:     updatedAt,
 		UpdatedAtUnix: snapshot.UpdatedAt.Unix(),
@@ -333,7 +420,11 @@ func toChatMessages(snapshot sessionstate.Snapshot) []ChatMessage {
 	return messages
 }
 
-func chatConversationTitle(history []sessionstate.Message) string {
+func chatConversationTitle(snapshot sessionstate.Snapshot) string {
+	if title := strings.TrimSpace(snapshot.Title); title != "" {
+		return title
+	}
+	history := snapshot.History
 	for _, item := range history {
 		text := strings.TrimSpace(item.Content)
 		if strings.EqualFold(strings.TrimSpace(item.Role), "user") && text != "" {

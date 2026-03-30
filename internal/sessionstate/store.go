@@ -15,6 +15,7 @@ import (
 
 type Snapshot struct {
 	Key          string    `json:"key"`
+	Title        string    `json:"title,omitempty"`
 	Mode         string    `json:"mode,omitempty"`
 	LoadedSkills []string  `json:"loaded_skills,omitempty"`
 	PromptID     string    `json:"prompt_id,omitempty"`
@@ -63,6 +64,7 @@ func (s *Store) Save(_ context.Context, snapshot Snapshot) (Snapshot, error) {
 	}
 
 	snapshot.Key = normalizeKey(snapshot.Key)
+	snapshot.Title = strings.TrimSpace(snapshot.Title)
 	snapshot.Mode = strings.TrimSpace(snapshot.Mode)
 	snapshot.UpdatedAt = time.Now()
 	items[snapshot.Key] = snapshot
@@ -97,6 +99,19 @@ func (s *Store) List(_ context.Context) ([]Snapshot, error) {
 		}
 	})
 	return out, nil
+}
+
+func (s *Store) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	items, err := s.readAllLocked()
+	if err != nil {
+		return err
+	}
+
+	delete(items, normalizeKey(key))
+	return s.writeAllLocked(items)
 }
 
 func (s *Store) readAllLocked() (map[string]Snapshot, error) {

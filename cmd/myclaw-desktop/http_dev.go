@@ -316,6 +316,39 @@ func (s desktopHTTPDevServer) registerAPI(mux *http.ServeMux) {
 		s.writeResult(w, result, err)
 	})
 
+	mux.HandleFunc("/api/chat/session/rename", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			s.writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		var body struct {
+			SessionID string `json:"sessionId"`
+			Title     string `json:"title"`
+		}
+		if err := decodeJSONBody(r, &body); err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := s.app.RenameChatSession(body.SessionID, body.Title)
+		s.writeResult(w, result, err)
+	})
+
+	mux.HandleFunc("/api/chat/session/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			s.writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		var body struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := decodeJSONBody(r, &body); err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := s.app.DeleteChatSession(body.SessionID)
+		s.writeResult(w, result, err)
+	})
+
 	mux.HandleFunc("/api/chat/mode", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
