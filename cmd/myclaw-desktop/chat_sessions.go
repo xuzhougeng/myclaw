@@ -23,6 +23,9 @@ type ChatConversation struct {
 	Title         string `json:"title"`
 	CustomTitle   bool   `json:"customTitle"`
 	Preview       string `json:"preview"`
+	Source        string `json:"source"`
+	SourceLabel   string `json:"sourceLabel"`
+	ReadOnly      bool   `json:"readOnly"`
 	UpdatedAt     string `json:"updatedAt"`
 	UpdatedAtUnix int64  `json:"updatedAtUnix"`
 	MessageCount  int    `json:"messageCount"`
@@ -44,8 +47,12 @@ type ChatState struct {
 }
 
 type chatSessionSnapshot struct {
-	SessionID string
-	Snapshot  sessionstate.Snapshot
+	SessionID   string
+	SnapshotKey string
+	Source      string
+	SourceLabel string
+	ReadOnly    bool
+	Snapshot    sessionstate.Snapshot
 }
 
 func (a *DesktopApp) GetChatState() (ChatState, error) {
@@ -77,19 +84,15 @@ func (a *DesktopApp) SwitchChatSession(sessionID string) (ChatState, error) {
 	}
 
 	sessionID = strings.TrimSpace(sessionID)
-	if !isDesktopChatSessionForProject(sessionID, project) {
-		return ChatState{}, errors.New("无效的对话 ID")
-	}
-
-	snapshot, ok, err := a.loadChatSessionSnapshot(context.Background(), project, sessionID)
+	session, ok, err := a.findChatSession(context.Background(), project, sessionID)
 	if err != nil {
 		return ChatState{}, err
 	}
 	if !ok {
 		return ChatState{}, errors.New("未找到要切换的对话")
 	}
-	if a.sessionStore != nil {
-		if _, err := a.sessionStore.Save(context.Background(), snapshot); err != nil {
+	if !session.ReadOnly && a.sessionStore != nil {
+		if _, err := a.sessionStore.Save(context.Background(), session.Snapshot); err != nil {
 			return ChatState{}, err
 		}
 	}
@@ -109,23 +112,23 @@ func (a *DesktopApp) RenameChatSession(sessionID, title string) (ChatState, erro
 
 	sessionID = strings.TrimSpace(sessionID)
 	title = strings.TrimSpace(title)
-	if !isDesktopChatSessionForProject(sessionID, project) {
-		return ChatState{}, errors.New("无效的对话 ID")
-	}
 	if title == "" {
 		return ChatState{}, errors.New("对话标题不能为空")
 	}
 
-	snapshot, ok, err := a.loadChatSessionSnapshot(context.Background(), project, sessionID)
+	session, ok, err := a.findChatSession(context.Background(), project, sessionID)
 	if err != nil {
 		return ChatState{}, err
 	}
 	if !ok {
 		return ChatState{}, errors.New("未找到要重命名的对话")
 	}
+	if session.ReadOnly {
+		return ChatState{}, errors.New("微信会话只支持查看历史，不能改名")
+	}
 
-	snapshot.Title = title
-	if _, err := a.sessionStore.Save(context.Background(), snapshot); err != nil {
+	session.Snapshot.Title = title
+	if _, err := a.sessionStore.Save(context.Background(), session.Snapshot); err != nil {
 		return ChatState{}, err
 	}
 	a.rememberChatSession(project, sessionID)
@@ -143,14 +146,15 @@ func (a *DesktopApp) DeleteChatSession(sessionID string) (ChatState, error) {
 	}
 
 	sessionID = strings.TrimSpace(sessionID)
-	if !isDesktopChatSessionForProject(sessionID, project) {
-		return ChatState{}, errors.New("无效的对话 ID")
-	}
-
-	if _, ok, err := a.loadChatSessionSnapshot(context.Background(), project, sessionID); err != nil {
+	session, ok, err := a.findChatSession(context.Background(), project, sessionID)
+	if err != nil {
 		return ChatState{}, err
-	} else if !ok {
+	}
+	if !ok {
 		return ChatState{}, errors.New("未找到要删除的对话")
+	}
+	if session.ReadOnly {
+		return ChatState{}, errors.New("微信会话只支持查看历史，不能删除")
 	}
 
 	currentSessionID, err := a.currentChatSession(context.Background(), project)
@@ -158,26 +162,26 @@ func (a *DesktopApp) DeleteChatSession(sessionID string) (ChatState, error) {
 		return ChatState{}, err
 	}
 
-	if err := a.sessionStore.Delete(context.Background(), desktopConversationSnapshotKey(project, sessionID)); err != nil {
+	if err := a.sessionStore.Delete(context.Background(), session.SnapshotKey); err != nil {
 		return ChatState{}, err
 	}
 
-	remaining, err := a.listProjectChatSessions(context.Background(), project)
+	remaining, err := a.listChatSessions(context.Background(), project)
 	if err != nil {
 		return ChatState{}, err
 	}
-	if len(remaining) == 0 {
-		nextSessionID := newDesktopChatSessionID(project)
-		if err := a.ensureChatSession(context.Background(), project, nextSessionID); err != nil {
-			return ChatState{}, err
+	if nextSessionID, ok := firstDesktopChatSession(remaining); ok {
+		if currentSessionID == sessionID || a.rememberedChatSession(project) == sessionID {
+			a.rememberChatSession(project, nextSessionID)
 		}
-		a.rememberChatSession(project, nextSessionID)
 		return a.buildChatState(context.Background(), project)
 	}
 
-	if currentSessionID == sessionID || a.rememberedChatSession(project) == sessionID {
-		a.rememberChatSession(project, remaining[0].SessionID)
+	nextSessionID := newDesktopChatSessionID(project)
+	if err := a.ensureChatSession(context.Background(), project, nextSessionID); err != nil {
+		return ChatState{}, err
 	}
+	a.rememberChatSession(project, nextSessionID)
 	return a.buildChatState(context.Background(), project)
 }
 
@@ -191,12 +195,15 @@ func (a *DesktopApp) RefreshChatResponse() (ChatResponse, error) {
 		return ChatResponse{}, err
 	}
 
-	sessionID, err := a.currentChatSession(context.Background(), project)
+	session, err := a.currentChatConversation(context.Background(), project)
 	if err != nil {
 		return ChatResponse{}, err
 	}
+	if session.ReadOnly {
+		return ChatResponse{}, errors.New("当前会话来自微信，只支持查看历史；请新建本地对话后继续")
+	}
 
-	snapshot, ok, err := a.loadChatSessionSnapshot(context.Background(), project, sessionID)
+	snapshot, ok, err := a.loadChatSessionSnapshot(context.Background(), project, session.SessionID)
 	if err != nil {
 		return ChatResponse{}, err
 	}
@@ -212,7 +219,7 @@ func (a *DesktopApp) RefreshChatResponse() (ChatResponse, error) {
 	if _, err := a.sessionStore.Save(context.Background(), trimmedSnapshot); err != nil {
 		return ChatResponse{}, err
 	}
-	a.rememberChatSession(project, sessionID)
+	a.rememberChatSession(project, session.SessionID)
 
 	result, err := a.sendMessage(context.Background(), input, nil)
 	if err != nil {
@@ -231,7 +238,7 @@ func (a *DesktopApp) buildChatState(ctx context.Context, project string) (ChatSt
 		return ChatState{}, err
 	}
 
-	sessions, err := a.listProjectChatSessions(ctx, project)
+	sessions, err := a.listChatSessions(ctx, project)
 	if err != nil {
 		return ChatState{}, err
 	}
@@ -243,6 +250,8 @@ func (a *DesktopApp) buildChatState(ctx context.Context, project string) (ChatSt
 					SessionID:    sessionID,
 					Title:        "新对话",
 					Preview:      "还没有消息",
+					Source:       desktopInterface,
+					SourceLabel:  "桌面",
 					MessageCount: 0,
 					HasMessages:  false,
 					Active:       true,
@@ -264,42 +273,50 @@ func (a *DesktopApp) buildChatState(ctx context.Context, project string) (ChatSt
 			activeFound = true
 			state.Messages = toChatMessages(item.Snapshot)
 		}
-		state.Conversations = append(state.Conversations, toChatConversation(item.SessionID, item.Snapshot, active))
+		state.Conversations = append(state.Conversations, toChatConversation(item, active))
 	}
 	if activeFound {
 		return state, nil
 	}
 
-	if snapshot, ok, err := a.loadChatSessionSnapshot(ctx, project, sessionID); err != nil {
+	if item, ok, err := a.findChatSession(ctx, project, sessionID); err != nil {
 		return ChatState{}, err
 	} else if ok {
-		state.Messages = toChatMessages(snapshot)
-		state.Conversations = append([]ChatConversation{toChatConversation(sessionID, snapshot, true)}, state.Conversations...)
+		state.Messages = toChatMessages(item.Snapshot)
+		state.Conversations = append([]ChatConversation{toChatConversation(item, true)}, state.Conversations...)
 	}
 	return state, nil
 }
 
 func (a *DesktopApp) chatMessageContext(ctx context.Context, project string) (appsvc.MessageContext, error) {
-	sessionID, err := a.currentChatSession(ctx, project)
+	session, err := a.currentChatConversation(ctx, project)
 	if err != nil {
 		return appsvc.MessageContext{}, err
 	}
-	return desktopMessageContext(project, sessionID), nil
+	if session.ReadOnly {
+		return externalMessageContext(session.Source, session.SessionID), nil
+	}
+	return desktopMessageContext(project, session.SessionID), nil
 }
 
 func (a *DesktopApp) currentChatSession(ctx context.Context, project string) (string, error) {
 	project = knowledge.CanonicalProjectName(project)
-	if sessionID := a.rememberedChatSession(project); sessionID != "" {
-		return sessionID, nil
-	}
-
-	sessions, err := a.listProjectChatSessions(ctx, project)
+	sessions, err := a.listChatSessions(ctx, project)
 	if err != nil {
 		return "", err
 	}
-	if len(sessions) > 0 {
-		a.rememberChatSession(project, sessions[0].SessionID)
-		return sessions[0].SessionID, nil
+
+	if sessionID := a.rememberedChatSession(project); sessionID != "" {
+		for _, item := range sessions {
+			if item.SessionID == sessionID {
+				return sessionID, nil
+			}
+		}
+	}
+
+	if sessionID, ok := firstDesktopChatSession(sessions); ok {
+		a.rememberChatSession(project, sessionID)
+		return sessionID, nil
 	}
 
 	sessionID := newDesktopChatSessionID(project)
@@ -353,7 +370,35 @@ func (a *DesktopApp) loadChatSessionSnapshot(ctx context.Context, project, sessi
 	return a.sessionStore.Load(ctx, desktopConversationSnapshotKey(project, sessionID))
 }
 
-func (a *DesktopApp) listProjectChatSessions(ctx context.Context, project string) ([]chatSessionSnapshot, error) {
+func (a *DesktopApp) currentChatConversation(ctx context.Context, project string) (chatSessionSnapshot, error) {
+	sessionID, err := a.currentChatSession(ctx, project)
+	if err != nil {
+		return chatSessionSnapshot{}, err
+	}
+	session, ok, err := a.findChatSession(ctx, project, sessionID)
+	if err != nil {
+		return chatSessionSnapshot{}, err
+	}
+	if !ok {
+		return chatSessionSnapshot{}, errors.New("未找到当前对话")
+	}
+	return session, nil
+}
+
+func (a *DesktopApp) findChatSession(ctx context.Context, project, sessionID string) (chatSessionSnapshot, bool, error) {
+	sessions, err := a.listChatSessions(ctx, project)
+	if err != nil {
+		return chatSessionSnapshot{}, false, err
+	}
+	for _, item := range sessions {
+		if item.SessionID == strings.TrimSpace(sessionID) {
+			return item, true, nil
+		}
+	}
+	return chatSessionSnapshot{}, false, nil
+}
+
+func (a *DesktopApp) listChatSessions(ctx context.Context, project string) ([]chatSessionSnapshot, error) {
 	if a.sessionStore == nil {
 		return nil, nil
 	}
@@ -366,19 +411,32 @@ func (a *DesktopApp) listProjectChatSessions(ctx context.Context, project string
 	project = knowledge.CanonicalProjectName(project)
 	out := make([]chatSessionSnapshot, 0, len(items))
 	for _, item := range items {
-		itemProject, sessionID, ok := parseDesktopConversationKey(item.Key)
+		source, sessionID, itemProject, ok := parseConversationKey(item.Key)
 		if !ok {
 			continue
 		}
-		if !strings.EqualFold(itemProject, project) {
-			continue
-		}
-		if !isDesktopChatSessionForProject(sessionID, project) {
+		switch {
+		case isDesktopConversationSource(source):
+			if !strings.EqualFold(itemProject, project) {
+				continue
+			}
+			if !isDesktopChatSessionForProject(sessionID, project) {
+				continue
+			}
+		case isWeixinConversationSource(source):
+			if len(item.History) == 0 && strings.TrimSpace(item.Title) == "" {
+				continue
+			}
+		default:
 			continue
 		}
 		out = append(out, chatSessionSnapshot{
-			SessionID: sessionID,
-			Snapshot:  item,
+			SessionID:   sessionID,
+			SnapshotKey: item.Key,
+			Source:      source,
+			SourceLabel: conversationSourceLabel(source),
+			ReadOnly:    conversationReadOnly(source),
+			Snapshot:    item,
 		})
 	}
 	return out, nil
@@ -394,9 +452,8 @@ func desktopConversationSnapshotKey(project, sessionID string) string {
 	}, "|")
 }
 
-func parseDesktopConversationKey(key string) (project string, sessionID string, ok bool) {
+func parseConversationKey(key string) (source string, sessionID string, project string, ok bool) {
 	parts := strings.Split(strings.TrimSpace(key), "|")
-	var source string
 	for _, part := range parts {
 		switch {
 		case strings.HasPrefix(part, "source:"):
@@ -407,7 +464,15 @@ func parseDesktopConversationKey(key string) (project string, sessionID string, 
 			project = strings.TrimSpace(strings.TrimPrefix(part, "project:"))
 		}
 	}
-	if source != desktopSourceLabel() || sessionID == "" || project == "" {
+	if source == "" || sessionID == "" {
+		return "", "", "", false
+	}
+	return source, sessionID, project, true
+}
+
+func parseDesktopConversationKey(key string) (project string, sessionID string, ok bool) {
+	source, sessionID, project, ok := parseConversationKey(key)
+	if !ok || !isDesktopConversationSource(source) || project == "" {
 		return "", "", false
 	}
 	return project, sessionID, true
@@ -426,21 +491,80 @@ func isDesktopChatSessionForProject(sessionID, project string) bool {
 	return sessionID == base || strings.HasPrefix(sessionID, base+":")
 }
 
-func toChatConversation(sessionID string, snapshot sessionstate.Snapshot, active bool) ChatConversation {
-	updatedAt := strings.TrimSpace(snapshot.UpdatedAt.Local().Format("2006-01-02 15:04:05"))
-	if snapshot.UpdatedAt.IsZero() {
+func isDesktopConversationSource(source string) bool {
+	return strings.EqualFold(strings.TrimSpace(source), desktopSourceLabel())
+}
+
+func isWeixinConversationSource(source string) bool {
+	name, _ := splitConversationSource(source)
+	return strings.EqualFold(name, "weixin")
+}
+
+func conversationReadOnly(source string) bool {
+	return isWeixinConversationSource(source)
+}
+
+func conversationSourceLabel(source string) string {
+	name, userID := splitConversationSource(source)
+	switch {
+	case strings.EqualFold(name, "weixin") && userID != "":
+		return "微信 · " + userID
+	case strings.EqualFold(name, "weixin"):
+		return "微信"
+	case strings.EqualFold(name, desktopInterface):
+		return "桌面"
+	case userID != "":
+		return name + " · " + userID
+	default:
+		return source
+	}
+}
+
+func splitConversationSource(source string) (name string, userID string) {
+	source = strings.TrimSpace(source)
+	name, userID, found := strings.Cut(source, ":")
+	if !found {
+		return source, ""
+	}
+	return strings.TrimSpace(name), strings.TrimSpace(userID)
+}
+
+func firstDesktopChatSession(sessions []chatSessionSnapshot) (string, bool) {
+	for _, item := range sessions {
+		if !item.ReadOnly {
+			return item.SessionID, true
+		}
+	}
+	return "", false
+}
+
+func externalMessageContext(source, sessionID string) appsvc.MessageContext {
+	name, userID := splitConversationSource(source)
+	return appsvc.MessageContext{
+		UserID:    userID,
+		Interface: name,
+		SessionID: strings.TrimSpace(sessionID),
+	}
+}
+
+func toChatConversation(item chatSessionSnapshot, active bool) ChatConversation {
+	updatedAt := strings.TrimSpace(item.Snapshot.UpdatedAt.Local().Format("2006-01-02 15:04:05"))
+	if item.Snapshot.UpdatedAt.IsZero() {
 		updatedAt = ""
 	}
-	customTitle := strings.TrimSpace(snapshot.Title) != ""
+	customTitle := strings.TrimSpace(item.Snapshot.Title) != ""
 	return ChatConversation{
-		SessionID:     sessionID,
-		Title:         chatConversationTitle(snapshot),
+		SessionID:     item.SessionID,
+		Title:         chatConversationTitle(item.Snapshot),
 		CustomTitle:   customTitle,
-		Preview:       chatConversationPreview(snapshot.History),
+		Preview:       chatConversationPreview(item.Snapshot.History),
+		Source:        strings.TrimSpace(item.Source),
+		SourceLabel:   strings.TrimSpace(item.SourceLabel),
+		ReadOnly:      item.ReadOnly,
 		UpdatedAt:     updatedAt,
-		UpdatedAtUnix: snapshot.UpdatedAt.Unix(),
-		MessageCount:  len(snapshot.History),
-		HasMessages:   len(snapshot.History) > 0,
+		UpdatedAtUnix: item.Snapshot.UpdatedAt.Unix(),
+		MessageCount:  len(item.Snapshot.History),
+		HasMessages:   len(item.Snapshot.History) > 0,
 		Active:        active,
 	}
 }

@@ -33,6 +33,11 @@ type SearchPlan struct {
 	Keywords []string `json:"keywords"`
 }
 
+type FileSearchIntent struct {
+	Enabled bool   `json:"enabled"`
+	Query   string `json:"query"`
+}
+
 type ConversationMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -382,6 +387,56 @@ Return only JSON that matches the schema.
 	plan.Queries = normalizeSearchQueries(plan.Queries)
 	plan.Keywords = knowledge.MergeKeywords(plan.Keywords)
 	return plan, nil
+}
+
+func (s *Service) BuildFileSearchIntent(ctx context.Context, input string) (FileSearchIntent, error) {
+	cfg, err := s.requireConfig(ctx)
+	if err != nil {
+		return FileSearchIntent{}, err
+	}
+
+	schema := map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"enabled": map[string]any{
+				"type": "boolean",
+			},
+			"query": map[string]any{
+				"type": "string",
+			},
+		},
+		"required": []string{"enabled", "query"},
+	}
+
+	instructions := strings.TrimSpace(`
+You are deciding whether the user is asking to find existing files on disk via Everything on Windows.
+
+If the user is asking to find files:
+- set enabled=true
+- query must be a concise Everything search query only, not an explanation
+- preserve the user's real search target and strip filler words
+- use drive filters like d: when the user specifies D盘/C盘/E盘
+- use ext:pdf / ext:doc;docx / ext:xls;xlsx / ext:ppt;pptx when file types are mentioned
+- use dm:today when the user asks for files created or updated today
+- keep only retrieval-essential terms
+
+If the user is not asking to find files on disk:
+- set enabled=false
+- set query=""
+
+Return only JSON that matches the schema.
+`)
+
+	var intent FileSearchIntent
+	if err := s.generateJSON(ctx, cfg, instructions, strings.TrimSpace(input), "file_search_intent", schema, &intent); err != nil {
+		return FileSearchIntent{}, err
+	}
+	intent.Query = strings.Join(strings.Fields(strings.TrimSpace(intent.Query)), " ")
+	if !intent.Enabled {
+		intent.Query = ""
+	}
+	return intent, nil
 }
 
 func (s *Service) ReviewAnswerCandidates(ctx context.Context, question string, entries []knowledge.Entry) ([]string, error) {

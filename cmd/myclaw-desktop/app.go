@@ -245,8 +245,20 @@ func NewDesktopApp(dataDir string, store *knowledge.Store, promptStore *promptli
 		chatSessionMap: make(map[string]string),
 		weixinStatus:   defaultWeixinStatus(),
 	}
+	if weixinBridge != nil {
+		weixinBridge.SetConversationUpdatedHook(app.emitChatChanged)
+	}
 	app.applyPersistedSettings()
 	return app
+}
+
+func (a *DesktopApp) emitChatChanged() {
+	if a.ctx == nil {
+		return
+	}
+	runtime.EventsEmit(a.ctx, "chat:changed", map[string]string{
+		"source": "weixin",
+	})
 }
 
 func (a *DesktopApp) startup(ctx context.Context) {
@@ -1084,6 +1096,13 @@ func (a *DesktopApp) sendMessage(ctx context.Context, input string, onDelta func
 			SessionID:      state.SessionID,
 			SessionChanged: true,
 		}, nil
+	}
+	active, err := a.currentChatConversation(ctx, project)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	if active.ReadOnly {
+		return ChatResponse{}, errors.New("当前会话来自微信，只支持查看历史；请新建本地对话后继续")
 	}
 	mc, err := a.chatMessageContext(ctx, project)
 	if err != nil {

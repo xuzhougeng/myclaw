@@ -91,22 +91,17 @@ func (a *DesktopApp) buildCurrentChatMarkdownExport(ctx context.Context) (ChatMa
 		return ChatMarkdownExport{}, err
 	}
 
-	sessionID, err := a.currentChatSession(ctx, project)
+	session, err := a.currentChatConversation(ctx, project)
 	if err != nil {
 		return ChatMarkdownExport{}, err
 	}
-
-	snapshot, ok, err := a.loadChatSessionSnapshot(ctx, project, sessionID)
-	if err != nil {
-		return ChatMarkdownExport{}, err
-	}
-	if !ok || countChatExportMessages(snapshot.History) == 0 {
+	if countChatExportMessages(session.Snapshot.History) == 0 {
 		return ChatMarkdownExport{}, errors.New("当前对话还没有可导出的消息")
 	}
 
 	return ChatMarkdownExport{
-		Filename: defaultChatMarkdownFilename(project, snapshot),
-		Markdown: renderChatMarkdown(project, sessionID, snapshot),
+		Filename: defaultChatMarkdownFilename(project, session.Snapshot),
+		Markdown: renderChatMarkdown(project, session.SessionID, session.Snapshot),
 	}, nil
 }
 

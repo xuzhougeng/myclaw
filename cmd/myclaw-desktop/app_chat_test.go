@@ -153,6 +153,104 @@ func TestDesktopSendMessageReturnsAndPersistsUsage(t *testing.T) {
 	}
 }
 
+func TestDesktopChatStateIncludesWeixinConversation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "knowledge.json"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "project.json"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "prompts.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	if _, err := app.GetChatState(); err != nil {
+		t.Fatalf("prime desktop chat state: %v", err)
+	}
+	if _, err := sessionStore.Save(context.Background(), sessionstate.Snapshot{
+		Key: "source:weixin:user-1|session:weixin:ctx-1",
+		History: []sessionstate.Message{
+			{Role: "user", Content: "帮我找单细胞 pdf"},
+			{Role: "assistant", Content: "找到 2 个文件，回复序号即可发送给你。"},
+		},
+	}); err != nil {
+		t.Fatalf("save weixin snapshot: %v", err)
+	}
+
+	state, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("get chat state: %v", err)
+	}
+
+	found := false
+	for _, item := range state.Conversations {
+		if item.SessionID != "weixin:ctx-1" {
+			continue
+		}
+		found = true
+		if !item.ReadOnly {
+			t.Fatalf("expected weixin conversation to be read-only: %#v", item)
+		}
+		if item.Source != "weixin:user-1" || item.SourceLabel != "微信 · user-1" {
+			t.Fatalf("unexpected weixin source metadata: %#v", item)
+		}
+		if item.Active {
+			t.Fatalf("expected desktop conversation to remain active by default: %#v", item)
+		}
+	}
+	if !found {
+		t.Fatalf("expected weixin conversation in chat state, got %#v", state.Conversations)
+	}
+
+	switched, err := app.SwitchChatSession("weixin:ctx-1")
+	if err != nil {
+		t.Fatalf("switch to weixin conversation: %v", err)
+	}
+	if switched.SessionID != "weixin:ctx-1" {
+		t.Fatalf("unexpected active session after switch: %#v", switched)
+	}
+	if len(switched.Messages) != 2 {
+		t.Fatalf("expected weixin history to be loaded, got %#v", switched.Messages)
+	}
+	if switched.Messages[0].Text != "帮我找单细胞 pdf" || switched.Messages[1].Text != "找到 2 个文件，回复序号即可发送给你。" {
+		t.Fatalf("unexpected weixin message history: %#v", switched.Messages)
+	}
+}
+
+func TestDesktopSendMessageRejectsWeixinConversation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "knowledge.json"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "project.json"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "prompts.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	if _, err := app.GetChatState(); err != nil {
+		t.Fatalf("prime desktop chat state: %v", err)
+	}
+	if _, err := sessionStore.Save(context.Background(), sessionstate.Snapshot{
+		Key: "source:weixin:user-1|session:weixin:ctx-1",
+		History: []sessionstate.Message{
+			{Role: "user", Content: "你好"},
+			{Role: "assistant", Content: "你好，我在。"},
+		},
+	}); err != nil {
+		t.Fatalf("save weixin snapshot: %v", err)
+	}
+	if _, err := app.SwitchChatSession("weixin:ctx-1"); err != nil {
+		t.Fatalf("switch to weixin conversation: %v", err)
+	}
+
+	if _, err := app.SendMessage("继续说"); err == nil || !strings.Contains(err.Error(), "只支持查看历史") {
+		t.Fatalf("expected read-only session error, got %v", err)
+	}
+}
+
 func TestDesktopChatSessionCanBeRenamed(t *testing.T) {
 	t.Parallel()
 
@@ -522,6 +620,10 @@ func (f desktopTestAI) RouteCommand(context.Context, string) (ai.RouteDecision, 
 
 func (f desktopTestAI) BuildSearchPlan(context.Context, string) (ai.SearchPlan, error) {
 	return ai.SearchPlan{}, nil
+}
+
+func (f desktopTestAI) BuildFileSearchIntent(context.Context, string) (ai.FileSearchIntent, error) {
+	return ai.FileSearchIntent{}, nil
 }
 
 func (f desktopTestAI) ReviewAnswerCandidates(context.Context, string, []knowledge.Entry) ([]string, error) {

@@ -623,6 +623,36 @@ func TestBuildSearchPlan(t *testing.T) {
 	}
 }
 
+func TestBuildFileSearchIntent(t *testing.T) {
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		var req responsesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Text == nil || req.Text.Format.Name != "file_search_intent" {
+			t.Fatalf("unexpected schema request: %#v", req.Text)
+		}
+		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"enabled\":true,\"query\":\"d: ext:pdf 单细胞\"}"}]}]}`), nil
+	})
+
+	intent, err := service.BuildFileSearchIntent(context.Background(), "查找 D 盘单细胞相关的PDF文件")
+	if err != nil {
+		t.Fatalf("build file search intent: %v", err)
+	}
+	if !intent.Enabled || intent.Query != "d: ext:pdf 单细胞" {
+		t.Fatalf("unexpected intent: %#v", intent)
+	}
+}
+
 func TestReviewAnswerCandidates(t *testing.T) {
 	store := newConfiguredStore(t, modelconfig.Config{
 		Provider: modelconfig.ProviderOpenAI,

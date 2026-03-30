@@ -10,7 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
+
+	"myclaw/internal/app"
 )
 
 const (
@@ -48,14 +49,25 @@ func (b *Bridge) maybeHandleFileFind(ctx context.Context, msg WeixinMessage, tex
 
 	command := normalizeSlashCommand(text)
 	query := ""
+	var err error
 	if strings.HasPrefix(strings.ToLower(command), "/find") {
 		query = strings.TrimSpace(strings.TrimPrefix(command, "/find"))
 		if query == "" {
 			return "用法: /find <关键词>\n例如: /find 单细胞*.pdf", true, nil
 		}
 	} else {
+		if b.service == nil {
+			return "", false, nil
+		}
 		var ok bool
-		query, ok = inferEverythingQueryFromText(text)
+		query, ok, err = b.service.BuildWeixinFileSearchQuery(ctx, app.MessageContext{
+			UserID:    msg.FromUserID,
+			Interface: "weixin",
+			SessionID: weixinSessionID(msg),
+		}, text)
+		if err != nil {
+			return "", false, err
+		}
 		if !ok {
 			return "", false, nil
 		}
@@ -238,173 +250,4 @@ func searchFilesWithEverything(ctx context.Context, everythingPath, query string
 		}
 	}
 	return results, nil
-}
-
-func inferEverythingQueryFromText(text string) (string, bool) {
-	raw := strings.TrimSpace(normalizeSlashCommand(text))
-	if raw == "" || strings.HasPrefix(raw, "/") {
-		return "", false
-	}
-
-	lower := strings.ToLower(raw)
-	if !containsAny(lower, "找", "查找", "搜索", "搜", "查一下", "找一下", "找找") {
-		return "", false
-	}
-
-	drive := detectDriveFilter(raw)
-	exts := detectExtensionFilters(lower)
-	if drive == "" && len(exts) == 0 && !containsAny(lower, "文件", "文档", "附件", "pdf", "word", "excel", "ppt", "表格", "图片", "照片", "压缩包") {
-		return "", false
-	}
-
-	terms := make([]string, 0, 4)
-	if drive != "" {
-		terms = append(terms, drive+":")
-	}
-	if containsAny(lower, "今天", "今日") {
-		terms = append(terms, "dm:today")
-	}
-	if len(exts) > 0 {
-		terms = append(terms, "ext:"+strings.Join(exts, ";"))
-	}
-	if keyword := extractFindKeywords(raw); keyword != "" {
-		terms = append(terms, keyword)
-	}
-	if len(terms) == 0 {
-		return "", false
-	}
-	return strings.Join(uniqueTerms(terms), " "), true
-}
-
-func detectDriveFilter(text string) string {
-	runes := []rune(strings.TrimSpace(text))
-	for idx := 0; idx+1 < len(runes); idx++ {
-		if !isASCIILetter(runes[idx]) || runes[idx+1] != '盘' {
-			continue
-		}
-		return strings.ToLower(string(runes[idx]))
-	}
-	return ""
-}
-
-func detectExtensionFilters(text string) []string {
-	type extensionRule struct {
-		terms []string
-		exts  []string
-	}
-
-	rules := []extensionRule{
-		{terms: []string{"pdf"}, exts: []string{"pdf"}},
-		{terms: []string{"word", "docx", "doc", "文档"}, exts: []string{"doc", "docx"}},
-		{terms: []string{"excel", "xlsx", "xls", "csv", "tsv", "表格"}, exts: []string{"xls", "xlsx", "csv", "tsv"}},
-		{terms: []string{"ppt", "pptx", "幻灯片"}, exts: []string{"ppt", "pptx"}},
-		{terms: []string{"jpg", "jpeg", "png", "gif", "webp", "图片", "照片"}, exts: []string{"jpg", "jpeg", "png", "gif", "webp"}},
-		{terms: []string{"zip", "rar", "7z", "压缩包"}, exts: []string{"zip", "rar", "7z"}},
-	}
-
-	var out []string
-	seen := make(map[string]struct{})
-	for _, rule := range rules {
-		if !containsAny(text, rule.terms...) {
-			continue
-		}
-		for _, ext := range rule.exts {
-			if _, ok := seen[ext]; ok {
-				continue
-			}
-			seen[ext] = struct{}{}
-			out = append(out, ext)
-		}
-	}
-	return out
-}
-
-func extractFindKeywords(text string) string {
-	replacer := strings.NewReplacer(
-		"，", " ",
-		"。", " ",
-		"？", " ",
-		"！", " ",
-		"、", " ",
-		",", " ",
-		".", " ",
-		":", " ",
-		"：", " ",
-		";", " ",
-		"；", " ",
-		"（", " ",
-		"）", " ",
-		"(", " ",
-		")", " ",
-		"/", " ",
-		"\\", " ",
-	)
-	value := replacer.Replace(text)
-
-	for _, noise := range []string{
-		"帮我", "帮忙", "麻烦", "请", "一下", "给我", "去", "把", "我要", "我想", "找一下", "查一下", "查找", "搜索", "搜", "查", "找",
-		"今天", "今日", "刚生成", "刚刚生成", "生成的", "最新", "文件", "文档", "附件", "的",
-		"pdf", "word", "excel", "ppt", "doc", "docx", "xls", "xlsx", "csv", "tsv", "jpg", "jpeg", "png", "gif", "webp", "zip", "rar", "7z",
-		"D盘", "d盘", "C盘", "c盘", "E盘", "e盘", "F盘", "f盘",
-	} {
-		value = strings.ReplaceAll(value, noise, " ")
-	}
-
-	fields := strings.Fields(strings.TrimSpace(value))
-	if len(fields) == 0 {
-		return ""
-	}
-
-	var keywords []string
-	for _, field := range fields {
-		field = strings.TrimSpace(field)
-		if field == "" {
-			continue
-		}
-		if isMostlyPunctuation(field) {
-			continue
-		}
-		keywords = append(keywords, field)
-	}
-	return strings.Join(keywords, " ")
-}
-
-func uniqueTerms(items []string) []string {
-	out := make([]string, 0, len(items))
-	seen := make(map[string]struct{})
-	for _, item := range items {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		key := strings.ToLower(item)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, item)
-	}
-	return out
-}
-
-func containsAny(text string, values ...string) bool {
-	for _, value := range values {
-		if strings.Contains(text, value) {
-			return true
-		}
-	}
-	return false
-}
-
-func isASCIILetter(value rune) bool {
-	return ('a' <= value && value <= 'z') || ('A' <= value && value <= 'Z')
-}
-
-func isMostlyPunctuation(text string) bool {
-	for _, value := range text {
-		if unicode.IsLetter(value) || unicode.IsDigit(value) {
-			return false
-		}
-	}
-	return true
 }

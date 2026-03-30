@@ -37,6 +37,8 @@ type Bridge struct {
 	service        *app.Service
 	reminders      *reminder.Manager
 	config         BridgeConfig
+	conversationMu sync.RWMutex
+	onConversation func()
 	findMu         sync.Mutex
 	pendingFind    map[string]pendingFileSelection
 	everythingPath string
@@ -58,6 +60,21 @@ func NewBridge(client *Client, service *app.Service, reminders *reminder.Manager
 		return bridge.client.SendFileMessage(ctx, toUserID, contextToken, filePath)
 	}
 	return bridge
+}
+
+func (b *Bridge) SetConversationUpdatedHook(fn func()) {
+	b.conversationMu.Lock()
+	b.onConversation = fn
+	b.conversationMu.Unlock()
+}
+
+func (b *Bridge) notifyConversationUpdated() {
+	b.conversationMu.RLock()
+	fn := b.onConversation
+	b.conversationMu.RUnlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 func (b *Bridge) StartLogin() (*QRCodeResponse, error) {
@@ -196,6 +213,11 @@ func (b *Bridge) Run(ctx context.Context) error {
 func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 	text := extractText(msg)
 	log.Printf("[weixin] inbound from=%s text=%s", msg.FromUserID, truncate(text, 80))
+	messageContext := app.MessageContext{
+		UserID:    msg.FromUserID,
+		Interface: "weixin",
+		SessionID: weixinSessionID(msg),
+	}
 
 	if b.reminders != nil {
 		userID := msg.FromUserID
@@ -211,6 +233,10 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 			log.Printf("[weixin] handle /find failed: %v", err)
 			reply = "处理文件查找失败，请稍后重试。"
 		}
+		if b.service != nil && strings.TrimSpace(text) != "" && strings.TrimSpace(reply) != "" {
+			b.service.RecordConversationTurn(ctx, messageContext, text, reply)
+			b.notifyConversationUpdated()
+		}
 		if strings.TrimSpace(reply) != "" {
 			if sendErr := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); sendErr != nil {
 				log.Printf("[weixin] send /find reply failed: %v", sendErr)
@@ -219,15 +245,12 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 		return
 	}
 
-	reply, err := b.service.HandleMessage(ctx, app.MessageContext{
-		UserID:    msg.FromUserID,
-		Interface: "weixin",
-		SessionID: weixinSessionID(msg),
-	}, text)
+	reply, err := b.service.HandleMessage(ctx, messageContext, text)
 	if err != nil {
 		log.Printf("[weixin] handle message failed: %v", err)
 		reply = "处理失败，请稍后重试。"
 	}
+	b.notifyConversationUpdated()
 
 	if err := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); err != nil {
 		log.Printf("[weixin] send reply failed: %v", err)

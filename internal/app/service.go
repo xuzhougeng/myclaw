@@ -71,6 +71,7 @@ type aiBackend interface {
 	IsConfigured(ctx context.Context) (bool, error)
 	RouteCommand(ctx context.Context, input string) (ai.RouteDecision, error)
 	BuildSearchPlan(ctx context.Context, question string) (ai.SearchPlan, error)
+	BuildFileSearchIntent(ctx context.Context, input string) (ai.FileSearchIntent, error)
 	ReviewAnswerCandidates(ctx context.Context, question string, entries []knowledge.Entry) ([]string, error)
 	Answer(ctx context.Context, question string, entries []knowledge.Entry) (string, error)
 	Chat(ctx context.Context, input string, history []ai.ConversationMessage) (string, error)
@@ -141,6 +142,29 @@ func (s *Service) SetWeixinHistoryLimits(messages int, runes int) {
 		Runes:    runes,
 	}
 	s.settingsMu.Unlock()
+}
+
+func (s *Service) BuildWeixinFileSearchQuery(ctx context.Context, mc MessageContext, input string) (string, bool, error) {
+	if s.aiService == nil {
+		return "", false, nil
+	}
+
+	configured, err := s.aiService.IsConfigured(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	if !configured {
+		return "", false, nil
+	}
+
+	intent, err := s.aiService.BuildFileSearchIntent(s.withSkillContext(ctx, mc), input)
+	if err != nil {
+		return "", false, err
+	}
+	if !intent.Enabled || strings.TrimSpace(intent.Query) == "" {
+		return "", false, nil
+	}
+	return strings.TrimSpace(intent.Query), true, nil
 }
 
 func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input string) (string, error) {

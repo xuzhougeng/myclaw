@@ -100,6 +100,10 @@ func (s *Service) appendConversationHistory(ctx context.Context, mc MessageConte
 	_ = s.saveSessionSnapshot(ctx, snapshot)
 }
 
+func (s *Service) RecordConversationTurn(ctx context.Context, mc MessageContext, userInput, assistantReply string) {
+	s.appendConversationHistory(ctx, mc, userInput, assistantReply)
+}
+
 func (s *Service) persistedLoadedSkillNames(mc MessageContext) []string {
 	snapshot, err := s.sessionSnapshot(context.Background(), mc)
 	if err != nil {

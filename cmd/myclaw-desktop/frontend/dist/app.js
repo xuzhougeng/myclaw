@@ -1107,6 +1107,11 @@ function bindRuntimeEvents() {
     applyWeixinStatus(next, true);
   });
 
+  window.runtime.EventsOn('chat:changed', () => {
+    if (state.chatStreaming) return;
+    void refreshChatState().catch(() => {});
+  });
+
   window.runtime.EventsOn('chat:stream', (payload) => {
     const event = Array.isArray(payload) ? payload[0] : payload;
     dispatchChatStreamEvent(event);
@@ -1845,6 +1850,12 @@ async function clearPromptsLibrary() {
 async function sendMessage(rawText = null, displayText = null) {
   if (state.chatStreaming) return;
 
+  const conversation = currentChatConversation();
+  if (conversation?.readOnly) {
+    showBanner('当前为微信会话，只支持查看历史；请新建本地对话后继续。', true);
+    return;
+  }
+
   const input = document.getElementById('chat-input');
   const text = String(rawText ?? input?.value ?? '').trim();
   if (!text) return;
@@ -2144,6 +2155,16 @@ function renderChatContext() {
   if (!container) return;
 
   const chips = [];
+  const conversation = currentChatConversation();
+  if (conversation?.sourceLabel) {
+    chips.push(`
+      <span class="chat-context-chip ${conversation.readOnly ? 'skill' : 'prompt'}">
+        <span>来源</span>
+        <strong>${escapeHTML(conversation.sourceLabel)}</strong>
+        ${conversation.readOnly ? '<span>只读</span>' : ''}
+      </span>
+    `);
+  }
   if (state.chatPrompt.promptId) {
     chips.push(`
       <span class="chat-context-chip prompt">
@@ -2168,6 +2189,25 @@ function renderChatContext() {
   }
 
   container.innerHTML = chips.join('');
+  renderChatComposerState();
+}
+
+function renderChatComposerState() {
+  const input = document.getElementById('chat-input');
+  const sendButton = document.getElementById('chat-send');
+  const conversation = currentChatConversation();
+  const readOnly = Boolean(conversation?.readOnly);
+
+  if (input instanceof HTMLTextAreaElement) {
+    input.disabled = readOnly || state.chatStreaming;
+    input.placeholder = readOnly
+      ? '当前为微信会话，只读查看；如需继续对话，请新建本地对话。'
+      : '输入消息，或使用 / 命令、$ 技能、@ Prompt...';
+  }
+  if (sendButton instanceof HTMLButtonElement) {
+    sendButton.disabled = readOnly || state.chatStreaming;
+    sendButton.title = readOnly ? '微信会话只支持查看历史' : '发送消息';
+  }
 }
 
 async function clearChatPromptSelection() {
@@ -3293,6 +3333,7 @@ function renderChat() {
   const container = document.getElementById('chat-list');
   if (!container) {
     renderChatContentActions();
+    renderChatComposerState();
     return;
   }
 
@@ -3305,6 +3346,7 @@ function renderChat() {
       </div>
     `;
     renderChatContentActions();
+    renderChatComposerState();
     return;
   }
 
@@ -3323,6 +3365,7 @@ function renderChat() {
     .join('');
   container.scrollTop = container.scrollHeight;
   renderChatContentActions();
+  renderChatComposerState();
 }
 
 function renderChatContentActions() {
@@ -3379,7 +3422,7 @@ function renderChatMessageActions(message, index) {
 }
 
 function renderChatRefreshButton(message, index) {
-  if (message.role !== 'assistant' || index !== findRefreshableChatMessageIndex()) {
+  if (currentChatConversation()?.readOnly || message.role !== 'assistant' || index !== findRefreshableChatMessageIndex()) {
     return '';
   }
 
@@ -3738,9 +3781,13 @@ function renderChatSessions() {
           type="button"
           class="chat-session-item ${conversation.active ? 'active' : ''}"
           data-chat-session="${escapeAttribute(conversation.sessionId)}"
-          title="拖动排序，右键查看更多操作"
+          title="${escapeAttribute([
+            conversation.sourceLabel || '',
+            conversation.preview || '',
+            conversation.readOnly ? '只读会话' : '可继续对话',
+          ].filter(Boolean).join('\n'))}"
         >
-          <span class="chat-session-title">${escapeHTML(conversation.title || '新对话')}</span>
+          <span class="chat-session-title">${conversation.sourceLabel ? `[${escapeHTML(conversation.sourceLabel)}] ` : ''}${escapeHTML(conversation.title || '新对话')}</span>
         </button>
       </div>
     `)
@@ -3931,6 +3978,8 @@ function defaultChatSessionContextMenuState() {
 }
 
 function openChatSessionContextMenu(sessionId, x, y) {
+  const conversation = (state.chatState.conversations || []).find((item) => item.sessionId === String(sessionId || '').trim());
+  if (conversation?.readOnly) return;
   state.chatSessionContextMenu = {
     open: true,
     sessionId: String(sessionId || '').trim(),
@@ -3971,6 +4020,11 @@ function renderChatSessionContextMenu() {
     menu.style.left = `${Math.min(Math.max(state.chatSessionContextMenu.x, padding), maxLeft)}px`;
     menu.style.top = `${Math.min(Math.max(state.chatSessionContextMenu.y, padding), maxTop)}px`;
   });
+}
+
+function currentChatConversation() {
+  const sessionId = state.chatState.sessionId || '';
+  return (state.chatState.conversations || []).find((item) => item.sessionId === sessionId) || null;
 }
 
 function defaultChatSessionDragState() {
@@ -4096,6 +4150,9 @@ function normalizeChatState(payload) {
       title: item?.title || '',
       customTitle: Boolean(item?.customTitle),
       preview: item?.preview || '',
+      source: item?.source || '',
+      sourceLabel: item?.sourceLabel || '',
+      readOnly: Boolean(item?.readOnly),
       updatedAt: item?.updatedAt || '',
       updatedAtUnix: Number(item?.updatedAtUnix || 0),
       messageCount: Number(item?.messageCount || 0),

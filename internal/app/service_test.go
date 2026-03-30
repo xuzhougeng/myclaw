@@ -1550,21 +1550,51 @@ func TestHandleMessageStreamUsesStreamingChat(t *testing.T) {
 	}
 }
 
+func TestBuildWeixinFileSearchQueryUsesAIIntent(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, fakeAI{
+		configured: true,
+		fileSearchIntent: ai.FileSearchIntent{
+			Enabled: true,
+			Query:   "d: ext:pdf 单细胞",
+		},
+	}, reminders)
+
+	query, ok, err := service.BuildWeixinFileSearchQuery(context.Background(), MessageContext{
+		UserID:    "u1",
+		Interface: "weixin",
+		SessionID: "s1",
+	}, "查找 D 盘单细胞相关的PDF文件")
+	if err != nil {
+		t.Fatalf("build file search query: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected file search intent to be recognized")
+	}
+	if query != "d: ext:pdf 单细胞" {
+		t.Fatalf("unexpected query: %q", query)
+	}
+}
+
 type fakeAI struct {
-	configured      bool
-	route           ai.RouteDecision
-	searchPlan      ai.SearchPlan
-	reviewIDs       []string
-	answer          string
-	answerFunc      func(string, []knowledge.Entry) string
-	chat            string
-	chatFunc        func(context.Context, string, []ai.ConversationMessage) string
-	agentStep       ai.AgentStepDecision
-	agentStepFunc   func(context.Context, string, []ai.ConversationMessage, []ai.AgentToolDefinition, []ai.AgentToolResult) ai.AgentStepDecision
-	translation     string
-	translationFunc func(context.Context, string) string
-	pdfSummary      string
-	imageSummary    string
+	configured       bool
+	route            ai.RouteDecision
+	searchPlan       ai.SearchPlan
+	fileSearchIntent ai.FileSearchIntent
+	reviewIDs        []string
+	answer           string
+	answerFunc       func(string, []knowledge.Entry) string
+	chat             string
+	chatFunc         func(context.Context, string, []ai.ConversationMessage) string
+	agentStep        ai.AgentStepDecision
+	agentStepFunc    func(context.Context, string, []ai.ConversationMessage, []ai.AgentToolDefinition, []ai.AgentToolResult) ai.AgentStepDecision
+	translation      string
+	translationFunc  func(context.Context, string) string
+	pdfSummary       string
+	imageSummary     string
 }
 
 func (f fakeAI) IsConfigured(context.Context) (bool, error) {
@@ -1577,6 +1607,10 @@ func (f fakeAI) RouteCommand(context.Context, string) (ai.RouteDecision, error) 
 
 func (f fakeAI) BuildSearchPlan(context.Context, string) (ai.SearchPlan, error) {
 	return f.searchPlan, nil
+}
+
+func (f fakeAI) BuildFileSearchIntent(context.Context, string) (ai.FileSearchIntent, error) {
+	return f.fileSearchIntent, nil
 }
 
 func (f fakeAI) ReviewAnswerCandidates(context.Context, string, []knowledge.Entry) ([]string, error) {
