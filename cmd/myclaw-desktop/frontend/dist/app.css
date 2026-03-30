@@ -1263,13 +1263,36 @@ select {
 }
 
 .chat-session-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  position: relative;
+  display: block;
 }
 
 .chat-session-row + .chat-session-row {
   margin-top: 8px;
+}
+
+.chat-session-row.dragging {
+  opacity: 0.6;
+}
+
+.chat-session-row.drop-before::before,
+.chat-session-row.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.chat-session-row.drop-before::before {
+  top: -5px;
+}
+
+.chat-session-row.drop-after::after {
+  bottom: -5px;
 }
 
 .chat-session-item {
@@ -1285,7 +1308,7 @@ select {
   background: var(--bg-input);
   color: inherit;
   text-align: left;
-  cursor: pointer;
+  cursor: grab;
   transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
 }
 
@@ -1304,10 +1327,22 @@ select {
   transform: translateX(1px);
 }
 
+.chat-session-row.dragging .chat-session-item,
+.chat-session-item:active {
+  cursor: grabbing;
+}
+
 .chat-session-item.active {
   border-color: rgba(196, 122, 92, 0.4);
   background:
     linear-gradient(90deg, rgba(196, 122, 92, 0.14), transparent 82%),
+    var(--bg-input);
+}
+
+.chat-session-row.context-open .chat-session-item {
+  border-color: rgba(196, 122, 92, 0.4);
+  background:
+    linear-gradient(90deg, rgba(196, 122, 92, 0.1), transparent 82%),
     var(--bg-input);
 }
 
@@ -1323,47 +1358,6 @@ select {
   white-space: nowrap;
   color: var(--text-primary);
   font-size: 13px;
-}
-
-.chat-session-actions {
-  display: flex;
-  gap: 6px;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-4px);
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.chat-session-row.active .chat-session-actions,
-.chat-session-row:hover .chat-session-actions,
-.chat-session-row:focus-within .chat-session-actions {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(0);
-}
-
-.chat-session-action {
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 11px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
-}
-
-.chat-session-action:hover {
-  border-color: var(--border);
-  background: var(--bg-input);
-  color: var(--text-primary);
-}
-
-.chat-session-action.delete:hover {
-  border-color: rgba(176, 74, 58, 0.42);
-  background: var(--danger-bg);
-  color: var(--danger);
 }
 
 .chat-main {
@@ -2173,6 +2167,48 @@ select {
   color: var(--accent-primary);
 }
 
+/* Context menu */
+.context-menu {
+  position: fixed;
+  z-index: 190;
+  min-width: 148px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top left, var(--accent-glow), transparent 56%),
+    var(--bg-surface);
+  box-shadow: 0 22px 64px rgba(0, 0, 0, 0.34);
+}
+
+.context-menu[hidden] {
+  display: none;
+}
+
+.context-menu-item {
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.context-menu-item:hover {
+  background: var(--bg-input);
+}
+
+.context-menu-item.danger {
+  color: var(--danger);
+}
+
+.context-menu-item.danger:hover {
+  background: var(--danger-bg);
+}
+
 /* Dialog */
 .dialog-backdrop {
   position: fixed;
@@ -2567,12 +2603,6 @@ select {
 
   .chat-sidebar-toggle {
     display: none;
-  }
-
-  .chat-session-actions {
-    opacity: 1;
-    pointer-events: auto;
-    transform: none;
   }
 
   .dialog-backdrop {

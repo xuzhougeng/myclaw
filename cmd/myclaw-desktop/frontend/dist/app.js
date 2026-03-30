@@ -85,6 +85,8 @@ const state = {
   chat: [],
   chatSidebarCollapsed: false,
   chatSessionDialog: defaultChatSessionDialogState(),
+  chatSessionContextMenu: defaultChatSessionContextMenuState(),
+  chatSessionDrag: defaultChatSessionDragState(),
   chatStreaming: false,
   chatStreamHandlers: {},
 };
@@ -254,6 +256,125 @@ function bindChatSessionUI() {
     confirm.addEventListener('click', () => void submitChatSessionDialog());
   }
 
+  const contextMenu = document.getElementById('chat-session-context-menu');
+  if (contextMenu) {
+    contextMenu.addEventListener('click', (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('[data-chat-session-menu-action]')
+        : null;
+      if (!target) return;
+
+      const action = target.dataset.chatSessionMenuAction || '';
+      const sessionId = state.chatSessionContextMenu.sessionId || '';
+      closeChatSessionContextMenu();
+      if (!sessionId) return;
+      if (action === 'rename') {
+        void renameChatSession(sessionId);
+      } else if (action === 'delete') {
+        void deleteChatSession(sessionId);
+      }
+    });
+  }
+
+  const sessionList = document.getElementById('chat-session-list');
+  if (sessionList) {
+    sessionList.addEventListener('contextmenu', (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('[data-chat-session]')
+        : null;
+      if (!target) return;
+
+      const sessionId = target.dataset.chatSession || '';
+      if (!sessionId) return;
+
+      event.preventDefault();
+      openChatSessionContextMenu(sessionId, event.clientX, event.clientY);
+    });
+
+    sessionList.addEventListener('dragstart', (event) => {
+      const row = event.target instanceof Element
+        ? event.target.closest('[data-chat-session-row]')
+        : null;
+      if (!row) return;
+
+      const sessionId = row.dataset.chatSessionRow || '';
+      if (!sessionId) {
+        event.preventDefault();
+        return;
+      }
+
+      closeChatSessionContextMenu();
+      clearChatSessionDropIndicators();
+      row.classList.add('dragging');
+      state.chatSessionDrag = {
+        ...state.chatSessionDrag,
+        sessionId,
+        targetSessionId: '',
+        placeBefore: true,
+      };
+
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', sessionId);
+      }
+    });
+
+    sessionList.addEventListener('dragover', (event) => {
+      const draggingSessionId = state.chatSessionDrag.sessionId || '';
+      const row = event.target instanceof Element
+        ? event.target.closest('[data-chat-session-row]')
+        : null;
+      const targetSessionId = row?.dataset.chatSessionRow || '';
+      if (!draggingSessionId || !row || !targetSessionId || draggingSessionId === targetSessionId) return;
+
+      event.preventDefault();
+      const rect = row.getBoundingClientRect();
+      const placeBefore = event.clientY < rect.top + rect.height / 2;
+      clearChatSessionDropIndicators();
+      row.classList.add(placeBefore ? 'drop-before' : 'drop-after');
+      state.chatSessionDrag = {
+        ...state.chatSessionDrag,
+        targetSessionId,
+        placeBefore,
+      };
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+    });
+
+    sessionList.addEventListener('drop', (event) => {
+      const draggingSessionId = state.chatSessionDrag.sessionId || '';
+      const row = event.target instanceof Element
+        ? event.target.closest('[data-chat-session-row]')
+        : null;
+      const targetSessionId = row?.dataset.chatSessionRow || state.chatSessionDrag.targetSessionId || '';
+      if (!draggingSessionId || !targetSessionId || draggingSessionId === targetSessionId) {
+        clearChatSessionDropIndicators();
+        state.chatSessionDrag = {
+          ...defaultChatSessionDragState(),
+          suppressClickUntil: Date.now() + 200,
+        };
+        return;
+      }
+
+      event.preventDefault();
+      reorderChatSessions(draggingSessionId, targetSessionId, state.chatSessionDrag.placeBefore);
+      clearChatSessionDropIndicators();
+      state.chatSessionDrag = {
+        ...defaultChatSessionDragState(),
+        suppressClickUntil: Date.now() + 200,
+      };
+    });
+
+    sessionList.addEventListener('dragend', () => {
+      clearChatSessionDropIndicators();
+      state.chatSessionDrag = {
+        ...defaultChatSessionDragState(),
+        suppressClickUntil: state.chatSessionDrag.suppressClickUntil || 0,
+      };
+    });
+  }
+
   const input = document.getElementById('chat-session-dialog-input');
   if (input) {
     input.addEventListener('keydown', (event) => {
@@ -271,11 +392,19 @@ function bindChatSessionUI() {
   }
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && state.chatSessionDialog.open) {
+    if (event.key !== 'Escape') return;
+    if (state.chatSessionDialog.open) {
       event.preventDefault();
       closeChatSessionDialog();
+      return;
+    }
+    if (state.chatSessionContextMenu.open) {
+      event.preventDefault();
+      closeChatSessionContextMenu();
     }
   });
+
+  window.addEventListener('blur', closeChatSessionContextMenu);
 }
 
 function setChatSidebarCollapsed(collapsed) {
@@ -308,51 +437,75 @@ function openChatSessionDialog(mode, conversation) {
   const eyebrow = document.getElementById('chat-session-dialog-eyebrow');
   const title = document.getElementById('chat-session-dialog-title');
   const description = document.getElementById('chat-session-dialog-desc');
+  const targetLabel = document.getElementById('chat-session-dialog-target-label');
   const targetValue = document.getElementById('chat-session-dialog-target-value');
   const field = document.getElementById('chat-session-dialog-field');
   const input = document.getElementById('chat-session-dialog-input');
   const confirm = document.getElementById('chat-session-dialog-confirm');
-  if (!dialog || !card || !eyebrow || !title || !description || !targetValue || !field || !input || !confirm) {
+  if (!dialog || !card || !eyebrow || !title || !description || !targetLabel || !targetValue || !field || !input || !confirm) {
     return;
   }
 
-  const displayTitle = (conversation?.title || '新对话').trim() || '新对话';
   state.chatSessionDialog = {
     ...defaultChatSessionDialogState(),
     open: true,
     mode,
     sessionId: conversation?.sessionId || '',
-    initialTitle: displayTitle,
+    itemId: conversation?.id || '',
     restoreFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null,
   };
 
-  targetValue.textContent = displayTitle;
-
-  if (mode === 'delete') {
+  if (mode === 'knowledge-delete') {
+    const shortId = (conversation?.shortId || String(conversation?.id || '').slice(0, 8)).trim();
+    const previewText = truncateText(String(conversation?.preview || conversation?.text || '').replace(/\s+/g, ' ').trim(), 48);
+    const displayTitle = previewText ? `#${shortId} · ${previewText}` : `#${shortId}`;
+    state.chatSessionDialog.initialTitle = displayTitle;
+    targetLabel.textContent = '目标记忆';
+    targetValue.textContent = displayTitle;
     eyebrow.textContent = '危险操作';
-    title.textContent = '删除对话';
-    description.textContent = '删除后当前会话消息会一并移除，这个动作不能撤销。';
+    title.textContent = '删除记忆';
+    description.textContent = '删除后这条记忆会立即从当前记忆库移除，这个动作不能撤销。';
     field.hidden = true;
     input.value = displayTitle;
+    input.placeholder = '';
     confirm.textContent = '删除';
     confirm.classList.remove('btn-primary');
     confirm.classList.add('btn-danger');
     card.classList.add('danger');
   } else {
-    eyebrow.textContent = '对话标题';
-    title.textContent = '重命名对话';
-    description.textContent = '只修改列表显示，不影响当前上下文和消息内容。';
-    field.hidden = false;
-    input.value = displayTitle;
-    confirm.textContent = '保存';
-    confirm.classList.remove('btn-danger');
-    confirm.classList.add('btn-primary');
-    card.classList.remove('danger');
+    const displayTitle = (conversation?.title || '新对话').trim() || '新对话';
+    state.chatSessionDialog.initialTitle = displayTitle;
+    targetLabel.textContent = '当前对话';
+    targetValue.textContent = displayTitle;
+
+    if (mode === 'delete') {
+      eyebrow.textContent = '危险操作';
+      title.textContent = '删除对话';
+      description.textContent = '删除后当前会话消息会一并移除，这个动作不能撤销。';
+      field.hidden = true;
+      input.value = displayTitle;
+      input.placeholder = '';
+      confirm.textContent = '删除';
+      confirm.classList.remove('btn-primary');
+      confirm.classList.add('btn-danger');
+      card.classList.add('danger');
+    } else {
+      eyebrow.textContent = '对话标题';
+      title.textContent = '重命名对话';
+      description.textContent = '只修改列表显示，不影响当前上下文和消息内容。';
+      field.hidden = false;
+      input.value = displayTitle;
+      input.placeholder = '输入对话标题';
+      confirm.textContent = '保存';
+      confirm.classList.remove('btn-danger');
+      confirm.classList.add('btn-primary');
+      card.classList.remove('danger');
+    }
   }
 
   dialog.hidden = false;
   requestAnimationFrame(() => {
-    if (mode === 'delete') {
+    if (mode === 'delete' || mode === 'knowledge-delete') {
       confirm.focus();
     } else {
       input.focus();
@@ -364,6 +517,8 @@ function openChatSessionDialog(mode, conversation) {
 function closeChatSessionDialog() {
   const dialog = document.getElementById('chat-session-dialog');
   const card = dialog?.querySelector('.dialog-card');
+  const targetLabel = document.getElementById('chat-session-dialog-target-label');
+  const targetValue = document.getElementById('chat-session-dialog-target-value');
   const field = document.getElementById('chat-session-dialog-field');
   const input = document.getElementById('chat-session-dialog-input');
   const confirm = document.getElementById('chat-session-dialog-confirm');
@@ -377,11 +532,18 @@ function closeChatSessionDialog() {
   if (card) {
     card.classList.remove('danger');
   }
+  if (targetLabel) {
+    targetLabel.textContent = '当前对话';
+  }
+  if (targetValue) {
+    targetValue.textContent = '新对话';
+  }
   if (field) {
     field.hidden = false;
   }
   if (input) {
     input.value = '';
+    input.placeholder = '输入对话标题';
   }
   if (confirm) {
     confirm.disabled = false;
@@ -397,10 +559,12 @@ function closeChatSessionDialog() {
 async function submitChatSessionDialog() {
   if (!state.chatSessionDialog.open) return;
 
-  const { mode, sessionId, initialTitle } = state.chatSessionDialog;
+  const { mode, sessionId, itemId, initialTitle } = state.chatSessionDialog;
   const input = document.getElementById('chat-session-dialog-input');
   const confirm = document.getElementById('chat-session-dialog-confirm');
-  if (!sessionId || !confirm) return;
+  if (!confirm) return;
+  if ((mode === 'rename' || mode === 'delete') && !sessionId) return;
+  if (mode === 'knowledge-delete' && !itemId) return;
 
   if (mode === 'rename') {
     const nextTitle = (input?.value || '').trim();
@@ -423,6 +587,14 @@ async function submitChatSessionDialog() {
       closeChatSessionDialog();
       await Promise.all([refreshSkills(), refreshChatPrompt()]);
       showBanner('对话已删除。', false);
+      return;
+    }
+
+    if (mode === 'knowledge-delete') {
+      const result = await state.backend.DeleteKnowledge(itemId);
+      closeChatSessionDialog();
+      await refreshAll();
+      showBanner(result.message, false);
       return;
     }
 
@@ -623,18 +795,8 @@ function bindStaticEvents() {
   const chatSessionList = document.getElementById('chat-session-list');
   if (chatSessionList) {
     chatSessionList.addEventListener('click', (event) => {
-      const actionTarget = event.target.closest('[data-chat-session-action]');
-      if (actionTarget) {
-        const sessionId = actionTarget.dataset.chatSessionId || '';
-        if (!sessionId) return;
-        if (actionTarget.dataset.chatSessionAction === 'rename') {
-          void renameChatSession(sessionId);
-        } else if (actionTarget.dataset.chatSessionAction === 'delete') {
-          void deleteChatSession(sessionId);
-        }
-        return;
-      }
-
+      if (Date.now() < (state.chatSessionDrag.suppressClickUntil || 0)) return;
+      closeChatSessionContextMenu();
       const target = event.target.closest('[data-chat-session]');
       if (!target) return;
       const sessionId = target.dataset.chatSession || '';
@@ -841,6 +1003,9 @@ function bindStaticEvents() {
   }
 
   document.addEventListener('click', (event) => {
+    if (!event.target.closest('#chat-session-context-menu')) {
+      closeChatSessionContextMenu();
+    }
     if (event.target.closest('.chat-input-area')) return;
     closeChatAutocomplete();
   });
@@ -1442,16 +1607,14 @@ async function appendKnowledge(id) {
 }
 
 async function deleteKnowledge(id) {
-  try {
-    const ok = await state.backend.ConfirmAction('删除记忆', `确认删除 #${id.slice(0, 8)} 吗？`);
-    if (!ok) return;
-
-    const result = await state.backend.DeleteKnowledge(id);
-    await refreshAll();
-    showBanner(result.message, false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
+  const targetId = String(id || '').trim();
+  if (!targetId) return;
+  const knowledge = state.knowledge.find((item) => item.id === targetId);
+  if (!knowledge) {
+    showBanner('没有找到要删除的记忆。', true);
+    return;
   }
+  openChatSessionDialog('knowledge-delete', knowledge);
 }
 
 async function clearKnowledge() {
@@ -3106,7 +3269,7 @@ function parseEDNChatOptionsPayload(text) {
 }
 
 function parseAskUserInputChatOptionsPayload(text) {
-  const inputTypeMatch = text.match(/\baskuserinput\s*:\s*([A-Za-z_][\w-]*)/i);
+  const inputTypeMatch = text.match(/\bask_user_input\s*:\s*([A-Za-z_][\w-]*)/i);
   if (!inputTypeMatch) return null;
 
   const inputType = normalizeChatOptionScalar(inputTypeMatch[1]).toLowerCase();
@@ -3209,34 +3372,19 @@ function renderChatSessions() {
 
   container.innerHTML = conversations
     .map((conversation) => `
-      <div class="chat-session-row ${conversation.active ? 'active' : ''}">
+      <div
+        class="chat-session-row ${conversation.active ? 'active' : ''} ${state.chatSessionContextMenu.open && state.chatSessionContextMenu.sessionId === conversation.sessionId ? 'context-open' : ''}"
+        data-chat-session-row="${escapeAttribute(conversation.sessionId)}"
+        draggable="true"
+      >
         <button
           type="button"
           class="chat-session-item ${conversation.active ? 'active' : ''}"
           data-chat-session="${escapeAttribute(conversation.sessionId)}"
+          title="拖动排序，右键查看更多操作"
         >
           <span class="chat-session-title">${escapeHTML(conversation.title || '新对话')}</span>
         </button>
-        <div class="chat-session-actions">
-          <button
-            type="button"
-            class="chat-session-action"
-            data-chat-session-action="rename"
-            data-chat-session-id="${escapeAttribute(conversation.sessionId)}"
-            title="重命名"
-          >
-            改名
-          </button>
-          <button
-            type="button"
-            class="chat-session-action delete"
-            data-chat-session-action="delete"
-            data-chat-session-id="${escapeAttribute(conversation.sessionId)}"
-            title="删除"
-          >
-            删除
-          </button>
-        </div>
       </div>
     `)
     .join('');
@@ -3244,6 +3392,17 @@ function renderChatSessions() {
 
 function applyChatState(nextState) {
   state.chatState = normalizeChatState(nextState);
+  state.chatState = {
+    ...state.chatState,
+    conversations: reconcileChatSessionOrder(state.chatState.conversations),
+  };
+  if (
+    state.chatSessionContextMenu.open
+    && !state.chatState.conversations.some((item) => item.sessionId === state.chatSessionContextMenu.sessionId)
+  ) {
+    state.chatSessionContextMenu = defaultChatSessionContextMenuState();
+    renderChatSessionContextMenu();
+  }
   state.chat = (state.chatState.messages || []).map((message) => ({
     role: message.role,
     text: message.text,
@@ -3282,13 +3441,13 @@ function syncCurrentChatConversationFromMessages() {
     }
     nextConversations[currentIndex] = nextConversation;
   } else {
-    nextConversations.unshift(nextConversation);
+    nextConversations.push(nextConversation);
   }
 
   state.chatState = {
     ...state.chatState,
     sessionId,
-    conversations: nextConversations,
+    conversations: reconcileChatSessionOrder(nextConversations),
     messages: state.chat.map((message) => ({
       role: message.role,
       text: message.text,
@@ -3297,6 +3456,180 @@ function syncCurrentChatConversationFromMessages() {
     })),
   };
   renderChatSessions();
+}
+
+function normalizeProjectStorageKey(project) {
+  const value = String(project || 'default').trim().toLowerCase();
+  return value || 'default';
+}
+
+function chatSessionOrderStorageKey(project = state.projectState.activeProject) {
+  return `myclaw-chat-session-order:${normalizeProjectStorageKey(project)}`;
+}
+
+function loadChatSessionOrder(project = state.projectState.activeProject) {
+  try {
+    const raw = localStorage.getItem(chatSessionOrderStorageKey(project));
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed)
+      ? parsed.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function saveChatSessionOrder(sessionIds, project = state.projectState.activeProject) {
+  const next = [];
+  const seen = new Set();
+  for (const sessionId of sessionIds || []) {
+    const value = String(sessionId || '').trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    next.push(value);
+  }
+
+  try {
+    localStorage.setItem(chatSessionOrderStorageKey(project), JSON.stringify(next));
+  } catch (_error) {
+    // Ignore local persistence failures and keep the in-memory order.
+  }
+  return next;
+}
+
+function sameStringArray(left, right) {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function reconcileChatSessionOrder(conversations, project = state.projectState.activeProject) {
+  const list = Array.isArray(conversations)
+    ? conversations.filter((item) => item?.sessionId)
+    : [];
+  if (list.length === 0) {
+    saveChatSessionOrder([], project);
+    return [];
+  }
+
+  const stored = loadChatSessionOrder(project);
+  if (stored.length === 0) {
+    saveChatSessionOrder(list.map((item) => item.sessionId), project);
+    return list;
+  }
+
+  const byID = new Map(list.map((item) => [item.sessionId, item]));
+  const ordered = [];
+  for (const sessionId of stored) {
+    const item = byID.get(sessionId);
+    if (!item) continue;
+    ordered.push(item);
+    byID.delete(sessionId);
+  }
+  for (const item of list) {
+    if (!byID.has(item.sessionId)) continue;
+    ordered.push(item);
+    byID.delete(item.sessionId);
+  }
+
+  const mergedOrder = ordered.map((item) => item.sessionId);
+  if (!sameStringArray(stored, mergedOrder)) {
+    saveChatSessionOrder(mergedOrder, project);
+  }
+  return ordered;
+}
+
+function reorderChatSessions(sourceSessionId, targetSessionId, placeBefore) {
+  const conversations = Array.isArray(state.chatState.conversations) ? [...state.chatState.conversations] : [];
+  const sourceIndex = conversations.findIndex((item) => item.sessionId === sourceSessionId);
+  const targetIndex = conversations.findIndex((item) => item.sessionId === targetSessionId);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
+
+  const [source] = conversations.splice(sourceIndex, 1);
+  let insertIndex = conversations.findIndex((item) => item.sessionId === targetSessionId);
+  if (insertIndex < 0) {
+    conversations.push(source);
+  } else {
+    if (!placeBefore) insertIndex += 1;
+    conversations.splice(insertIndex, 0, source);
+  }
+
+  state.chatState = {
+    ...state.chatState,
+    conversations,
+  };
+  saveChatSessionOrder(conversations.map((item) => item.sessionId));
+  renderChatSessions();
+}
+
+function defaultChatSessionContextMenuState() {
+  return {
+    open: false,
+    sessionId: '',
+    x: 0,
+    y: 0,
+  };
+}
+
+function openChatSessionContextMenu(sessionId, x, y) {
+  state.chatSessionContextMenu = {
+    open: true,
+    sessionId: String(sessionId || '').trim(),
+    x: Number(x || 0),
+    y: Number(y || 0),
+  };
+  renderChatSessionContextMenu();
+  renderChatSessions();
+}
+
+function closeChatSessionContextMenu() {
+  if (!state.chatSessionContextMenu.open) return;
+  state.chatSessionContextMenu = defaultChatSessionContextMenuState();
+  renderChatSessionContextMenu();
+  renderChatSessions();
+}
+
+function renderChatSessionContextMenu() {
+  const menu = document.getElementById('chat-session-context-menu');
+  if (!menu) return;
+
+  if (!state.chatSessionContextMenu.open) {
+    menu.hidden = true;
+    menu.style.removeProperty('left');
+    menu.style.removeProperty('top');
+    return;
+  }
+
+  menu.hidden = false;
+  menu.style.left = `${state.chatSessionContextMenu.x}px`;
+  menu.style.top = `${state.chatSessionContextMenu.y}px`;
+
+  requestAnimationFrame(() => {
+    if (menu.hidden) return;
+    const padding = 12;
+    const maxLeft = Math.max(padding, window.innerWidth - menu.offsetWidth - padding);
+    const maxTop = Math.max(padding, window.innerHeight - menu.offsetHeight - padding);
+    menu.style.left = `${Math.min(Math.max(state.chatSessionContextMenu.x, padding), maxLeft)}px`;
+    menu.style.top = `${Math.min(Math.max(state.chatSessionContextMenu.y, padding), maxTop)}px`;
+  });
+}
+
+function defaultChatSessionDragState() {
+  return {
+    sessionId: '',
+    targetSessionId: '',
+    placeBefore: true,
+    suppressClickUntil: 0,
+  };
+}
+
+function clearChatSessionDropIndicators() {
+  document.querySelectorAll('.chat-session-row.dragging, .chat-session-row.drop-before, .chat-session-row.drop-after')
+    .forEach((row) => {
+      row.classList.remove('dragging', 'drop-before', 'drop-after');
+    });
 }
 
 function summarizeChatTitle(messages) {
@@ -3365,6 +3698,7 @@ function defaultChatSessionDialogState() {
     open: false,
     mode: '',
     sessionId: '',
+    itemId: '',
     initialTitle: '',
     restoreFocus: null,
   };
