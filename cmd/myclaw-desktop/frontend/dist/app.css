@@ -1144,6 +1144,13 @@ select {
   gap: 12px;
 }
 
+.chat-sidebar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .chat-sidebar-header h3 {
   font-size: 14px;
   margin-bottom: 4px;

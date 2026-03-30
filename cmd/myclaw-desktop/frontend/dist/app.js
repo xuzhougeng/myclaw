@@ -380,6 +380,11 @@ function bindStaticEvents() {
     chatNewSession.addEventListener('click', () => void startNewConversation());
   }
 
+  const chatExportMarkdown = document.getElementById('chat-export-markdown');
+  if (chatExportMarkdown) {
+    chatExportMarkdown.addEventListener('click', () => void exportChatMarkdown());
+  }
+
   const chatSessionList = document.getElementById('chat-session-list');
   if (chatSessionList) {
     chatSessionList.addEventListener('click', (event) => {
@@ -741,6 +746,7 @@ function createWailsBackend(backend) {
       }
     },
     GetChatState: () => backend.GetChatState(),
+    ExportChatMarkdown: () => backend.ExportChatMarkdown(),
     NewChatSession: () => backend.NewChatSession(),
     SwitchChatSession: (sessionId) => backend.SwitchChatSession(sessionId),
     GetChatPrompt: () => backend.GetChatPrompt(),
@@ -793,6 +799,11 @@ function createHTTPBackend() {
     SendMessage: (input) => requestJSON('POST', '/api/chat', { input }),
     SendMessageStream: (input, handlers = {}) => streamJSON('POST', '/api/chat/stream', { input }, handlers),
     GetChatState: () => requestJSON('GET', '/api/chat/state'),
+    ExportChatMarkdown: async () => {
+      const payload = await requestJSON('GET', '/api/chat/export-markdown');
+      downloadTextFile(payload.filename || 'myclaw-chat.md', payload.markdown || '', 'text/markdown;charset=utf-8');
+      return { message: `已导出 Markdown：${payload.filename || 'myclaw-chat.md'}` };
+    },
     NewChatSession: () => requestJSON('POST', '/api/chat/session/new'),
     SwitchChatSession: (sessionId) => requestJSON('POST', '/api/chat/session/switch', { sessionId }),
     GetChatPrompt: () => requestJSON('GET', '/api/chat/prompt'),
@@ -908,6 +919,18 @@ async function uploadFile(url, file) {
     throw new Error((payload && payload.error) || `HTTP ${response.status}`);
   }
   return payload;
+}
+
+function downloadTextFile(filename, content, type = 'text/plain;charset=utf-8') {
+  const blob = new Blob([String(content ?? '')], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = String(filename || 'download.txt').trim() || 'download.txt';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function startBackendPolling() {
@@ -1396,6 +1419,21 @@ async function startNewConversation() {
     const input = document.getElementById('chat-input');
     if (input) input.focus();
     showBanner('已开启新对话。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function exportChatMarkdown() {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
+  }
+  try {
+    const result = await state.backend.ExportChatMarkdown();
+    if (result?.message) {
+      showBanner(result.message, false);
+    }
   } catch (error) {
     showBanner(asMessage(error), true);
   }

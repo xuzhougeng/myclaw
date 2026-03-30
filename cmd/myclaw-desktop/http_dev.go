@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -278,6 +279,15 @@ func (s desktopHTTPDevServer) registerAPI(mux *http.ServeMux) {
 			return
 		}
 		result, err := s.app.GetChatState()
+		s.writeResult(w, result, err)
+	})
+
+	mux.HandleFunc("/api/chat/export-markdown", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			s.writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		result, err := s.app.buildCurrentChatMarkdownExport(context.Background())
 		s.writeResult(w, result, err)
 	})
 
