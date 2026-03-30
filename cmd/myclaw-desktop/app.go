@@ -191,10 +191,11 @@ type ChatPromptState struct {
 }
 
 type ChatResponse struct {
-	Reply          string `json:"reply"`
-	Timestamp      string `json:"timestamp"`
-	SessionID      string `json:"sessionId,omitempty"`
-	SessionChanged bool   `json:"sessionChanged,omitempty"`
+	Reply          string         `json:"reply"`
+	Timestamp      string         `json:"timestamp"`
+	SessionID      string         `json:"sessionId,omitempty"`
+	SessionChanged bool           `json:"sessionChanged,omitempty"`
+	Usage          *ai.TokenUsage `json:"usage,omitempty"`
 }
 
 type ChatStreamEvent struct {
@@ -1041,6 +1042,7 @@ func (a *DesktopApp) SendMessageStream(requestID, input string) (ChatResponse, e
 }
 
 func (a *DesktopApp) sendMessage(ctx context.Context, input string, onDelta func(string)) (ChatResponse, error) {
+	ctx = ai.WithUsageCollector(ctx)
 	project, err := a.currentProject(ctx)
 	if err != nil {
 		return ChatResponse{}, err
@@ -1071,10 +1073,17 @@ func (a *DesktopApp) sendMessage(ctx context.Context, input string, onDelta func
 	if err != nil {
 		return ChatResponse{}, err
 	}
+	usage := ai.UsageFromContext(ctx)
+	var usagePayload *ai.TokenUsage
+	if !usage.IsZero() {
+		usageCopy := usage
+		usagePayload = &usageCopy
+	}
 	return ChatResponse{
 		Reply:     reply,
 		Timestamp: time.Now().Local().Format("2006-01-02 15:04:05"),
 		SessionID: mc.SessionID,
+		Usage:     usagePayload,
 	}, nil
 }
 

@@ -1848,11 +1848,25 @@ select {
   transform: translateY(0);
 }
 
+.chat-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
 .chat-time {
-  display: block;
-  margin-top: 6px;
   font-size: 10px;
   opacity: 0.6;
+}
+
+.chat-usage {
+  font-size: 10px;
+  line-height: 1.4;
+  opacity: 0.72;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .chat-input-area {

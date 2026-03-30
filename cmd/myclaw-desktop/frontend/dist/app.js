@@ -1399,6 +1399,7 @@ async function sendMessage(rawText = null, displayText = null) {
     }
     placeholder.text = result.reply || placeholder.text;
     placeholder.time = result.timestamp || nowLabel();
+    placeholder.usage = normalizeTokenUsage(result.usage);
     placeholder.streaming = false;
     syncCurrentChatConversationFromMessages();
     renderChat();
@@ -2607,13 +2608,28 @@ function renderChat() {
           <div class="chat-avatar">${message.role === 'user' ? '◐' : message.role === 'system' ? '◇' : '○'}</div>
           <div class="chat-bubble">
             ${renderChatMessageContent(message)}
-            ${message.time ? `<span class="chat-time">${escapeHTML(message.time)}</span>` : ''}
+            ${renderChatMeta(message)}
           </div>
         </div>
       `,
     )
     .join('');
   container.scrollTop = container.scrollHeight;
+}
+
+function renderChatMeta(message) {
+  const parts = [];
+  if (message.time) {
+    parts.push(`<span class="chat-time">${escapeHTML(message.time)}</span>`);
+  }
+  if (message.role === 'assistant') {
+    const usageText = formatTokenUsage(message.usage);
+    if (usageText) {
+      parts.push(`<span class="chat-usage">${escapeHTML(usageText)}</span>`);
+    }
+  }
+  if (parts.length === 0) return '';
+  return `<div class="chat-meta">${parts.join('')}</div>`;
 }
 
 function renderChatMessageContent(message) {
@@ -2778,6 +2794,7 @@ function applyChatState(nextState) {
     role: message.role,
     text: message.text,
     time: message.time || '',
+    usage: normalizeTokenUsage(message.usage),
   }));
   renderChatSessions();
   renderChat();
@@ -2818,6 +2835,7 @@ function syncCurrentChatConversationFromMessages() {
       role: message.role,
       text: message.text,
       time: message.time || '',
+      usage: normalizeTokenUsage(message.usage),
     })),
   };
   renderChatSessions();
@@ -2878,6 +2896,29 @@ function defaultChatState() {
   };
 }
 
+function normalizeTokenUsage(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const inputTokens = Number(payload.inputTokens || 0);
+  const outputTokens = Number(payload.outputTokens || 0);
+  const cachedTokens = Number(payload.cachedTokens || 0);
+  const totalTokens = Number(payload.totalTokens || inputTokens + outputTokens);
+  if (inputTokens <= 0 && outputTokens <= 0 && cachedTokens <= 0 && totalTokens <= 0) {
+    return null;
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    cachedTokens,
+    totalTokens,
+  };
+}
+
+function formatTokenUsage(usage) {
+  const value = normalizeTokenUsage(usage);
+  if (!value) return '';
+  return `input ${value.inputTokens} · output ${value.outputTokens} · cached ${value.cachedTokens} · total ${value.totalTokens}`;
+}
+
 function normalizeChatState(payload) {
   const source = Array.isArray(payload) ? payload[0] : payload;
   const next = {
@@ -2901,6 +2942,7 @@ function normalizeChatState(payload) {
       role: item?.role || 'assistant',
       text: item?.text || '',
       time: item?.time || '',
+      usage: normalizeTokenUsage(item?.usage),
     }))
     : [];
   return next;

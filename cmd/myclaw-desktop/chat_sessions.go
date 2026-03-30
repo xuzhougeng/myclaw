@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"myclaw/internal/ai"
 	appsvc "myclaw/internal/app"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/sessionstate"
@@ -29,9 +30,10 @@ type ChatConversation struct {
 }
 
 type ChatMessage struct {
-	Role string `json:"role"`
-	Text string `json:"text"`
-	Time string `json:"time"`
+	Role  string         `json:"role"`
+	Text  string         `json:"text"`
+	Time  string         `json:"time"`
+	Usage *ai.TokenUsage `json:"usage,omitempty"`
 }
 
 type ChatState struct {
@@ -322,9 +324,10 @@ func toChatMessages(snapshot sessionstate.Snapshot) []ChatMessage {
 			continue
 		}
 		messages = append(messages, ChatMessage{
-			Role: role,
-			Text: text,
-			Time: "",
+			Role:  role,
+			Text:  text,
+			Time:  "",
+			Usage: item.Usage,
 		})
 	}
 	return messages

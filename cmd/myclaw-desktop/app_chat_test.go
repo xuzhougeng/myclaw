@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"myclaw/internal/ai"
 	appsvc "myclaw/internal/app"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/projectstate"
@@ -95,6 +96,62 @@ func TestDesktopSendMessageNewConversationReturnsSessionChanged(t *testing.T) {
 	}
 }
 
+func TestDesktopSendMessageReturnsAndPersistsUsage(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "knowledge.json"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "project.json"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "prompts.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, desktopTestAI{
+		route: ai.RouteDecision{
+			Command:  "answer",
+			Question: "测试 usage",
+		},
+		chatFunc: func(ctx context.Context, input string, history []ai.ConversationMessage) string {
+			if input != "测试 usage" {
+				t.Fatalf("unexpected chat input: %q", input)
+			}
+			ai.AddUsage(ctx, ai.TokenUsage{
+				InputTokens:  140,
+				OutputTokens: 28,
+				CachedTokens: 36,
+				TotalTokens:  168,
+			})
+			return "已返回 usage"
+		},
+	}, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	result, err := app.SendMessage("测试 usage")
+	if err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	if result.Usage == nil {
+		t.Fatalf("expected usage payload, got %#v", result)
+	}
+	if result.Usage.InputTokens != 140 || result.Usage.OutputTokens != 28 || result.Usage.CachedTokens != 36 || result.Usage.TotalTokens != 168 {
+		t.Fatalf("unexpected response usage: %#v", result.Usage)
+	}
+
+	state, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("get chat state: %v", err)
+	}
+	if len(state.Messages) != 2 {
+		t.Fatalf("expected user+assistant messages, got %#v", state.Messages)
+	}
+	last := state.Messages[len(state.Messages)-1]
+	if last.Usage == nil {
+		t.Fatalf("expected persisted usage on assistant message, got %#v", last)
+	}
+	if last.Usage.InputTokens != 140 || last.Usage.OutputTokens != 28 || last.Usage.CachedTokens != 36 || last.Usage.TotalTokens != 168 {
+		t.Fatalf("unexpected persisted usage: %#v", last.Usage)
+	}
+}
+
 func TestBuildCurrentChatMarkdownExportFormatsConversation(t *testing.T) {
 	t.Parallel()
 
@@ -166,4 +223,52 @@ func TestBuildCurrentChatMarkdownExportRejectsEmptyConversation(t *testing.T) {
 	if _, err := app.buildCurrentChatMarkdownExport(context.Background()); err == nil || !strings.Contains(err.Error(), "没有可导出的消息") {
 		t.Fatalf("expected empty conversation error, got %v", err)
 	}
+}
+
+type desktopTestAI struct {
+	route    ai.RouteDecision
+	chatFunc func(context.Context, string, []ai.ConversationMessage) string
+}
+
+func (f desktopTestAI) IsConfigured(context.Context) (bool, error) {
+	return true, nil
+}
+
+func (f desktopTestAI) RouteCommand(context.Context, string) (ai.RouteDecision, error) {
+	return f.route, nil
+}
+
+func (f desktopTestAI) BuildSearchPlan(context.Context, string) (ai.SearchPlan, error) {
+	return ai.SearchPlan{}, nil
+}
+
+func (f desktopTestAI) ReviewAnswerCandidates(context.Context, string, []knowledge.Entry) ([]string, error) {
+	return nil, nil
+}
+
+func (f desktopTestAI) Answer(context.Context, string, []knowledge.Entry) (string, error) {
+	return "", nil
+}
+
+func (f desktopTestAI) Chat(ctx context.Context, input string, history []ai.ConversationMessage) (string, error) {
+	if f.chatFunc != nil {
+		return f.chatFunc(ctx, input, history), nil
+	}
+	return "", nil
+}
+
+func (f desktopTestAI) DecideAgentStep(context.Context, string, []ai.ConversationMessage, []ai.AgentToolDefinition, []ai.AgentToolResult) (ai.AgentStepDecision, error) {
+	return ai.AgentStepDecision{}, nil
+}
+
+func (f desktopTestAI) TranslateToChinese(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (f desktopTestAI) SummarizePDFText(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
+func (f desktopTestAI) SummarizeImageFile(context.Context, string, string) (string, error) {
+	return "", nil
 }

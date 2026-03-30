@@ -271,6 +271,43 @@ func TestOpenAIResponsesChatStream(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesUsageIsCollected(t *testing.T) {
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeResponses,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-test",
+	})
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusOK, `{
+			"output":[{"type":"message","content":[{"type":"output_text","text":"你好"}]}],
+			"usage":{
+				"input_tokens":90,
+				"input_tokens_details":{"cached_tokens":24},
+				"output_tokens":15,
+				"total_tokens":105
+			}
+		}`), nil
+	})
+
+	ctx := WithUsageCollector(context.Background())
+	reply, err := service.Chat(ctx, "hi", nil)
+	if err != nil {
+		t.Fatalf("chat with usage: %v", err)
+	}
+	if reply != "你好" {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+
+	usage := UsageFromContext(ctx)
+	if usage.InputTokens != 90 || usage.OutputTokens != 15 || usage.CachedTokens != 24 || usage.TotalTokens != 105 {
+		t.Fatalf("unexpected usage: %#v", usage)
+	}
+}
+
 func TestOpenAIChatCompletionsStream(t *testing.T) {
 	store := newConfiguredStore(t, modelconfig.Config{
 		Provider: modelconfig.ProviderOpenAI,
@@ -288,6 +325,9 @@ func TestOpenAIChatCompletionsStream(t *testing.T) {
 		}
 		if !req.Stream {
 			t.Fatalf("expected streaming request, got %#v", req)
+		}
+		if req.StreamOptions == nil || !req.StreamOptions.IncludeUsage {
+			t.Fatalf("expected stream usage request, got %#v", req.StreamOptions)
 		}
 		return streamResponse(strings.Join([]string{
 			`data: {"choices":[{"delta":{"content":"分"}}]}`,
@@ -311,6 +351,51 @@ func TestOpenAIChatCompletionsStream(t *testing.T) {
 	}
 	if strings.Join(deltas, "") != "分段输出" {
 		t.Fatalf("unexpected deltas: %#v", deltas)
+	}
+}
+
+func TestOpenAIChatCompletionsStreamUsageIsCollected(t *testing.T) {
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderOpenAI,
+		APIType:  modelconfig.APITypeChatCompletions,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "secret",
+		Model:    "gpt-4o-mini",
+	})
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		var req chatCompletionsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.StreamOptions == nil || !req.StreamOptions.IncludeUsage {
+			t.Fatalf("expected stream usage request, got %#v", req.StreamOptions)
+		}
+		return streamResponse(strings.Join([]string{
+			`data: {"choices":[{"delta":{"content":"流"}}]}`,
+			``,
+			`data: {"choices":[{"delta":{"content":"式"}}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":120,"prompt_tokens_details":{"cached_tokens":30},"completion_tokens":25,"total_tokens":145}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n")), nil
+	})
+
+	ctx := WithUsageCollector(context.Background())
+	reply, err := service.ChatStream(ctx, "hi", nil, func(string) {})
+	if err != nil {
+		t.Fatalf("stream chat completions with usage: %v", err)
+	}
+	if reply != "流式" {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+
+	usage := UsageFromContext(ctx)
+	if usage.InputTokens != 120 || usage.OutputTokens != 25 || usage.CachedTokens != 30 || usage.TotalTokens != 145 {
+		t.Fatalf("unexpected usage: %#v", usage)
 	}
 }
 
@@ -360,6 +445,48 @@ func TestAnthropicMessagesStream(t *testing.T) {
 	}
 	if strings.Join(deltas, "") != "Claude stream" {
 		t.Fatalf("unexpected deltas: %#v", deltas)
+	}
+}
+
+func TestAnthropicMessagesStreamUsageIsCollected(t *testing.T) {
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider: modelconfig.ProviderAnthropic,
+		APIType:  modelconfig.APITypeMessages,
+		BaseURL:  "http://example.invalid/v1",
+		APIKey:   "anthropic-secret",
+		Model:    "claude-3-7-sonnet-latest",
+	})
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		return streamResponse(strings.Join([]string{
+			`event: message_start`,
+			`data: {"type":"message_start","message":{"content":[],"usage":{"input_tokens":40,"cache_creation_input_tokens":10,"cache_read_input_tokens":12,"output_tokens":1}}}`,
+			``,
+			`event: content_block_delta`,
+			`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Claude"}}`,
+			``,
+			`event: message_delta`,
+			`data: {"type":"message_delta","usage":{"output_tokens":18}}`,
+			``,
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
+		}, "\n")), nil
+	})
+
+	ctx := WithUsageCollector(context.Background())
+	reply, err := service.ChatStream(ctx, "hi", nil, func(string) {})
+	if err != nil {
+		t.Fatalf("stream anthropic with usage: %v", err)
+	}
+	if reply != "Claude" {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+
+	usage := UsageFromContext(ctx)
+	if usage.InputTokens != 62 || usage.OutputTokens != 18 || usage.CachedTokens != 12 || usage.TotalTokens != 80 {
+		t.Fatalf("unexpected usage: %#v", usage)
 	}
 }
 

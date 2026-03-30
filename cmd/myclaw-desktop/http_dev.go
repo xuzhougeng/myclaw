@@ -650,6 +650,7 @@ func (s desktopHTTPDevServer) streamChat(w http.ResponseWriter, r *http.Request,
 		"timestamp":      result.Timestamp,
 		"sessionId":      result.SessionID,
 		"sessionChanged": result.SessionChanged,
+		"usage":          result.Usage,
 	}); err != nil {
 		log.Printf("write chat stream done: %v", err)
 	}

@@ -78,7 +78,13 @@ func (s *Service) appendConversationHistory(ctx context.Context, mc MessageConte
 	}
 
 	limits := s.conversationHistoryLimitsFor(mc)
+	usage := ai.UsageFromContext(ctx)
 	history := append([]sessionstate.Message(nil), snapshot.History...)
+	var assistantUsage *ai.TokenUsage
+	if !usage.IsZero() {
+		usageCopy := usage
+		assistantUsage = &usageCopy
+	}
 	history = append(history,
 		sessionstate.Message{
 			Role:    "user",
@@ -87,6 +93,7 @@ func (s *Service) appendConversationHistory(ctx context.Context, mc MessageConte
 		sessionstate.Message{
 			Role:    "assistant",
 			Content: trimConversationHistoryText(assistantReply, limits.Runes),
+			Usage:   assistantUsage,
 		},
 	)
 	snapshot.History = trimSessionHistory(history, limits)
@@ -151,6 +158,7 @@ func trimSessionHistory(history []sessionstate.Message, limits conversationHisto
 		out = append(out, sessionstate.Message{
 			Role:    role,
 			Content: content,
+			Usage:   item.Usage,
 		})
 	}
 	if limits.Messages <= 0 || len(out) <= limits.Messages {

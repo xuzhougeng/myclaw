@@ -732,6 +732,7 @@ func (s *Service) createOpenAIResponse(ctx context.Context, cfg modelconfig.Conf
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
+	AddUsage(ctx, result.Usage.TokenUsage())
 	text := strings.TrimSpace(result.OutputText())
 	if text == "" {
 		return "", fmt.Errorf("model returned empty output")
@@ -792,6 +793,7 @@ func (s *Service) createOpenAIChatCompletion(ctx context.Context, cfg modelconfi
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
+	AddUsage(ctx, result.Usage.TokenUsage())
 	text := strings.TrimSpace(result.OutputText())
 	if text == "" {
 		return "", fmt.Errorf("model returned empty output")
@@ -846,6 +848,7 @@ func (s *Service) createOpenAIResponseStream(ctx context.Context, cfg modelconfi
 
 	var builder strings.Builder
 	var completedText string
+	var usage TokenUsage
 	err = consumeServerSentEvents(resp.Body, func(_ string, data []byte) error {
 		payload := bytes.TrimSpace(data)
 		if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
@@ -870,6 +873,7 @@ func (s *Service) createOpenAIResponseStream(ctx context.Context, cfg modelconfi
 			}
 		case "response.completed":
 			completedText = strings.TrimSpace(event.Response.OutputText())
+			usage = event.Response.Usage.TokenUsage()
 		case "error":
 			return parseStreamError(payload)
 		}
@@ -886,6 +890,7 @@ func (s *Service) createOpenAIResponseStream(ctx context.Context, cfg modelconfi
 	if text == "" {
 		return "", fmt.Errorf("model returned empty output")
 	}
+	AddUsage(ctx, usage)
 	return text, nil
 }
 
@@ -899,6 +904,9 @@ func (s *Service) createOpenAIChatCompletionStream(ctx context.Context, cfg mode
 		FrequencyPenalty: req.FrequencyPenalty,
 		PresencePenalty:  req.PresencePenalty,
 		Stream:           true,
+		StreamOptions: &chatCompletionsStreamOptions{
+			IncludeUsage: true,
+		},
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -930,6 +938,7 @@ func (s *Service) createOpenAIChatCompletionStream(ctx context.Context, cfg mode
 	}
 
 	var builder strings.Builder
+	var usage TokenUsage
 	err = consumeServerSentEvents(resp.Body, func(_ string, data []byte) error {
 		payload := bytes.TrimSpace(data)
 		if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
@@ -943,6 +952,7 @@ func (s *Service) createOpenAIChatCompletionStream(ctx context.Context, cfg mode
 					Refusal string `json:"refusal"`
 				} `json:"delta"`
 			} `json:"choices"`
+			Usage *chatCompletionsUsage `json:"usage,omitempty"`
 			Error *struct {
 				Message string `json:"message"`
 			} `json:"error,omitempty"`
@@ -952,6 +962,9 @@ func (s *Service) createOpenAIChatCompletionStream(ctx context.Context, cfg mode
 		}
 		if chunk.Error != nil && strings.TrimSpace(chunk.Error.Message) != "" {
 			return fmt.Errorf("openai chat completions api stream error: %s", strings.TrimSpace(chunk.Error.Message))
+		}
+		if chunk.Usage != nil {
+			usage = chunk.Usage.TokenUsage()
 		}
 		for _, choice := range chunk.Choices {
 			for _, delta := range []string{choice.Delta.Content, choice.Delta.Refusal} {
@@ -974,6 +987,7 @@ func (s *Service) createOpenAIChatCompletionStream(ctx context.Context, cfg mode
 	if text == "" {
 		return "", fmt.Errorf("model returned empty output")
 	}
+	AddUsage(ctx, usage)
 	return text, nil
 }
 
@@ -999,6 +1013,7 @@ func (s *Service) createAnthropicMessage(ctx context.Context, cfg modelconfig.Co
 	if err != nil {
 		return "", err
 	}
+	AddUsage(ctx, result.Usage.TokenUsage())
 	if req.WantsJSON() {
 		text, ok, err := result.StructuredOutput()
 		if err != nil {
@@ -1058,6 +1073,7 @@ func (s *Service) createAnthropicMessageStream(ctx context.Context, cfg modelcon
 	}
 
 	var builder strings.Builder
+	var usage anthropicUsage
 	err = consumeServerSentEvents(resp.Body, func(_ string, data []byte) error {
 		payload := bytes.TrimSpace(data)
 		if len(payload) == 0 {
@@ -1065,7 +1081,11 @@ func (s *Service) createAnthropicMessageStream(ctx context.Context, cfg modelcon
 		}
 
 		var event struct {
-			Type  string `json:"type"`
+			Type    string `json:"type"`
+			Message struct {
+				Usage anthropicUsageEvent `json:"usage"`
+			} `json:"message"`
+			Usage anthropicUsageEvent `json:"usage"`
 			Delta struct {
 				Type string `json:"type"`
 				Text string `json:"text"`
@@ -1075,6 +1095,10 @@ func (s *Service) createAnthropicMessageStream(ctx context.Context, cfg modelcon
 			return err
 		}
 		switch event.Type {
+		case "message_start":
+			event.Message.Usage.ApplyTo(&usage)
+		case "message_delta":
+			event.Usage.ApplyTo(&usage)
 		case "content_block_delta":
 			if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
 				builder.WriteString(event.Delta.Text)
@@ -1095,6 +1119,7 @@ func (s *Service) createAnthropicMessageStream(ctx context.Context, cfg modelcon
 	if text == "" {
 		return "", fmt.Errorf("model returned empty output")
 	}
+	AddUsage(ctx, usage.TokenUsage())
 	return text, nil
 }
 
@@ -1286,6 +1311,25 @@ type responseFormat struct {
 
 type responsesResponse struct {
 	Output []responseOutputItem `json:"output"`
+	Usage  responsesUsage       `json:"usage"`
+}
+
+type responsesUsage struct {
+	InputTokens        int `json:"input_tokens"`
+	InputTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
+}
+
+func (u responsesUsage) TokenUsage() TokenUsage {
+	return TokenUsage{
+		InputTokens:  u.InputTokens,
+		OutputTokens: u.OutputTokens,
+		CachedTokens: u.InputTokensDetails.CachedTokens,
+		TotalTokens:  u.TotalTokens,
+	}
 }
 
 func (r responsesResponse) OutputText() string {
@@ -1334,6 +1378,7 @@ type chatCompletionsRequest struct {
 	FrequencyPenalty *float64                       `json:"frequency_penalty,omitempty"`
 	PresencePenalty  *float64                       `json:"presence_penalty,omitempty"`
 	Stream           bool                           `json:"stream,omitempty"`
+	StreamOptions    *chatCompletionsStreamOptions  `json:"stream_options,omitempty"`
 }
 
 type chatCompletionsMessage struct {
@@ -1357,6 +1402,10 @@ type chatCompletionsResponseFormat struct {
 	JSONSchema *chatCompletionsJSONSchema `json:"json_schema,omitempty"`
 }
 
+type chatCompletionsStreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
+}
+
 type chatCompletionsJSONSchema struct {
 	Name   string         `json:"name"`
 	Schema map[string]any `json:"schema"`
@@ -1365,6 +1414,25 @@ type chatCompletionsJSONSchema struct {
 
 type chatCompletionsResponse struct {
 	Choices []chatCompletionsChoice `json:"choices"`
+	Usage   chatCompletionsUsage    `json:"usage"`
+}
+
+type chatCompletionsUsage struct {
+	PromptTokens        int `json:"prompt_tokens"`
+	PromptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+func (u chatCompletionsUsage) TokenUsage() TokenUsage {
+	return TokenUsage{
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+		CachedTokens: u.PromptTokensDetails.CachedTokens,
+		TotalTokens:  u.TotalTokens,
+	}
 }
 
 type chatCompletionsChoice struct {
@@ -1424,6 +1492,49 @@ type anthropicToolChoice struct {
 
 type anthropicMessagesResponse struct {
 	Content []anthropicContentBlock `json:"content"`
+	Usage   anthropicUsage          `json:"usage"`
+}
+
+type anthropicUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+func (u anthropicUsage) TokenUsage() TokenUsage {
+	inputTokens := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	return TokenUsage{
+		InputTokens:  inputTokens,
+		OutputTokens: u.OutputTokens,
+		CachedTokens: u.CacheReadInputTokens,
+		TotalTokens:  inputTokens + u.OutputTokens,
+	}
+}
+
+type anthropicUsageEvent struct {
+	InputTokens              *int `json:"input_tokens,omitempty"`
+	OutputTokens             *int `json:"output_tokens,omitempty"`
+	CacheCreationInputTokens *int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     *int `json:"cache_read_input_tokens,omitempty"`
+}
+
+func (u anthropicUsageEvent) ApplyTo(target *anthropicUsage) {
+	if target == nil {
+		return
+	}
+	if u.InputTokens != nil {
+		target.InputTokens = *u.InputTokens
+	}
+	if u.OutputTokens != nil {
+		target.OutputTokens = *u.OutputTokens
+	}
+	if u.CacheCreationInputTokens != nil {
+		target.CacheCreationInputTokens = *u.CacheCreationInputTokens
+	}
+	if u.CacheReadInputTokens != nil {
+		target.CacheReadInputTokens = *u.CacheReadInputTokens
+	}
 }
 
 type anthropicContentBlock struct {

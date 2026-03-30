@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"myclaw/internal/ai"
 )
 
 type Snapshot struct {
@@ -21,8 +23,9 @@ type Snapshot struct {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string         `json:"role"`
+	Content string         `json:"content"`
+	Usage   *ai.TokenUsage `json:"usage,omitempty"`
 }
 
 type Store struct {
