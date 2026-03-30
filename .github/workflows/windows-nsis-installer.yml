@@ -50,29 +50,32 @@ jobs:
         shell: powershell
         run: go test ./cmd/myclaw-desktop ./internal/...
 
+      - name: Resolve build version
+        shell: powershell
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/*') {
+            $version = $env:GITHUB_REF_NAME
+          } else {
+            $version = "v0.0.$env:GITHUB_RUN_NUMBER"
+          }
+          "BUILD_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build desktop installer
         shell: powershell
-        working-directory: cmd/myclaw-desktop
         run: |
-          wails build `
-            -platform windows/amd64 `
-            -o myclaw-desktop-amd64.exe `
-            -nsis `
-            -webview2 download `
-            -m `
-            -s
+          ./scripts/package-desktop-windows.ps1 -Version $env:BUILD_VERSION
 
       - name: Verify installer output
         shell: powershell
         run: |
-          $installers = Get-ChildItem -Path cmd/myclaw-desktop/build/bin -Filter *-installer.exe -File
-          if (-not $installers) {
+          $installer = Join-Path "dist" ("myclaw-{0}-amd64-installer.exe" -f $env:BUILD_VERSION)
+          if (-not (Test-Path $installer)) {
             Get-ChildItem -Path cmd/myclaw-desktop/build -Recurse | Select-Object FullName
-            throw "NSIS installer was not generated."
+            Get-ChildItem -Path dist -Recurse | Select-Object FullName
+            throw "Versioned NSIS installer was not generated."
           }
-          $installer = $installers | Select-Object -First 1
-          $installer | Select-Object FullName, Length
-          "INSTALLER_PATH=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-Item $installer | Select-Object FullName, Length
+          "INSTALLER_PATH=$installer" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
