@@ -472,6 +472,26 @@ function openChatSessionDialog(mode, conversation) {
     confirm.classList.remove('btn-primary');
     confirm.classList.add('btn-danger');
     card.classList.add('danger');
+  } else if (mode === 'prompt-delete') {
+    const shortId = (conversation?.shortId || String(conversation?.id || '').slice(0, 8)).trim();
+    const promptTitle = String(conversation?.title || '').trim();
+    const previewText = truncateText(String(conversation?.content || '').replace(/\s+/g, ' ').trim(), 48);
+    const displayTitle = promptTitle ? `#${shortId} · ${promptTitle}` : `#${shortId}`;
+    state.chatSessionDialog.initialTitle = displayTitle;
+    targetLabel.textContent = '目标 Prompt';
+    targetValue.textContent = displayTitle;
+    eyebrow.textContent = '危险操作';
+    title.textContent = '删除 Prompt';
+    description.textContent = previewText
+      ? `删除后这个 Prompt 会立即从 Prompt 库移除，这个动作不能撤销。\n\n内容预览：${previewText}`
+      : '删除后这个 Prompt 会立即从 Prompt 库移除，这个动作不能撤销。';
+    field.hidden = true;
+    input.value = displayTitle;
+    input.placeholder = '';
+    confirm.textContent = '删除';
+    confirm.classList.remove('btn-primary');
+    confirm.classList.add('btn-danger');
+    card.classList.add('danger');
   } else {
     const displayTitle = (conversation?.title || '新对话').trim() || '新对话';
     state.chatSessionDialog.initialTitle = displayTitle;
@@ -505,7 +525,7 @@ function openChatSessionDialog(mode, conversation) {
 
   dialog.hidden = false;
   requestAnimationFrame(() => {
-    if (mode === 'delete' || mode === 'knowledge-delete') {
+    if (mode === 'delete' || mode === 'knowledge-delete' || mode === 'prompt-delete') {
       confirm.focus();
     } else {
       input.focus();
@@ -564,7 +584,7 @@ async function submitChatSessionDialog() {
   const confirm = document.getElementById('chat-session-dialog-confirm');
   if (!confirm) return;
   if ((mode === 'rename' || mode === 'delete') && !sessionId) return;
-  if (mode === 'knowledge-delete' && !itemId) return;
+  if ((mode === 'knowledge-delete' || mode === 'prompt-delete') && !itemId) return;
 
   if (mode === 'rename') {
     const nextTitle = (input?.value || '').trim();
@@ -592,6 +612,14 @@ async function submitChatSessionDialog() {
 
     if (mode === 'knowledge-delete') {
       const result = await state.backend.DeleteKnowledge(itemId);
+      closeChatSessionDialog();
+      await refreshAll();
+      showBanner(result.message, false);
+      return;
+    }
+
+    if (mode === 'prompt-delete') {
+      const result = await state.backend.DeletePrompt(itemId);
       closeChatSessionDialog();
       await refreshAll();
       showBanner(result.message, false);
@@ -1713,16 +1741,14 @@ function insertPromptToChat(id) {
 }
 
 async function deletePrompt(id) {
-  try {
-    const ok = await state.backend.ConfirmAction('删除 Prompt', `确认删除 Prompt #${id.slice(0, 8)} 吗？`);
-    if (!ok) return;
-
-    const result = await state.backend.DeletePrompt(id);
-    await refreshAll();
-    showBanner(result.message, false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
+  const targetId = String(id || '').trim();
+  if (!targetId) return;
+  const prompt = state.prompts.find((item) => item.id === targetId);
+  if (!prompt) {
+    showBanner('没有找到要删除的 Prompt。', true);
+    return;
   }
+  openChatSessionDialog('prompt-delete', prompt);
 }
 
 async function clearPromptsLibrary() {
