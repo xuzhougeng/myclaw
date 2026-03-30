@@ -165,6 +165,7 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 	switch strings.ToLower(fields[0]) {
 	case "/help", "/h":
 		return "可用命令:\n" +
+			"/new — 开启新对话（terminal / desktop）\n" +
 			"/remember <内容> 或 记住：<内容> — 保存一条知识\n" +
 			"/remember-file <路径> — 总结图片/PDF并存入知识库\n" +
 			"/append <ID前缀> <内容> — 追加到已有知识\n" +
@@ -188,6 +189,8 @@ func (s *Service) handleCommand(ctx context.Context, mc MessageContext, input st
 			"/clear — 清空知识库\n" +
 			"/help — 查看帮助\n\n" +
 			"普通问题默认走 direct 模式；可以用 `/mode knowledge` 切到知识库检索，或在单条消息前加 `@kb` 临时覆盖。", nil
+	case "/new":
+		return "当前客户端会在收到 `/new` 时切换到一个新的会话。", nil
 	case "/remember", "/r":
 		if len(fields) < 2 {
 			return "用法: /remember <内容>", nil

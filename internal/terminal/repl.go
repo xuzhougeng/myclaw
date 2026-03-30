@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"myclaw/internal/app"
 )
@@ -16,6 +17,7 @@ type REPL struct {
 	service *app.Service
 	input   io.Reader
 	output  io.Writer
+	session string
 }
 
 func NewREPL(service *app.Service, input io.Reader, output io.Writer) *REPL {
@@ -23,6 +25,7 @@ func NewREPL(service *app.Service, input io.Reader, output io.Writer) *REPL {
 		service: service,
 		input:   input,
 		output:  output,
+		session: "terminal-repl",
 	}
 }
 
@@ -57,6 +60,9 @@ func (r *REPL) Run(ctx context.Context) error {
 		switch {
 		case line == "/exit" || line == "/quit":
 			return nil
+		case line == "/new":
+			r.session = fmt.Sprintf("terminal-repl:%d", time.Now().UnixNano())
+			fmt.Fprintln(r.output, "已开启新对话。")
 		case line == "/help":
 			r.printHelp()
 		case line == "/remember":
@@ -87,7 +93,7 @@ func (r *REPL) runMessage(ctx context.Context, message string) {
 	reply, err := r.service.HandleMessage(ctx, app.MessageContext{
 		UserID:    "terminal",
 		Interface: "terminal",
-		SessionID: "terminal-repl",
+		SessionID: r.session,
 	}, message)
 	if err != nil {
 		fmt.Fprintf(r.output, "error: %v\n", err)
@@ -119,6 +125,7 @@ func (r *REPL) readMultiline(scanner *bufio.Scanner, title string) (string, erro
 func (r *REPL) printHelp() {
 	fmt.Fprintln(r.output, "commands:")
 	fmt.Fprintln(r.output, "  /help")
+	fmt.Fprintln(r.output, "  /new")
 	fmt.Fprintln(r.output, "  /exit")
 	fmt.Fprintln(r.output, "  /remember          paste multiline content until EOF")
 	fmt.Fprintln(r.output, "  /remember-file <路径>")

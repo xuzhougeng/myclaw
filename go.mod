@@ -1,6 +1,6 @@
 module myclaw
 
-go 1.24.0
+go 1.24
 
 require (
 	github.com/gen2brain/go-fitz v1.24.15

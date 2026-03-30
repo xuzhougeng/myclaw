@@ -56,7 +56,7 @@ func main() {
 	weixinBridge := weixin.NewBridge(weixin.NewClient("", ""), service, reminderManager, weixin.BridgeConfig{
 		DataDir: dataDir,
 	})
-	desktopApp := NewDesktopApp(dataDir, store, promptStore, projectStore, modelStore, aiService, service, reminderManager, weixinBridge)
+	desktopApp := NewDesktopApp(dataDir, store, promptStore, projectStore, modelStore, aiService, service, sessionStore, reminderManager, weixinBridge)
 
 	if *httpDevFlag {
 		if err := runHTTPDevServer(*httpListenFlag, desktopApp); err != nil {

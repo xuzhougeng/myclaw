@@ -257,6 +257,40 @@ func (s desktopHTTPDevServer) registerAPI(mux *http.ServeMux) {
 		s.writeResult(w, result, err)
 	})
 
+	mux.HandleFunc("/api/chat/state", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			s.writeMethodNotAllowed(w, http.MethodGet)
+			return
+		}
+		result, err := s.app.GetChatState()
+		s.writeResult(w, result, err)
+	})
+
+	mux.HandleFunc("/api/chat/session/new", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			s.writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		result, err := s.app.NewChatSession()
+		s.writeResult(w, result, err)
+	})
+
+	mux.HandleFunc("/api/chat/session/switch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			s.writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		var body struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := decodeJSONBody(r, &body); err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := s.app.SwitchChatSession(body.SessionID)
+		s.writeResult(w, result, err)
+	})
+
 	mux.HandleFunc("/api/chat/mode", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -67,6 +68,32 @@ func (s *Store) Save(_ context.Context, snapshot Snapshot) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	return snapshot, nil
+}
+
+func (s *Store) List(_ context.Context) ([]Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	items, err := s.readAllLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]Snapshot, 0, len(items))
+	for _, snapshot := range items {
+		out = append(out, snapshot)
+	}
+	slices.SortFunc(out, func(left, right Snapshot) int {
+		switch {
+		case left.UpdatedAt.After(right.UpdatedAt):
+			return -1
+		case left.UpdatedAt.Before(right.UpdatedAt):
+			return 1
+		default:
+			return strings.Compare(left.Key, right.Key)
+		}
+	})
+	return out, nil
 }
 
 func (s *Store) readAllLocked() (map[string]Snapshot, error) {

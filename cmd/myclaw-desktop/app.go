@@ -19,6 +19,7 @@ import (
 	"myclaw/internal/projectstate"
 	"myclaw/internal/promptlib"
 	"myclaw/internal/reminder"
+	"myclaw/internal/sessionstate"
 	"myclaw/internal/skilllib"
 	"myclaw/internal/weixin"
 
@@ -41,14 +42,17 @@ type DesktopApp struct {
 	modelStore        *modelconfig.Store
 	aiService         *ai.Service
 	service           *appsvc.Service
+	sessionStore      *sessionstate.Store
 	reminders         *reminder.Manager
 	weixinBridge      *weixin.Bridge
 	reminderCancel    context.CancelFunc
 	dialogMu          sync.Mutex
+	chatSessionMu     sync.RWMutex
 	projectMu         sync.RWMutex
 	trayMu            sync.Mutex
 	weixinMu          sync.Mutex
 	activeProject     string
+	chatSessionMap    map[string]string
 	trayController    desktopTrayController
 	allowWindowClose  bool
 	weixinStatus      WeixinStatus
@@ -68,22 +72,22 @@ type Overview struct {
 }
 
 type ModelSettings struct {
-	Profiles                   []modelconfig.Summary `json:"profiles"`
-	ActiveProfileID            string                `json:"activeProfileId"`
-	Configured                 bool                  `json:"configured"`
-	MissingFields              []string              `json:"missingFields"`
-	EffectiveProfileName       string                `json:"effectiveProfileName"`
-	EffectiveProvider          string                `json:"effectiveProvider"`
-	EffectiveAPIType           string                `json:"effectiveApiType"`
-	EffectiveBaseURL           string                `json:"effectiveBaseUrl"`
-	EffectiveAPIKeyMasked      string                `json:"effectiveApiKeyMasked"`
-	EffectiveModel             string                `json:"effectiveModel"`
-	EffectiveMaxOutputTokens   *int                  `json:"effectiveMaxOutputTokens,omitempty"`
-	EffectiveTemperature       *float64              `json:"effectiveTemperature,omitempty"`
-	EffectiveTopP              *float64              `json:"effectiveTopP,omitempty"`
-	EffectiveFrequencyPenalty  *float64              `json:"effectiveFrequencyPenalty,omitempty"`
-	EffectivePresencePenalty   *float64              `json:"effectivePresencePenalty,omitempty"`
-	Message                    string                `json:"message"`
+	Profiles                  []modelconfig.Summary `json:"profiles"`
+	ActiveProfileID           string                `json:"activeProfileId"`
+	Configured                bool                  `json:"configured"`
+	MissingFields             []string              `json:"missingFields"`
+	EffectiveProfileName      string                `json:"effectiveProfileName"`
+	EffectiveProvider         string                `json:"effectiveProvider"`
+	EffectiveAPIType          string                `json:"effectiveApiType"`
+	EffectiveBaseURL          string                `json:"effectiveBaseUrl"`
+	EffectiveAPIKeyMasked     string                `json:"effectiveApiKeyMasked"`
+	EffectiveModel            string                `json:"effectiveModel"`
+	EffectiveMaxOutputTokens  *int                  `json:"effectiveMaxOutputTokens,omitempty"`
+	EffectiveTemperature      *float64              `json:"effectiveTemperature,omitempty"`
+	EffectiveTopP             *float64              `json:"effectiveTopP,omitempty"`
+	EffectiveFrequencyPenalty *float64              `json:"effectiveFrequencyPenalty,omitempty"`
+	EffectivePresencePenalty  *float64              `json:"effectivePresencePenalty,omitempty"`
+	Message                   string                `json:"message"`
 }
 
 type ModelConfigInput struct {
@@ -176,8 +180,10 @@ type ChatPromptState struct {
 }
 
 type ChatResponse struct {
-	Reply     string `json:"reply"`
-	Timestamp string `json:"timestamp"`
+	Reply          string `json:"reply"`
+	Timestamp      string `json:"timestamp"`
+	SessionID      string `json:"sessionId,omitempty"`
+	SessionChanged bool   `json:"sessionChanged,omitempty"`
 }
 
 type ReminderItem struct {
@@ -197,18 +203,20 @@ type reminderNotifier struct {
 	app *DesktopApp
 }
 
-func NewDesktopApp(dataDir string, store *knowledge.Store, promptStore *promptlib.Store, projectStore *projectstate.Store, modelStore *modelconfig.Store, aiService *ai.Service, service *appsvc.Service, reminders *reminder.Manager, weixinBridge *weixin.Bridge) *DesktopApp {
+func NewDesktopApp(dataDir string, store *knowledge.Store, promptStore *promptlib.Store, projectStore *projectstate.Store, modelStore *modelconfig.Store, aiService *ai.Service, service *appsvc.Service, sessionStore *sessionstate.Store, reminders *reminder.Manager, weixinBridge *weixin.Bridge) *DesktopApp {
 	return &DesktopApp{
-		dataDir:      dataDir,
-		store:        store,
-		promptStore:  promptStore,
-		projectStore: projectStore,
-		modelStore:   modelStore,
-		aiService:    aiService,
-		service:      service,
-		reminders:    reminders,
-		weixinBridge: weixinBridge,
-		weixinStatus: defaultWeixinStatus(),
+		dataDir:        dataDir,
+		store:          store,
+		promptStore:    promptStore,
+		projectStore:   projectStore,
+		modelStore:     modelStore,
+		aiService:      aiService,
+		service:        service,
+		sessionStore:   sessionStore,
+		reminders:      reminders,
+		weixinBridge:   weixinBridge,
+		chatSessionMap: make(map[string]string),
+		weixinStatus:   defaultWeixinStatus(),
 	}
 }
 
@@ -409,22 +417,22 @@ func (a *DesktopApp) GetModelSettings() (ModelSettings, error) {
 
 	missing := effective.MissingFields()
 	settings := ModelSettings{
-		Profiles:                   snapshot.Profiles,
-		ActiveProfileID:            snapshot.ActiveProfileID,
-		Configured:                 snapshot.ActiveProfileID != "" && len(missing) == 0,
-		MissingFields:              missing,
-		EffectiveProfileName:       effective.Name,
-		EffectiveProvider:          effective.Provider,
-		EffectiveAPIType:           effective.APIType,
-		EffectiveBaseURL:           effective.BaseURL,
-		EffectiveAPIKeyMasked:      modelconfig.MaskSecret(effective.APIKey),
-		EffectiveModel:             effective.Model,
-		EffectiveMaxOutputTokens:   effective.MaxOutputTokens,
-		EffectiveTemperature:       effective.Temperature,
-		EffectiveTopP:              effective.TopP,
-		EffectiveFrequencyPenalty:  effective.FrequencyPenalty,
-		EffectivePresencePenalty:   effective.PresencePenalty,
-		Message:                    desktopModelMessage(snapshot, missing),
+		Profiles:                  snapshot.Profiles,
+		ActiveProfileID:           snapshot.ActiveProfileID,
+		Configured:                snapshot.ActiveProfileID != "" && len(missing) == 0,
+		MissingFields:             missing,
+		EffectiveProfileName:      effective.Name,
+		EffectiveProvider:         effective.Provider,
+		EffectiveAPIType:          effective.APIType,
+		EffectiveBaseURL:          effective.BaseURL,
+		EffectiveAPIKeyMasked:     modelconfig.MaskSecret(effective.APIKey),
+		EffectiveModel:            effective.Model,
+		EffectiveMaxOutputTokens:  effective.MaxOutputTokens,
+		EffectiveTemperature:      effective.Temperature,
+		EffectiveTopP:             effective.TopP,
+		EffectiveFrequencyPenalty: effective.FrequencyPenalty,
+		EffectivePresencePenalty:  effective.PresencePenalty,
+		Message:                   desktopModelMessage(snapshot, missing),
 	}
 	return settings, nil
 }
@@ -679,12 +687,16 @@ func (a *DesktopApp) ListSkills() ([]SkillItem, error) {
 	if err != nil {
 		return nil, err
 	}
+	mc, err := a.chatMessageContext(context.Background(), project)
+	if err != nil {
+		return nil, err
+	}
 
 	available, err := a.service.ListAvailableSkills()
 	if err != nil {
 		return nil, err
 	}
-	loaded := a.service.ListLoadedSkills(desktopMessageContext(project))
+	loaded := a.service.ListLoadedSkills(mc)
 	loadedSet := make(map[string]struct{}, len(loaded))
 	for _, skill := range loaded {
 		loadedSet[strings.ToLower(strings.TrimSpace(skill.Name))] = struct{}{}
@@ -707,8 +719,12 @@ func (a *DesktopApp) LoadSkill(name string) (MessageResult, error) {
 	if err != nil {
 		return MessageResult{}, err
 	}
+	mc, err := a.chatMessageContext(context.Background(), project)
+	if err != nil {
+		return MessageResult{}, err
+	}
 
-	message, err := a.service.LoadSkillForSession(desktopMessageContext(project), name)
+	message, err := a.service.LoadSkillForSession(mc, name)
 	if err != nil {
 		return MessageResult{}, err
 	}
@@ -724,8 +740,12 @@ func (a *DesktopApp) UnloadSkill(name string) (MessageResult, error) {
 	if err != nil {
 		return MessageResult{}, err
 	}
+	mc, err := a.chatMessageContext(context.Background(), project)
+	if err != nil {
+		return MessageResult{}, err
+	}
 
-	message, err := a.service.UnloadSkillForSession(desktopMessageContext(project), name)
+	message, err := a.service.UnloadSkillForSession(mc, name)
 	if err != nil {
 		return MessageResult{}, err
 	}
@@ -741,8 +761,12 @@ func (a *DesktopApp) GetChatMode() (ChatModeState, error) {
 	if err != nil {
 		return ChatModeState{}, err
 	}
+	mc, err := a.chatMessageContext(context.Background(), project)
+	if err != nil {
+		return ChatModeState{}, err
+	}
 
-	mode, err := a.service.GetMode(context.Background(), desktopMessageContext(project))
+	mode, err := a.service.GetMode(context.Background(), mc)
 	if err != nil {
 		return ChatModeState{}, err
 	}
@@ -758,8 +782,12 @@ func (a *DesktopApp) SetChatMode(mode string) (ChatModeState, error) {
 	if err != nil {
 		return ChatModeState{}, err
 	}
+	mc, err := a.chatMessageContext(context.Background(), project)
+	if err != nil {
+		return ChatModeState{}, err
+	}
 
-	selected, err := a.service.SetMode(context.Background(), desktopMessageContext(project), appsvc.Mode(mode))
+	selected, err := a.service.SetMode(context.Background(), mc, appsvc.Mode(mode))
 	if err != nil {
 		return ChatModeState{}, err
 	}
@@ -775,8 +803,12 @@ func (a *DesktopApp) GetChatPrompt() (ChatPromptState, error) {
 	if err != nil {
 		return ChatPromptState{}, err
 	}
+	mc, err := a.chatMessageContext(context.Background(), project)
+	if err != nil {
+		return ChatPromptState{}, err
+	}
 
-	prompt, ok, err := a.service.CurrentPromptProfile(context.Background(), desktopMessageContext(project))
+	prompt, ok, err := a.service.CurrentPromptProfile(context.Background(), mc)
 	if err != nil {
 		return ChatPromptState{}, err
 	}
@@ -799,8 +831,12 @@ func (a *DesktopApp) SetChatPrompt(idOrPrefix string) (ChatPromptState, error) {
 	if err != nil {
 		return ChatPromptState{}, err
 	}
+	mc, err := a.chatMessageContext(context.Background(), project)
+	if err != nil {
+		return ChatPromptState{}, err
+	}
 
-	prompt, err := a.service.SetPromptProfile(context.Background(), desktopMessageContext(project), idOrPrefix)
+	prompt, err := a.service.SetPromptProfile(context.Background(), mc, idOrPrefix)
 	if err != nil {
 		return ChatPromptState{}, err
 	}
@@ -820,7 +856,11 @@ func (a *DesktopApp) ClearChatPrompt() (ChatPromptState, error) {
 	if err != nil {
 		return ChatPromptState{}, err
 	}
-	if err := a.service.ClearPromptProfile(context.Background(), desktopMessageContext(project)); err != nil {
+	mc, err := a.chatMessageContext(context.Background(), project)
+	if err != nil {
+		return ChatPromptState{}, err
+	}
+	if err := a.service.ClearPromptProfile(context.Background(), mc); err != nil {
 		return ChatPromptState{}, err
 	}
 	return ChatPromptState{}, nil
@@ -935,14 +975,31 @@ func (a *DesktopApp) SendMessage(input string) (ChatResponse, error) {
 	if err != nil {
 		return ChatResponse{}, err
 	}
+	if strings.EqualFold(strings.TrimSpace(input), "/new") {
+		state, err := a.NewChatSession()
+		if err != nil {
+			return ChatResponse{}, err
+		}
+		return ChatResponse{
+			Reply:          "已开启新对话。",
+			Timestamp:      time.Now().Local().Format("2006-01-02 15:04:05"),
+			SessionID:      state.SessionID,
+			SessionChanged: true,
+		}, nil
+	}
+	mc, err := a.chatMessageContext(context.Background(), project)
+	if err != nil {
+		return ChatResponse{}, err
+	}
 
-	reply, err := a.service.HandleMessage(context.Background(), desktopMessageContext(project), input)
+	reply, err := a.service.HandleMessage(context.Background(), mc, input)
 	if err != nil {
 		return ChatResponse{}, err
 	}
 	return ChatResponse{
 		Reply:     reply,
 		Timestamp: time.Now().Local().Format("2006-01-02 15:04:05"),
+		SessionID: mc.SessionID,
 	}, nil
 }
 
@@ -1121,11 +1178,11 @@ func (a *DesktopApp) buildProjectState(ctx context.Context) (ProjectState, error
 	}, nil
 }
 
-func desktopMessageContext(project string) appsvc.MessageContext {
+func desktopMessageContext(project string, sessionID string) appsvc.MessageContext {
 	return appsvc.MessageContext{
 		Interface: desktopInterface,
 		UserID:    desktopUserID,
-		SessionID: desktopChatSessionID + ":" + knowledge.CanonicalProjectName(project),
+		SessionID: strings.TrimSpace(sessionID),
 		Project:   project,
 	}
 }

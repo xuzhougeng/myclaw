@@ -47,6 +47,7 @@ const state = {
   backendMode: "",
   overview: null,
   projectState: defaultProjectState(),
+  chatState: defaultChatState(),
   reminders: [],
   knowledge: [],
   prompts: [],
@@ -62,13 +63,7 @@ const state = {
   openAppendId: "",
   model: defaultModelState(),
   weixin: defaultWeixinState(),
-  chat: [
-    {
-      role: "assistant",
-      text: "桌面前端已接入。你可以在记忆库里导入图片/PDF、管理记忆，也可以直接配置模型和微信扫码登录。",
-      time: nowLabel(),
-    },
-  ],
+  chat: [],
 };
 
 let devPollTimer = 0;
@@ -82,6 +77,7 @@ const promptExamples = [
 
 const CHAT_SLASH_COMMANDS = [
   { label: '/help', insert: '/help', description: '查看可用命令' },
+  { label: '/new', insert: '/new', description: '开启一个新的对话' },
   { label: '/remember', insert: '/remember ', description: '保存一条知识' },
   { label: '/remember-file', insert: '/remember-file ', description: '总结图片或 PDF 并写入知识库' },
   { label: '/append', insert: '/append ', description: '追加到已有知识' },
@@ -123,6 +119,7 @@ async function init() {
   renderChatContext();
   renderChatAutocomplete();
   renderProjectState();
+  renderChatSessions();
   renderChat();
   renderKnowledge();
   renderReminders();
@@ -137,6 +134,7 @@ async function init() {
     bindRuntimeEvents();
     startBackendPolling();
     await refreshAll();
+    await refreshChatState();
   } catch (error) {
     showBanner(asMessage(error), true);
   }
@@ -368,6 +366,22 @@ function bindStaticEvents() {
     chatSend.addEventListener('click', () => void sendMessage());
   }
 
+  const chatNewSession = document.getElementById('chat-new-session');
+  if (chatNewSession) {
+    chatNewSession.addEventListener('click', () => void startNewConversation());
+  }
+
+  const chatSessionList = document.getElementById('chat-session-list');
+  if (chatSessionList) {
+    chatSessionList.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-chat-session]');
+      if (!target) return;
+      const sessionId = target.dataset.chatSession || '';
+      if (!sessionId) return;
+      void switchChatSession(sessionId);
+    });
+  }
+
   const chatInput = document.getElementById('chat-input');
   if (chatInput) {
     autoResizeChatInput();
@@ -572,6 +586,7 @@ function bindRuntimeEvents() {
       text: `[提醒 #${shortId}] ${message}`,
       time: nowLabel(),
     });
+    syncCurrentChatConversationFromMessages();
     renderChat();
     showBanner(`提醒 #${shortId}: ${message}`, false);
     void refreshReminders().catch(() => {});
@@ -669,6 +684,9 @@ function createWailsBackend(backend) {
     ImportFile: (path) => backend.ImportFile(path),
     UploadImportFile: () => Promise.reject(new Error('Wails 模式不使用浏览器上传。')),
     SendMessage: (input) => backend.SendMessage(input),
+    GetChatState: () => backend.GetChatState(),
+    NewChatSession: () => backend.NewChatSession(),
+    SwitchChatSession: (sessionId) => backend.SwitchChatSession(sessionId),
     GetChatPrompt: () => backend.GetChatPrompt(),
     SetChatPrompt: (idOrPrefix) => backend.SetChatPrompt(idOrPrefix),
     ClearChatPrompt: () => backend.ClearChatPrompt(),
@@ -715,6 +733,9 @@ function createHTTPBackend() {
     },
     UploadImportFile: (file) => uploadFile('/api/import/upload', file),
     SendMessage: (input) => requestJSON('POST', '/api/chat', { input }),
+    GetChatState: () => requestJSON('GET', '/api/chat/state'),
+    NewChatSession: () => requestJSON('POST', '/api/chat/session/new'),
+    SwitchChatSession: (sessionId) => requestJSON('POST', '/api/chat/session/switch', { sessionId }),
     GetChatPrompt: () => requestJSON('GET', '/api/chat/prompt'),
     SetChatPrompt: (idOrPrefix) => requestJSON('POST', '/api/chat/prompt', { idOrPrefix }),
     ClearChatPrompt: () => requestJSON('DELETE', '/api/chat/prompt'),
@@ -778,6 +799,10 @@ async function refreshAll() {
 async function refreshProjectState() {
   state.projectState = normalizeProjectState(await state.backend.GetProjectState());
   renderProjectState();
+}
+
+async function refreshChatState() {
+  applyChatState(normalizeChatState(await state.backend.GetChatState()));
 }
 
 async function refreshOverview() {
@@ -907,6 +932,7 @@ async function importFile() {
       text: `${result.message}\n${result.item.preview}`,
       time: nowLabel(),
     });
+    syncCurrentChatConversationFromMessages();
     renderChat();
   } catch (error) {
     showBanner(asMessage(error), true);
@@ -1044,12 +1070,14 @@ async function setActiveProject(nextProject) {
     state.projectState = normalizeProjectState(await state.backend.SetActiveProject(project));
     renderProjectState();
     await refreshAll();
+    await refreshChatState();
     if (state.projectState.activeProject !== previousProject) {
       state.chat.push({
         role: 'system',
         text: `已切换记忆库项目 [${state.projectState.activeProject}]，后续导入和新增记忆会写入这里，对话也会优先检索这个项目。`,
         time: nowLabel(),
       });
+      syncCurrentChatConversationFromMessages();
       renderChat();
     }
     showBanner(`已切换记忆库项目 ${state.projectState.activeProject}。`, false);
@@ -1145,6 +1173,15 @@ async function sendMessage() {
   const input = document.getElementById('chat-input');
   const text = input?.value.trim();
   if (!text) return;
+  if (text === '/new') {
+    closeChatAutocomplete();
+    if (input) {
+      input.value = '';
+      autoResizeChatInput();
+    }
+    await startNewConversation();
+    return;
+  }
 
   state.chat.push({ role: 'user', text, time: nowLabel() });
   renderChat();
@@ -1156,11 +1193,18 @@ async function sendMessage() {
 
   try {
     const result = await state.backend.SendMessage(text);
+    if (result.sessionChanged) {
+      await refreshChatState();
+      await Promise.all([refreshSkills(), refreshChatPrompt()]);
+      showBanner(result.reply || '已开启新对话。', false);
+      return;
+    }
     state.chat.push({
       role: 'assistant',
       text: result.reply,
       time: result.timestamp || nowLabel(),
     });
+    syncCurrentChatConversationFromMessages();
     renderChat();
     await refreshAll();
   } catch (error) {
@@ -1169,7 +1213,32 @@ async function sendMessage() {
       text: asMessage(error),
       time: nowLabel(),
     });
+    syncCurrentChatConversationFromMessages();
     renderChat();
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function startNewConversation() {
+  try {
+    applyChatState(normalizeChatState(await state.backend.NewChatSession()));
+    await Promise.all([refreshSkills(), refreshChatPrompt()]);
+    const input = document.getElementById('chat-input');
+    if (input) input.focus();
+    showBanner('已开启新对话。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function switchChatSession(sessionId) {
+  const nextSessionId = (sessionId || '').trim();
+  if (!nextSessionId || nextSessionId === state.chatState.sessionId) return;
+
+  try {
+    applyChatState(normalizeChatState(await state.backend.SwitchChatSession(nextSessionId)));
+    await Promise.all([refreshSkills(), refreshChatPrompt()]);
+  } catch (error) {
     showBanner(asMessage(error), true);
   }
 }
@@ -2158,6 +2227,7 @@ function applyWeixinStatus(nextStatus, fromEvent) {
       text: '微信已连接，desktop 会直接接收微信消息。',
       time: nowLabel(),
     });
+    syncCurrentChatConversationFromMessages();
     renderChat();
   }
 
@@ -2263,13 +2333,118 @@ function renderChat() {
           <div class="chat-avatar">${message.role === 'user' ? '◐' : message.role === 'system' ? '◇' : '○'}</div>
           <div class="chat-bubble">
             <div class="chat-markdown">${renderMarkdown(message.text)}</div>
-            <span class="chat-time">${escapeHTML(message.time)}</span>
+            ${message.time ? `<span class="chat-time">${escapeHTML(message.time)}</span>` : ''}
           </div>
         </div>
       `,
     )
     .join('');
   container.scrollTop = container.scrollHeight;
+}
+
+function renderChatSessions() {
+  const container = document.getElementById('chat-session-list');
+  if (!container) return;
+
+  const conversations = state.chatState.conversations || [];
+  if (conversations.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state compact">
+        <div class="empty-state-icon">◌</div>
+        <h3>还没有对话</h3>
+        <p>点击右上角新建，或输入 <code>/new</code></p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = conversations
+    .map((conversation) => `
+      <button
+        type="button"
+        class="chat-session-item ${conversation.active ? 'active' : ''}"
+        data-chat-session="${escapeAttribute(conversation.sessionId)}"
+      >
+        <div class="chat-session-title-row">
+          <strong>${escapeHTML(conversation.title || '新对话')}</strong>
+          <span>${escapeHTML(conversation.updatedAt || '')}</span>
+        </div>
+        <div class="chat-session-preview">${escapeHTML(conversation.preview || '还没有消息')}</div>
+      </button>
+    `)
+    .join('');
+}
+
+function applyChatState(nextState) {
+  state.chatState = normalizeChatState(nextState);
+  state.chat = (state.chatState.messages || []).map((message) => ({
+    role: message.role,
+    text: message.text,
+    time: message.time || '',
+  }));
+  renderChatSessions();
+  renderChat();
+}
+
+function syncCurrentChatConversationFromMessages() {
+  const sessionId = state.chatState.sessionId || '';
+  if (!sessionId) return;
+
+  const conversations = Array.isArray(state.chatState.conversations) ? [...state.chatState.conversations] : [];
+  const currentIndex = conversations.findIndex((item) => item.sessionId === sessionId);
+  const nextConversation = {
+    sessionId,
+    title: summarizeChatTitle(state.chat),
+    preview: summarizeChatPreview(state.chat),
+    updatedAt: nowLabel(),
+    updatedAtUnix: Date.now(),
+    messageCount: state.chat.length,
+    hasMessages: state.chat.length > 0,
+    active: true,
+  };
+
+  const nextConversations = conversations.map((item, index) => ({
+    ...item,
+    active: index === currentIndex ? true : false,
+  }));
+  if (currentIndex >= 0) {
+    nextConversations[currentIndex] = nextConversation;
+  } else {
+    nextConversations.unshift(nextConversation);
+  }
+
+  state.chatState = {
+    ...state.chatState,
+    sessionId,
+    conversations: nextConversations,
+    messages: state.chat.map((message) => ({
+      role: message.role,
+      text: message.text,
+      time: message.time || '',
+    })),
+  };
+  renderChatSessions();
+}
+
+function summarizeChatTitle(messages) {
+  const firstUser = (messages || []).find((item) => item.role === 'user' && (item.text || '').trim());
+  return truncateText(firstUser?.text || '新对话', 28);
+}
+
+function summarizeChatPreview(messages) {
+  for (let index = (messages || []).length - 1; index >= 0; index -= 1) {
+    const text = (messages[index].text || '').trim();
+    if (text) return truncateText(text, 72);
+  }
+  return '还没有消息';
+}
+
+function truncateText(value, maxRunes) {
+  const text = (value || '').trim();
+  if (!text) return '';
+  const chars = Array.from(text);
+  if (chars.length <= maxRunes) return text;
+  return `${chars.slice(0, Math.max(1, maxRunes - 1)).join('')}…`;
 }
 
 let bannerTimer = 0;
@@ -2287,6 +2462,42 @@ function defaultProjectState() {
       },
     ],
   };
+}
+
+function defaultChatState() {
+  return {
+    sessionId: '',
+    conversations: [],
+    messages: [],
+  };
+}
+
+function normalizeChatState(payload) {
+  const source = Array.isArray(payload) ? payload[0] : payload;
+  const next = {
+    ...defaultChatState(),
+    ...(source || {}),
+  };
+  next.conversations = Array.isArray(next.conversations)
+    ? next.conversations.map((item) => ({
+      sessionId: item?.sessionId || '',
+      title: item?.title || '',
+      preview: item?.preview || '',
+      updatedAt: item?.updatedAt || '',
+      updatedAtUnix: Number(item?.updatedAtUnix || 0),
+      messageCount: Number(item?.messageCount || 0),
+      hasMessages: Boolean(item?.hasMessages),
+      active: Boolean(item?.active),
+    }))
+    : [];
+  next.messages = Array.isArray(next.messages)
+    ? next.messages.map((item) => ({
+      role: item?.role || 'assistant',
+      text: item?.text || '',
+      time: item?.time || '',
+    }))
+    : [];
+  return next;
 }
 
 function defaultChatPromptState() {
