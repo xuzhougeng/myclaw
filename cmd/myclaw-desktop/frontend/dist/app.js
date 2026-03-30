@@ -2307,7 +2307,8 @@ function populateModelForm(profile) {
     const el = document.getElementById(id);
     if (el) el.value = val != null ? val : '';
   };
-  setOptional('model-max-output-tokens', source.maxOutputTokens);
+  setOptional('model-max-output-tokens-text', coalesceOptionalNumber(source.maxOutputTokensText, source.maxOutputTokens));
+  setOptional('model-max-output-tokens-json', coalesceOptionalNumber(source.maxOutputTokensJSON, source.maxOutputTokens));
   setOptional('model-temperature', source.temperature);
   setOptional('model-top-p', source.topP);
   setOptional('model-frequency-penalty', source.frequencyPenalty);
@@ -2345,6 +2346,28 @@ function readOptionalNumber(id) {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeOptionalNumber(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function coalesceOptionalNumber(primary, fallback) {
+  const normalizedPrimary = normalizeOptionalNumber(primary);
+  if (normalizedPrimary != null) {
+    return normalizedPrimary;
+  }
+  return normalizeOptionalNumber(fallback);
+}
+
+function formatEffectiveMaxOutputTokens(value, defaultValue) {
+  const n = normalizeOptionalNumber(value);
+  if (n != null && n > 0) {
+    return String(n);
+  }
+  return `默认（${defaultValue}）`;
+}
+
 function readModelForm() {
   const selected = selectedModelProfile();
   const profileSelect = document.getElementById('model-profile-select');
@@ -2356,7 +2379,8 @@ function readModelForm() {
     baseUrl: document.getElementById('model-base-url')?.value.trim() || '',
     apiKey: document.getElementById('model-api-key')?.value.trim() || '',
     model: document.getElementById('model-name')?.value.trim() || '',
-    maxOutputTokens: readOptionalNumber('model-max-output-tokens'),
+    maxOutputTokensText: readOptionalNumber('model-max-output-tokens-text'),
+    maxOutputTokensJSON: readOptionalNumber('model-max-output-tokens-json'),
     temperature: readOptionalNumber('model-temperature'),
     topP: readOptionalNumber('model-top-p'),
     frequencyPenalty: readOptionalNumber('model-frequency-penalty'),
@@ -2440,6 +2464,8 @@ function renderModel() {
   const effectiveAPIType = document.getElementById('effective-api-type');
   const effectiveBaseUrl = document.getElementById('effective-base-url');
   const effectiveModel = document.getElementById('effective-model');
+  const effectiveMaxOutputTokensText = document.getElementById('effective-max-output-tokens-text');
+  const effectiveMaxOutputTokensJSON = document.getElementById('effective-max-output-tokens-json');
   const effectiveApiKey = document.getElementById('effective-api-key');
 
   const profiles = state.model.profiles || [];
@@ -2475,6 +2501,8 @@ function renderModel() {
   if (effectiveAPIType) effectiveAPIType.textContent = state.model.effectiveApiType || '—';
   if (effectiveBaseUrl) effectiveBaseUrl.textContent = state.model.effectiveBaseUrl || '—';
   if (effectiveModel) effectiveModel.textContent = state.model.effectiveModel || '—';
+  if (effectiveMaxOutputTokensText) effectiveMaxOutputTokensText.textContent = formatEffectiveMaxOutputTokens(state.model.effectiveMaxOutputTokensText, 1500);
+  if (effectiveMaxOutputTokensJSON) effectiveMaxOutputTokensJSON.textContent = formatEffectiveMaxOutputTokens(state.model.effectiveMaxOutputTokensJSON, 800);
   if (effectiveApiKey) effectiveApiKey.textContent = state.model.effectiveApiKeyMasked || '—';
 
   populateModelForm((profiles || []).find((item) => item.id === nextSelectedId) || null);
@@ -3146,6 +3174,12 @@ function defaultModelState() {
     effectiveBaseUrl: 'https://api.openai.com/v1',
     effectiveApiKeyMasked: '(empty)',
     effectiveModel: '',
+    effectiveMaxOutputTokensText: null,
+    effectiveMaxOutputTokensJSON: null,
+    effectiveTemperature: null,
+    effectiveTopP: null,
+    effectiveFrequencyPenalty: null,
+    effectivePresencePenalty: null,
     message: '尚未保存任何模型 profile。',
   };
 }
@@ -3157,18 +3191,34 @@ function normalizeModelSettings(payload) {
     ...(source || {}),
   };
   stateValue.profiles = Array.isArray(stateValue.profiles)
-    ? stateValue.profiles.map((item) => ({
-        id: item.id || '',
-        name: item.name || '',
-        provider: item.provider || 'openai',
-        apiType: item.apiType || 'responses',
-        baseUrl: item.baseUrl || MODEL_PROVIDER_DEFAULTS[item.provider || 'openai']?.baseUrl || '',
-        model: item.model || '',
-        hasApiKey: Boolean(item.hasApiKey),
-        apiKeyMasked: item.apiKeyMasked || (item.hasApiKey ? '********' : '(empty)'),
-        active: Boolean(item.active),
-      }))
+    ? stateValue.profiles.map((item) => {
+        const legacyMaxOutputTokens = normalizeOptionalNumber(item.maxOutputTokens);
+        return {
+          id: item.id || '',
+          name: item.name || '',
+          provider: item.provider || 'openai',
+          apiType: item.apiType || 'responses',
+          baseUrl: item.baseUrl || MODEL_PROVIDER_DEFAULTS[item.provider || 'openai']?.baseUrl || '',
+          model: item.model || '',
+          hasApiKey: Boolean(item.hasApiKey),
+          apiKeyMasked: item.apiKeyMasked || (item.hasApiKey ? '********' : '(empty)'),
+          active: Boolean(item.active),
+          maxOutputTokensText: coalesceOptionalNumber(item.maxOutputTokensText, legacyMaxOutputTokens),
+          maxOutputTokensJSON: coalesceOptionalNumber(item.maxOutputTokensJSON, legacyMaxOutputTokens),
+          maxOutputTokens: legacyMaxOutputTokens,
+          temperature: normalizeOptionalNumber(item.temperature),
+          topP: normalizeOptionalNumber(item.topP),
+          frequencyPenalty: normalizeOptionalNumber(item.frequencyPenalty),
+          presencePenalty: normalizeOptionalNumber(item.presencePenalty),
+        };
+      })
     : [];
+  stateValue.effectiveMaxOutputTokensText = coalesceOptionalNumber(stateValue.effectiveMaxOutputTokensText, stateValue.effectiveMaxOutputTokens);
+  stateValue.effectiveMaxOutputTokensJSON = coalesceOptionalNumber(stateValue.effectiveMaxOutputTokensJSON, stateValue.effectiveMaxOutputTokens);
+  stateValue.effectiveTemperature = normalizeOptionalNumber(stateValue.effectiveTemperature);
+  stateValue.effectiveTopP = normalizeOptionalNumber(stateValue.effectiveTopP);
+  stateValue.effectiveFrequencyPenalty = normalizeOptionalNumber(stateValue.effectiveFrequencyPenalty);
+  stateValue.effectivePresencePenalty = normalizeOptionalNumber(stateValue.effectivePresencePenalty);
   return stateValue;
 }
 

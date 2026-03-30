@@ -414,8 +414,12 @@
                     <summary>高级参数</summary>
                     <div class="form-grid">
                       <label class="form-field">
-                        <span>最大输出 Tokens</span>
-                        <input id="model-max-output-tokens" type="number" min="1" max="128000" step="1" placeholder="默认：JSON 800 / 文本 1500" />
+                        <span>文本最大输出 Tokens</span>
+                        <input id="model-max-output-tokens-text" type="number" min="1" max="128000" step="1" placeholder="默认：1500" />
+                      </label>
+                      <label class="form-field">
+                        <span>JSON 最大输出 Tokens</span>
+                        <input id="model-max-output-tokens-json" type="number" min="1" max="128000" step="1" placeholder="默认：800" />
                       </label>
                       <label class="form-field">
                         <span>Temperature</span>
@@ -472,6 +476,14 @@
                     <div class="model-summary-row">
                       <span>Model</span>
                       <strong id="effective-model">—</strong>
+                    </div>
+                    <div class="model-summary-row">
+                      <span>文本最大输出 Tokens</span>
+                      <strong id="effective-max-output-tokens-text">—</strong>
+                    </div>
+                    <div class="model-summary-row">
+                      <span>JSON 最大输出 Tokens</span>
+                      <strong id="effective-max-output-tokens-json">—</strong>
                     </div>
                     <div class="model-summary-row">
                       <span>API Key</span>

@@ -8,6 +8,10 @@ import (
 	"testing"
 )
 
+func intPtr(v int) *int {
+	return &v
+}
+
 func TestMaskSecret(t *testing.T) {
 	t.Parallel()
 
@@ -41,12 +45,14 @@ func TestStoreSaveLoadListAndSwitchActiveProfile(t *testing.T) {
 	ctx := context.Background()
 
 	first, err := store.Save(ctx, Config{
-		Name:     "OpenAI New API",
-		Provider: ProviderOpenAI,
-		APIType:  APITypeResponses,
-		BaseURL:  "https://example.com/v1/",
-		APIKey:   "openai-secret",
-		Model:    "gpt-4.1-mini",
+		Name:                "OpenAI New API",
+		Provider:            ProviderOpenAI,
+		APIType:             APITypeResponses,
+		BaseURL:             "https://example.com/v1/",
+		APIKey:              "openai-secret",
+		Model:               "gpt-4.1-mini",
+		MaxOutputTokensText: intPtr(1600),
+		MaxOutputTokensJSON: intPtr(900),
 	}, SaveOptions{SetActive: true})
 	if err != nil {
 		t.Fatalf("save first profile: %v", err)
@@ -56,6 +62,12 @@ func TestStoreSaveLoadListAndSwitchActiveProfile(t *testing.T) {
 	}
 	if first.APIKey != "openai-secret" {
 		t.Fatalf("expected decrypted api key, got %q", first.APIKey)
+	}
+	if first.MaxOutputTokensText == nil || *first.MaxOutputTokensText != 1600 {
+		t.Fatalf("expected text max tokens to round-trip, got %#v", first.MaxOutputTokensText)
+	}
+	if first.MaxOutputTokensJSON == nil || *first.MaxOutputTokensJSON != 900 {
+		t.Fatalf("expected json max tokens to round-trip, got %#v", first.MaxOutputTokensJSON)
 	}
 
 	second, err := store.Save(ctx, Config{
@@ -94,6 +106,15 @@ func TestStoreSaveLoadListAndSwitchActiveProfile(t *testing.T) {
 	}
 	if snapshot.Profiles[0].APIKeyMasked != "********" {
 		t.Fatalf("expected masked api key, got %q", snapshot.Profiles[0].APIKeyMasked)
+	}
+	if snapshot.Profiles[0].MaxOutputTokensText == nil || *snapshot.Profiles[0].MaxOutputTokensText != 1600 {
+		t.Fatalf("expected text token limit in summary, got %#v", snapshot.Profiles[0].MaxOutputTokensText)
+	}
+	if snapshot.Profiles[0].MaxOutputTokensJSON == nil || *snapshot.Profiles[0].MaxOutputTokensJSON != 900 {
+		t.Fatalf("expected json token limit in summary, got %#v", snapshot.Profiles[0].MaxOutputTokensJSON)
+	}
+	if snapshot.Profiles[0].MaxOutputTokens != nil {
+		t.Fatalf("expected shared legacy token field to be nil for split config, got %#v", snapshot.Profiles[0].MaxOutputTokens)
 	}
 
 	if err := store.SetActive(ctx, second.ID); err != nil {
@@ -278,5 +299,76 @@ func TestStoreMigratesLegacyPlaintextConfigIntoEncryptedDatabase(t *testing.T) {
 
 	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
 		t.Fatalf("expected legacy plaintext config to be retired, got err=%v", err)
+	}
+}
+
+func TestStoreMigratesLegacySingleMaxOutputTokensIntoSplitFields(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "model", "profiles.db")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatalf("mkdir db dir: %v", err)
+	}
+	if err := os.WriteFile(dbPath, []byte(`{
+  "version": 1,
+  "legacy_imported": true,
+  "active_profile_id": "legacy-profile",
+  "profiles": [
+    {
+      "id": "legacy-profile",
+      "name": "Legacy",
+      "provider": "openai",
+      "api_type": "responses",
+      "base_url": "https://example.com/v1",
+      "model": "gpt-legacy",
+      "max_output_tokens": 2048,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  ]
+}`), 0o600); err != nil {
+		t.Fatalf("write legacy db: %v", err)
+	}
+
+	store := NewStore(dbPath)
+	loaded, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load migrated profile: %v", err)
+	}
+	if loaded.MaxOutputTokensText == nil || *loaded.MaxOutputTokensText != 2048 {
+		t.Fatalf("expected migrated text tokens, got %#v", loaded.MaxOutputTokensText)
+	}
+	if loaded.MaxOutputTokensJSON == nil || *loaded.MaxOutputTokensJSON != 2048 {
+		t.Fatalf("expected migrated json tokens, got %#v", loaded.MaxOutputTokensJSON)
+	}
+	if loaded.MaxOutputTokens != nil {
+		t.Fatalf("expected legacy max tokens field to be cleared, got %#v", loaded.MaxOutputTokens)
+	}
+
+	snapshot, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list migrated profile: %v", err)
+	}
+	if len(snapshot.Profiles) != 1 {
+		t.Fatalf("expected 1 migrated profile, got %d", len(snapshot.Profiles))
+	}
+	if snapshot.Profiles[0].MaxOutputTokens == nil || *snapshot.Profiles[0].MaxOutputTokens != 2048 {
+		t.Fatalf("expected shared legacy summary field for equal split values, got %#v", snapshot.Profiles[0].MaxOutputTokens)
+	}
+
+	rawDB, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatalf("read migrated db: %v", err)
+	}
+	rawText := string(rawDB)
+	if !strings.Contains(rawText, `"max_output_tokens_text": 2048`) {
+		t.Fatalf("expected migrated db to persist text tokens, got %s", rawText)
+	}
+	if !strings.Contains(rawText, `"max_output_tokens_json": 2048`) {
+		t.Fatalf("expected migrated db to persist json tokens, got %s", rawText)
+	}
+	if strings.Contains(rawText, `"max_output_tokens": 2048`) {
+		t.Fatalf("expected legacy max_output_tokens field to be removed, got %s", rawText)
 	}
 }

@@ -57,13 +57,19 @@ func newConfiguredStore(t *testing.T, cfg modelconfig.Config) *modelconfig.Store
 	return store
 }
 
+func intPtr(v int) *int {
+	return &v
+}
+
 func TestRouteCommandUsesOpenAIResponses(t *testing.T) {
 	store := newConfiguredStore(t, modelconfig.Config{
-		Provider: modelconfig.ProviderOpenAI,
-		APIType:  modelconfig.APITypeResponses,
-		BaseURL:  "http://example.invalid/v1",
-		APIKey:   "secret",
-		Model:    "gpt-test",
+		Provider:            modelconfig.ProviderOpenAI,
+		APIType:             modelconfig.APITypeResponses,
+		BaseURL:             "http://example.invalid/v1",
+		APIKey:              "secret",
+		Model:               "gpt-test",
+		MaxOutputTokensText: intPtr(1501),
+		MaxOutputTokensJSON: intPtr(901),
 	})
 
 	service := NewService(store)
@@ -74,6 +80,9 @@ func TestRouteCommandUsesOpenAIResponses(t *testing.T) {
 		}
 		if req.Text == nil || req.Text.Format.Type != "json_schema" {
 			t.Fatalf("expected json schema request, got %#v", req.Text)
+		}
+		if req.MaxOutputTokens != 901 {
+			t.Fatalf("expected json token override, got %d", req.MaxOutputTokens)
 		}
 		if r.URL.Path != "/v1/responses" {
 			t.Fatalf("unexpected endpoint: %s", r.URL.Path)
@@ -90,6 +99,41 @@ func TestRouteCommandUsesOpenAIResponses(t *testing.T) {
 	}
 	if !strings.Contains(decision.MemoryText, "整理内容") {
 		t.Fatalf("unexpected memory text: %#v", decision)
+	}
+}
+
+func TestChatUsesTextMaxOutputTokensOverride(t *testing.T) {
+	store := newConfiguredStore(t, modelconfig.Config{
+		Provider:            modelconfig.ProviderOpenAI,
+		APIType:             modelconfig.APITypeResponses,
+		BaseURL:             "http://example.invalid/v1",
+		APIKey:              "secret",
+		Model:               "gpt-test",
+		MaxOutputTokensText: intPtr(1601),
+		MaxOutputTokensJSON: intPtr(801),
+	})
+
+	service := NewService(store)
+	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
+		var req responsesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.MaxOutputTokens != 1601 {
+			t.Fatalf("expected text token override, got %d", req.MaxOutputTokens)
+		}
+		if req.Text == nil || req.Text.Format.Type != "text" {
+			t.Fatalf("expected text request, got %#v", req.Text)
+		}
+		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"你好"}]}]}`), nil
+	})
+
+	reply, err := service.Chat(context.Background(), "hi", nil)
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if reply != "你好" {
+		t.Fatalf("unexpected reply: %q", reply)
 	}
 }
 

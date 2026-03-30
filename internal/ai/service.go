@@ -654,8 +654,8 @@ func (s *Service) generateStream(ctx context.Context, cfg modelconfig.Config, re
 }
 
 func applyConfigToGenerationRequest(cfg modelconfig.Config, req generationRequest) generationRequest {
-	if cfg.MaxOutputTokens != nil && *cfg.MaxOutputTokens > 0 {
-		req.MaxOutputTokens = *cfg.MaxOutputTokens
+	if override := configuredMaxOutputTokens(cfg, req.WantsJSON()); override != nil && *override > 0 {
+		req.MaxOutputTokens = *override
 	}
 	if cfg.Temperature != nil && req.Temperature == nil {
 		req.Temperature = cfg.Temperature
@@ -670,6 +670,19 @@ func applyConfigToGenerationRequest(cfg modelconfig.Config, req generationReques
 		req.PresencePenalty = cfg.PresencePenalty
 	}
 	return req
+}
+
+func configuredMaxOutputTokens(cfg modelconfig.Config, wantsJSON bool) *int {
+	if wantsJSON {
+		if cfg.MaxOutputTokensJSON != nil {
+			return cfg.MaxOutputTokensJSON
+		}
+	} else {
+		if cfg.MaxOutputTokensText != nil {
+			return cfg.MaxOutputTokensText
+		}
+	}
+	return cfg.MaxOutputTokens
 }
 
 func (s *Service) createOpenAIResponse(ctx context.Context, cfg modelconfig.Config, req generationRequest) (string, error) {

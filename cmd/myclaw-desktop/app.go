@@ -73,39 +73,43 @@ type Overview struct {
 }
 
 type ModelSettings struct {
-	Profiles                  []modelconfig.Summary `json:"profiles"`
-	ActiveProfileID           string                `json:"activeProfileId"`
-	Configured                bool                  `json:"configured"`
-	MissingFields             []string              `json:"missingFields"`
-	EffectiveProfileName      string                `json:"effectiveProfileName"`
-	EffectiveProvider         string                `json:"effectiveProvider"`
-	EffectiveAPIType          string                `json:"effectiveApiType"`
-	EffectiveBaseURL          string                `json:"effectiveBaseUrl"`
-	EffectiveAPIKeyMasked     string                `json:"effectiveApiKeyMasked"`
-	EffectiveModel            string                `json:"effectiveModel"`
-	EffectiveMaxOutputTokens  *int                  `json:"effectiveMaxOutputTokens,omitempty"`
-	EffectiveTemperature      *float64              `json:"effectiveTemperature,omitempty"`
-	EffectiveTopP             *float64              `json:"effectiveTopP,omitempty"`
-	EffectiveFrequencyPenalty *float64              `json:"effectiveFrequencyPenalty,omitempty"`
-	EffectivePresencePenalty  *float64              `json:"effectivePresencePenalty,omitempty"`
-	Message                   string                `json:"message"`
+	Profiles                     []modelconfig.Summary `json:"profiles"`
+	ActiveProfileID              string                `json:"activeProfileId"`
+	Configured                   bool                  `json:"configured"`
+	MissingFields                []string              `json:"missingFields"`
+	EffectiveProfileName         string                `json:"effectiveProfileName"`
+	EffectiveProvider            string                `json:"effectiveProvider"`
+	EffectiveAPIType             string                `json:"effectiveApiType"`
+	EffectiveBaseURL             string                `json:"effectiveBaseUrl"`
+	EffectiveAPIKeyMasked        string                `json:"effectiveApiKeyMasked"`
+	EffectiveModel               string                `json:"effectiveModel"`
+	EffectiveMaxOutputTokensText *int                  `json:"effectiveMaxOutputTokensText,omitempty"`
+	EffectiveMaxOutputTokensJSON *int                  `json:"effectiveMaxOutputTokensJSON,omitempty"`
+	EffectiveMaxOutputTokens     *int                  `json:"effectiveMaxOutputTokens,omitempty"`
+	EffectiveTemperature         *float64              `json:"effectiveTemperature,omitempty"`
+	EffectiveTopP                *float64              `json:"effectiveTopP,omitempty"`
+	EffectiveFrequencyPenalty    *float64              `json:"effectiveFrequencyPenalty,omitempty"`
+	EffectivePresencePenalty     *float64              `json:"effectivePresencePenalty,omitempty"`
+	Message                      string                `json:"message"`
 }
 
 type ModelConfigInput struct {
-	ID               string   `json:"id"`
-	Name             string   `json:"name"`
-	Provider         string   `json:"provider"`
-	APIType          string   `json:"apiType"`
-	BaseURL          string   `json:"baseUrl"`
-	APIKey           string   `json:"apiKey"`
-	Model            string   `json:"model"`
-	MaxOutputTokens  *int     `json:"maxOutputTokens"`
-	Temperature      *float64 `json:"temperature"`
-	TopP             *float64 `json:"topP"`
-	FrequencyPenalty *float64 `json:"frequencyPenalty"`
-	PresencePenalty  *float64 `json:"presencePenalty"`
-	SetActive        bool     `json:"setActive"`
-	PreserveAPIKey   bool     `json:"preserveApiKey"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Provider            string   `json:"provider"`
+	APIType             string   `json:"apiType"`
+	BaseURL             string   `json:"baseUrl"`
+	APIKey              string   `json:"apiKey"`
+	Model               string   `json:"model"`
+	MaxOutputTokensText *int     `json:"maxOutputTokensText"`
+	MaxOutputTokensJSON *int     `json:"maxOutputTokensJSON"`
+	MaxOutputTokens     *int     `json:"maxOutputTokens"`
+	Temperature         *float64 `json:"temperature"`
+	TopP                *float64 `json:"topP"`
+	FrequencyPenalty    *float64 `json:"frequencyPenalty"`
+	PresencePenalty     *float64 `json:"presencePenalty"`
+	SetActive           bool     `json:"setActive"`
+	PreserveAPIKey      bool     `json:"preserveApiKey"`
 }
 
 type KnowledgeItem struct {
@@ -437,22 +441,24 @@ func (a *DesktopApp) GetModelSettings() (ModelSettings, error) {
 
 	missing := effective.MissingFields()
 	settings := ModelSettings{
-		Profiles:                  snapshot.Profiles,
-		ActiveProfileID:           snapshot.ActiveProfileID,
-		Configured:                snapshot.ActiveProfileID != "" && len(missing) == 0,
-		MissingFields:             missing,
-		EffectiveProfileName:      effective.Name,
-		EffectiveProvider:         effective.Provider,
-		EffectiveAPIType:          effective.APIType,
-		EffectiveBaseURL:          effective.BaseURL,
-		EffectiveAPIKeyMasked:     modelconfig.MaskSecret(effective.APIKey),
-		EffectiveModel:            effective.Model,
-		EffectiveMaxOutputTokens:  effective.MaxOutputTokens,
-		EffectiveTemperature:      effective.Temperature,
-		EffectiveTopP:             effective.TopP,
-		EffectiveFrequencyPenalty: effective.FrequencyPenalty,
-		EffectivePresencePenalty:  effective.PresencePenalty,
-		Message:                   desktopModelMessage(snapshot, missing),
+		Profiles:                     snapshot.Profiles,
+		ActiveProfileID:              snapshot.ActiveProfileID,
+		Configured:                   snapshot.ActiveProfileID != "" && len(missing) == 0,
+		MissingFields:                missing,
+		EffectiveProfileName:         effective.Name,
+		EffectiveProvider:            effective.Provider,
+		EffectiveAPIType:             effective.APIType,
+		EffectiveBaseURL:             effective.BaseURL,
+		EffectiveAPIKeyMasked:        modelconfig.MaskSecret(effective.APIKey),
+		EffectiveModel:               effective.Model,
+		EffectiveMaxOutputTokensText: effective.MaxOutputTokensText,
+		EffectiveMaxOutputTokensJSON: effective.MaxOutputTokensJSON,
+		EffectiveMaxOutputTokens:     modelconfig.SharedMaxOutputTokens(effective.MaxOutputTokensText, effective.MaxOutputTokensJSON),
+		EffectiveTemperature:         effective.Temperature,
+		EffectiveTopP:                effective.TopP,
+		EffectiveFrequencyPenalty:    effective.FrequencyPenalty,
+		EffectivePresencePenalty:     effective.PresencePenalty,
+		Message:                      desktopModelMessage(snapshot, missing),
 	}
 	return settings, nil
 }
@@ -497,18 +503,20 @@ func (a *DesktopApp) SaveModelConfig(input ModelConfigInput) (ModelSettings, err
 	}
 
 	cfg := modelconfig.Config{
-		ID:               input.ID,
-		Name:             input.Name,
-		Provider:         input.Provider,
-		APIType:          input.APIType,
-		BaseURL:          input.BaseURL,
-		APIKey:           input.APIKey,
-		Model:            input.Model,
-		MaxOutputTokens:  input.MaxOutputTokens,
-		Temperature:      input.Temperature,
-		TopP:             input.TopP,
-		FrequencyPenalty: input.FrequencyPenalty,
-		PresencePenalty:  input.PresencePenalty,
+		ID:                  input.ID,
+		Name:                input.Name,
+		Provider:            input.Provider,
+		APIType:             input.APIType,
+		BaseURL:             input.BaseURL,
+		APIKey:              input.APIKey,
+		Model:               input.Model,
+		MaxOutputTokensText: input.MaxOutputTokensText,
+		MaxOutputTokensJSON: input.MaxOutputTokensJSON,
+		MaxOutputTokens:     input.MaxOutputTokens,
+		Temperature:         input.Temperature,
+		TopP:                input.TopP,
+		FrequencyPenalty:    input.FrequencyPenalty,
+		PresencePenalty:     input.PresencePenalty,
 	}
 	if _, err := a.modelStore.Save(context.Background(), cfg, modelconfig.SaveOptions{
 		SetActive:      input.SetActive,
