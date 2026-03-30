@@ -145,6 +145,13 @@ select {
   border-bottom: 1px solid var(--border);
 }
 
+.sidebar-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .sidebar-header h1 {
   font-family: var(--font-display);
   font-size: 18px;
@@ -206,14 +213,9 @@ select {
 .sidebar-footer {
   padding: 14px 18px;
   border-top: 1px solid var(--border);
-  position: relative;
 }
 
 .theme-toggle {
-  position: absolute;
-  top: 50%;
-  right: 18px;
-  transform: translateY(-50%);
   width: 32px;
   height: 32px;
   border: 1px solid var(--border);
