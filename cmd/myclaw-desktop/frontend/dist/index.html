@@ -42,14 +42,6 @@
             <span class="icon">⌬</span>
             <span>Skill库</span>
           </a>
-          <a class="nav-item" data-view="model">
-            <span class="icon">◌</span>
-            <span>模型</span>
-          </a>
-          <a class="nav-item" data-view="weixin">
-            <span class="icon">◎</span>
-            <span>微信</span>
-          </a>
           <a class="nav-item" data-view="settings">
             <span class="icon">⚙</span>
             <span>设置</span>
@@ -135,13 +127,13 @@
                 <h3>开始对话</h3>
                 <p>与 AI 助手交流</p>
               </div>
-              <div class="action-card" onclick="navigateTo('weixin')">
+              <div class="action-card" onclick="navigateTo('settings', 'settings-section-weixin')">
                 <h3>微信接入</h3>
-                <p>在桌面端直接扫码登录</p>
+                <p>在设置里直接扫码登录</p>
               </div>
-              <div class="action-card" onclick="navigateTo('model')">
+              <div class="action-card" onclick="navigateTo('settings', 'settings-section-model')">
                 <h3>模型配置</h3>
-                <p>直接在 desktop 里保存与测试</p>
+                <p>在设置里保存与测试 profile</p>
               </div>
               <div class="action-card" data-open-quick-memory>
                 <h3>快速记忆</h3>
@@ -359,195 +351,177 @@
           </div>
         </div>
 
-        <!-- Model View -->
-        <div id="view-model" class="view">
-          <header class="content-header">
-            <h2>模型配置</h2>
-            <p class="subtitle">在 desktop 内保存多模型 profile、切换当前模型，并安全保存 API Key</p>
-          </header>
-          <div class="content-body">
-            <div class="model-layout">
-              <section class="model-card">
-                <div class="model-card-header">
-                  <div>
-                    <h3>模型 Profiles</h3>
-                    <p>支持 OpenAI Responses、OpenAI Chat Completions 和 Anthropic Messages。</p>
-                  </div>
-                  <span class="status-pill off" id="model-status-pill">未配置</span>
-                </div>
-
-                <div class="model-profile-bar">
-                  <label class="form-field form-field-wide">
-                    <span>已保存 Profiles</span>
-                    <select id="model-profile-select"></select>
-                  </label>
-                  <div class="model-actions">
-                    <button class="btn btn-ghost" id="model-new">新建 Profile</button>
-                    <button class="btn btn-ghost" id="model-set-active">设为当前</button>
-                    <button class="btn btn-ghost" id="model-delete">删除 Profile</button>
-                  </div>
-                </div>
-
-                <div class="form-grid">
-                  <label class="form-field">
-                    <span>Profile Name</span>
-                    <input id="model-profile-name" type="text" placeholder="例如：Claude 主力 / GPT-4.1 分析" />
-                  </label>
-                  <label class="form-field">
-                    <span>Provider</span>
-                    <select id="model-provider">
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                    </select>
-                  </label>
-                  <label class="form-field">
-                    <span>API Type</span>
-                    <select id="model-api-type"></select>
-                  </label>
-                  <label class="form-field">
-                    <span>Base URL</span>
-                    <input id="model-base-url" type="text" placeholder="https://api.openai.com/v1" />
-                  </label>
-                  <label class="form-field">
-                    <span>Model</span>
-                    <input id="model-name" type="text" placeholder="gpt-4.1-mini / claude-3-7-sonnet-latest" />
-                  </label>
-                  <label class="form-field form-field-wide">
-                    <span>API Key</span>
-                    <input id="model-api-key" type="password" placeholder="sk-..." />
-                  </label>
-                </div>
-
-                <details class="model-advanced-toggle">
-                  <summary>高级参数</summary>
-                  <div class="form-grid">
-                    <label class="form-field">
-                      <span>最大输出 Tokens</span>
-                      <input id="model-max-output-tokens" type="number" min="1" max="128000" step="1" placeholder="默认：JSON 800 / 文本 1500" />
-                    </label>
-                    <label class="form-field">
-                      <span>Temperature</span>
-                      <input id="model-temperature" type="number" min="0" max="2" step="0.1" placeholder="默认由模型决定" />
-                    </label>
-                    <label class="form-field">
-                      <span>Top P</span>
-                      <input id="model-top-p" type="number" min="0" max="1" step="0.05" placeholder="默认由模型决定" />
-                    </label>
-                    <label class="form-field">
-                      <span>Frequency Penalty</span>
-                      <input id="model-frequency-penalty" type="number" min="-2" max="2" step="0.1" placeholder="仅 OpenAI 兼容 API" />
-                    </label>
-                    <label class="form-field">
-                      <span>Presence Penalty</span>
-                      <input id="model-presence-penalty" type="number" min="-2" max="2" step="0.1" placeholder="仅 OpenAI 兼容 API" />
-                    </label>
-                  </div>
-                </details>
-
-                <p class="model-inline-note" id="model-api-key-hint">新建 profile 时请输入 API Key；编辑已保存 profile 时留空会保留原 key。</p>
-                <p class="model-message" id="model-message">尚未保存本地模型配置。</p>
-                <div class="model-actions">
-                  <button class="btn btn-primary" id="model-save">保存 Profile</button>
-                  <button class="btn btn-ghost" id="model-test">测试所选 Profile</button>
-                </div>
-              </section>
-
-              <section class="model-card">
-                <div class="model-card-header">
-                  <div>
-                    <h3>当前生效值</h3>
-                    <p>业务层始终使用当前活跃 profile，不再从模型环境变量读取。</p>
-                  </div>
-                </div>
-
-                <div class="model-summary">
-                  <div class="model-summary-row">
-                    <span>Profile</span>
-                    <strong id="effective-profile-name">—</strong>
-                  </div>
-                  <div class="model-summary-row">
-                    <span>Provider</span>
-                    <strong id="effective-provider">—</strong>
-                  </div>
-                  <div class="model-summary-row">
-                    <span>API Type</span>
-                    <strong id="effective-api-type">—</strong>
-                  </div>
-                  <div class="model-summary-row">
-                    <span>Base URL</span>
-                    <strong id="effective-base-url">—</strong>
-                  </div>
-                  <div class="model-summary-row">
-                    <span>Model</span>
-                    <strong id="effective-model">—</strong>
-                  </div>
-                  <div class="model-summary-row">
-                    <span>API Key</span>
-                    <strong id="effective-api-key">—</strong>
-                  </div>
-                </div>
-              </section>
-            </div>
-          </div>
-        </div>
-
-        <!-- Weixin View -->
-        <div id="view-weixin" class="view">
-          <header class="content-header">
-            <h2>微信接入</h2>
-            <p class="subtitle">直接在桌面端扫码登录，不再依赖外部网页</p>
-          </header>
-          <div class="content-body">
-            <div class="weixin-layout">
-              <section class="weixin-card">
-                <div class="weixin-card-header">
-                  <div>
-                    <h3>登录状态</h3>
-                    <p>扫码成功后，desktop 会直接启动微信 bridge。</p>
-                  </div>
-                  <span class="status-pill off" id="weixin-status-pill">未连接</span>
-                </div>
-                <p class="weixin-status-copy" id="weixin-status-copy">未连接微信，可在桌面端直接生成二维码扫码登录。</p>
-                <div class="weixin-actions">
-                  <button class="btn btn-primary" id="weixin-start-login">生成二维码</button>
-                  <button class="btn btn-ghost" id="weixin-stop-login">取消扫码</button>
-                  <button class="btn btn-ghost" id="weixin-logout">退出登录</button>
-                </div>
-                <div class="weixin-account" id="weixin-account" hidden>
-                  <div class="weixin-account-row">
-                    <span>机器人 ID</span>
-                    <strong id="weixin-account-id">—</strong>
-                  </div>
-                  <div class="weixin-account-row">
-                    <span>用户 ID</span>
-                    <strong id="weixin-user-id">—</strong>
-                  </div>
-                </div>
-              </section>
-
-              <section class="weixin-card weixin-qr-card">
-                <div class="weixin-qr-frame">
-                  <img id="weixin-qr-image" alt="微信扫码二维码" hidden />
-                  <div class="weixin-qr-empty" id="weixin-qr-empty">
-                    <div class="weixin-qr-icon">◎</div>
-                    <h3>等待生成二维码</h3>
-                    <p>点击左侧按钮后，在这里直接扫码即可。</p>
-                  </div>
-                </div>
-                <p class="weixin-qr-caption" id="weixin-qr-caption">二维码会在本窗口内展示。</p>
-              </section>
-            </div>
-          </div>
-        </div>
-
         <div id="view-settings" class="view">
           <header class="content-header">
             <h2>设置</h2>
-            <p class="subtitle">管理 desktop 内部运行参数。这里的微信上下文限制只影响微信后台消息，不影响本地对话 UI。</p>
+            <p class="subtitle">统一管理模型配置、微信接入和 desktop 内部运行参数。</p>
           </header>
           <div class="content-body">
             <div class="settings-layout">
-              <section class="model-card">
+              <div id="settings-section-model" class="model-layout">
+                <section class="model-card">
+                  <div class="model-card-header">
+                    <div>
+                      <h3>模型配置</h3>
+                      <p>在 desktop 内保存多模型 profile、切换当前模型，并安全保存 API Key。</p>
+                    </div>
+                    <span class="status-pill off" id="model-status-pill">未配置</span>
+                  </div>
+
+                  <div class="model-profile-bar">
+                    <label class="form-field form-field-wide">
+                      <span>已保存 Profiles</span>
+                      <select id="model-profile-select"></select>
+                    </label>
+                    <div class="model-actions">
+                      <button class="btn btn-ghost" id="model-new">新建 Profile</button>
+                      <button class="btn btn-ghost" id="model-set-active">设为当前</button>
+                      <button class="btn btn-ghost" id="model-delete">删除 Profile</button>
+                    </div>
+                  </div>
+
+                  <div class="form-grid">
+                    <label class="form-field">
+                      <span>Profile Name</span>
+                      <input id="model-profile-name" type="text" placeholder="例如：Claude 主力 / GPT-4.1 分析" />
+                    </label>
+                    <label class="form-field">
+                      <span>Provider</span>
+                      <select id="model-provider">
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                      </select>
+                    </label>
+                    <label class="form-field">
+                      <span>API Type</span>
+                      <select id="model-api-type"></select>
+                    </label>
+                    <label class="form-field">
+                      <span>Base URL</span>
+                      <input id="model-base-url" type="text" placeholder="https://api.openai.com/v1" />
+                    </label>
+                    <label class="form-field">
+                      <span>Model</span>
+                      <input id="model-name" type="text" placeholder="gpt-4.1-mini / claude-3-7-sonnet-latest" />
+                    </label>
+                    <label class="form-field form-field-wide">
+                      <span>API Key</span>
+                      <input id="model-api-key" type="password" placeholder="sk-..." />
+                    </label>
+                  </div>
+
+                  <details class="model-advanced-toggle">
+                    <summary>高级参数</summary>
+                    <div class="form-grid">
+                      <label class="form-field">
+                        <span>最大输出 Tokens</span>
+                        <input id="model-max-output-tokens" type="number" min="1" max="128000" step="1" placeholder="默认：JSON 800 / 文本 1500" />
+                      </label>
+                      <label class="form-field">
+                        <span>Temperature</span>
+                        <input id="model-temperature" type="number" min="0" max="2" step="0.1" placeholder="默认由模型决定" />
+                      </label>
+                      <label class="form-field">
+                        <span>Top P</span>
+                        <input id="model-top-p" type="number" min="0" max="1" step="0.05" placeholder="默认由模型决定" />
+                      </label>
+                      <label class="form-field">
+                        <span>Frequency Penalty</span>
+                        <input id="model-frequency-penalty" type="number" min="-2" max="2" step="0.1" placeholder="仅 OpenAI 兼容 API" />
+                      </label>
+                      <label class="form-field">
+                        <span>Presence Penalty</span>
+                        <input id="model-presence-penalty" type="number" min="-2" max="2" step="0.1" placeholder="仅 OpenAI 兼容 API" />
+                      </label>
+                    </div>
+                  </details>
+
+                  <p class="model-inline-note" id="model-api-key-hint">新建 profile 时请输入 API Key；编辑已保存 profile 时留空会保留原 key。</p>
+                  <p class="model-message" id="model-message">尚未保存本地模型配置。</p>
+                  <div class="model-actions">
+                    <button class="btn btn-primary" id="model-save">保存 Profile</button>
+                    <button class="btn btn-ghost" id="model-test">测试所选 Profile</button>
+                  </div>
+                </section>
+
+                <section class="model-card">
+                  <div class="model-card-header">
+                    <div>
+                      <h3>当前生效值</h3>
+                      <p>业务层始终使用当前活跃 profile，不再从模型环境变量读取。</p>
+                    </div>
+                  </div>
+
+                  <div class="model-summary">
+                    <div class="model-summary-row">
+                      <span>Profile</span>
+                      <strong id="effective-profile-name">—</strong>
+                    </div>
+                    <div class="model-summary-row">
+                      <span>Provider</span>
+                      <strong id="effective-provider">—</strong>
+                    </div>
+                    <div class="model-summary-row">
+                      <span>API Type</span>
+                      <strong id="effective-api-type">—</strong>
+                    </div>
+                    <div class="model-summary-row">
+                      <span>Base URL</span>
+                      <strong id="effective-base-url">—</strong>
+                    </div>
+                    <div class="model-summary-row">
+                      <span>Model</span>
+                      <strong id="effective-model">—</strong>
+                    </div>
+                    <div class="model-summary-row">
+                      <span>API Key</span>
+                      <strong id="effective-api-key">—</strong>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div id="settings-section-weixin" class="weixin-layout">
+                <section class="weixin-card">
+                  <div class="weixin-card-header">
+                    <div>
+                      <h3>微信接入</h3>
+                      <p>直接在桌面端扫码登录，不再依赖外部网页。</p>
+                    </div>
+                    <span class="status-pill off" id="weixin-status-pill">未连接</span>
+                  </div>
+                  <p class="weixin-status-copy" id="weixin-status-copy">未连接微信，可在桌面端直接生成二维码扫码登录。</p>
+                  <div class="weixin-actions">
+                    <button class="btn btn-primary" id="weixin-start-login">生成二维码</button>
+                    <button class="btn btn-ghost" id="weixin-stop-login">取消扫码</button>
+                    <button class="btn btn-ghost" id="weixin-logout">退出登录</button>
+                  </div>
+                  <div class="weixin-account" id="weixin-account" hidden>
+                    <div class="weixin-account-row">
+                      <span>机器人 ID</span>
+                      <strong id="weixin-account-id">—</strong>
+                    </div>
+                    <div class="weixin-account-row">
+                      <span>用户 ID</span>
+                      <strong id="weixin-user-id">—</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="weixin-card weixin-qr-card">
+                  <div class="weixin-qr-frame">
+                    <img id="weixin-qr-image" alt="微信扫码二维码" hidden />
+                    <div class="weixin-qr-empty" id="weixin-qr-empty">
+                      <div class="weixin-qr-icon">◎</div>
+                      <h3>等待生成二维码</h3>
+                      <p>点击左侧按钮后，在这里直接扫码即可。</p>
+                    </div>
+                  </div>
+                  <p class="weixin-qr-caption" id="weixin-qr-caption">二维码会在本窗口内展示。</p>
+                </section>
+              </div>
+
+              <section class="model-card" id="settings-section-runtime">
                 <div class="model-card-header">
                   <div>
                     <h3>微信上下文限制</h3>

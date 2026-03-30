@@ -1254,6 +1254,10 @@ select {
   gap: 16px;
 }
 
+.settings-layout > [id] {
+  scroll-margin-top: 16px;
+}
+
 .model-card {
   background: var(--bg-surface);
   border: 1px solid var(--border);

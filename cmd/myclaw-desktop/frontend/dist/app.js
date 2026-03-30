@@ -1,9 +1,18 @@
+const NAV_VIEW_ALIASES = {
+  model: { view: 'settings', sectionId: 'settings-section-model' },
+  weixin: { view: 'settings', sectionId: 'settings-section-weixin' },
+};
+
 // Global navigation function
-window.navigateTo = function(viewName) {
+window.navigateTo = function(viewName, sectionId) {
+  const alias = NAV_VIEW_ALIASES[viewName] || null;
+  const normalizedView = alias?.view || viewName;
+  const normalizedSectionId = sectionId || alias?.sectionId || '';
+
   // Update nav items
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.remove('active');
-    if (item.dataset.view === viewName) {
+    if (item.dataset.view === normalizedView) {
       item.classList.add('active');
     }
   });
@@ -12,9 +21,18 @@ window.navigateTo = function(viewName) {
   document.querySelectorAll('.view').forEach(view => {
     view.classList.remove('active');
   });
-  const targetView = document.getElementById(`view-${viewName}`);
+  const targetView = document.getElementById(`view-${normalizedView}`);
   if (targetView) {
     targetView.classList.add('active');
+  }
+
+  if (targetView && normalizedSectionId) {
+    const targetSection = document.getElementById(normalizedSectionId);
+    if (targetSection && targetView.contains(targetSection)) {
+      requestAnimationFrame(() => {
+        targetSection.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      });
+    }
   }
 };
 
