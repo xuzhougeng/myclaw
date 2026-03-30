@@ -396,10 +396,11 @@ function bindStaticEvents() {
     chatList.addEventListener('click', (event) => {
       const target = event.target.closest('[data-chat-option]');
       if (!target) return;
-      const value = target.dataset.chatOption || '';
+      const value = target.dataset.chatOptionValue || target.dataset.chatOption || '';
+      const label = target.dataset.chatOptionLabel || value;
       const question = target.dataset.chatOptionQuestion || '';
       if (!value || !question) return;
-      void sendChatOption(question, value);
+      void sendChatOption(question, value, label);
     });
   }
 
@@ -1400,12 +1401,12 @@ async function startNewConversation() {
   }
 }
 
-async function sendChatOption(question, value) {
+async function sendChatOption(question, value, label = value) {
   if (state.chatStreaming) {
     showBanner('当前回复尚未完成。', true);
     return;
   }
-  await sendMessage(buildChatOptionSubmission(question, value), value);
+  await sendMessage(buildChatOptionSubmission(question, value, label), label);
 }
 
 async function switchChatSession(sessionId) {
@@ -2577,10 +2578,12 @@ function renderChatOptions(payload) {
             <button
               type="button"
               class="chat-option-button"
-              data-chat-option="${escapeAttribute(option)}"
+              data-chat-option="${escapeAttribute(option.value)}"
+              data-chat-option-value="${escapeAttribute(option.value)}"
+              data-chat-option-label="${escapeAttribute(option.label)}"
               data-chat-option-question="${escapeAttribute(payload.question)}"
             >
-              ${escapeHTML(option)}
+              ${escapeHTML(option.label)}
             </button>
           `)
           .join('')}
@@ -2593,6 +2596,21 @@ function parseChatOptionsPayload(source) {
   const text = String(source ?? '').trim();
   if (!text.startsWith('{') || !text.endsWith('}')) return null;
 
+  const jsonPayload = parseJSONChatOptionsPayload(text);
+  if (jsonPayload) return jsonPayload;
+
+  return parseEDNChatOptionsPayload(text);
+}
+
+function parseJSONChatOptionsPayload(text) {
+  try {
+    return normalizeChatOptionsPayload(JSON.parse(text));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function parseEDNChatOptionsPayload(text) {
   const questionMatch = text.match(/:question\s+"((?:\\.|[^"])*)"/s);
   const optionsMatch = text.match(/:options\s+\[((?:.|\n)*)\]/s);
   if (!questionMatch || !optionsMatch) return null;
@@ -2601,9 +2619,48 @@ function parseChatOptionsPayload(source) {
   const options = Array.from(optionsMatch[1].matchAll(/"((?:\\.|[^"])*)"/g))
     .map((item) => unescapeChatOptionText(item[1]).trim())
     .filter(Boolean);
+  return normalizeChatOptionsPayload({ question, options });
+}
+
+function normalizeChatOptionsPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+
+  const questionType = normalizeChatOptionScalar(payload.questiontype ?? payload.questionType).toLowerCase();
+  if (questionType && questionType !== 'singleselect') return null;
+
+  const question = normalizeChatOptionScalar(payload.question);
+  const options = normalizeChatOptionList(payload.options);
   if (!question || options.length === 0) return null;
 
   return { question, options };
+}
+
+function normalizeChatOptionList(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => normalizeChatOption(item))
+    .filter(Boolean);
+}
+
+function normalizeChatOption(option) {
+  if (typeof option === 'string' || typeof option === 'number' || typeof option === 'boolean') {
+    const text = normalizeChatOptionScalar(option);
+    return text ? { label: text, value: text } : null;
+  }
+  if (!option || typeof option !== 'object' || Array.isArray(option)) return null;
+
+  const value = normalizeChatOptionScalar(option.value);
+  const label = normalizeChatOptionScalar(option.label) || value;
+  const nextValue = value || label;
+  if (!label || !nextValue) return null;
+
+  return { label, value: nextValue };
+}
+
+function normalizeChatOptionScalar(value) {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value).trim();
+  return '';
 }
 
 function unescapeChatOptionText(value) {
@@ -2614,9 +2671,14 @@ function unescapeChatOptionText(value) {
   }
 }
 
-function buildChatOptionSubmission(question, option) {
+function buildChatOptionSubmission(question, optionValue, optionLabel = optionValue) {
+  const label = String(optionLabel ?? optionValue ?? '').trim();
+  const value = String(optionValue ?? optionLabel ?? '').trim();
+  const selection = label && value && label !== value
+    ? `我选择“${label}”（选项值：${value}）。`
+    : `我选择“${label || value}”。`;
   return [
-    `对于你刚才给出的选项题“${question}”，我选择“${option}”。`,
+    `对于你刚才给出的选项题“${question}”，${selection}`,
     '请严格基于上一轮上下文执行这个选择，不要把它当成一个脱离上下文的新话题。',
   ].join('\n');
 }
