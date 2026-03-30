@@ -59,6 +59,22 @@ func (s desktopHTTPDevServer) registerAPI(mux *http.ServeMux) {
 		s.writeResult(w, result, err)
 	})
 
+	mux.HandleFunc("/api/open-external", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			s.writeMethodNotAllowed(w, http.MethodPost)
+			return
+		}
+		var body struct {
+			URL string `json:"url"`
+		}
+		if err := decodeJSONBody(r, &body); err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := s.app.OpenExternalURL(body.URL)
+		s.writeResult(w, result, err)
+	})
+
 	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			s.writeMethodNotAllowed(w, http.MethodGet)

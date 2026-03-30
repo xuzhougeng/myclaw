@@ -16,6 +16,7 @@ const (
 	defaultCurrentVersion = "dev"
 	githubRepo            = "myclaw"
 	githubLatestTagsAPI   = "https://api.github.com/repos/xuzhougeng/myclaw/tags?per_page=1"
+	githubReleasesURL     = "https://github.com/xuzhougeng/myclaw/releases"
 )
 
 var (
@@ -29,6 +30,7 @@ type VersionInfo struct {
 	CurrentVersion string `json:"currentVersion"`
 	LatestVersion  string `json:"latestVersion"`
 	HasUpdate      bool   `json:"hasUpdate"`
+	ReleaseURL     string `json:"releaseUrl,omitempty"`
 	Message        string `json:"message"`
 }
 
@@ -47,6 +49,7 @@ func (a *DesktopApp) GetVersionInfo() (VersionInfo, error) {
 	}
 
 	info.LatestVersion = latestVersion
+	info.ReleaseURL = githubReleasesURL
 	info.HasUpdate = hasVersionUpdate(info.CurrentVersion, latestVersion)
 	if info.HasUpdate {
 		info.Message = fmt.Sprintf("当前版本 %s，最新版本 %s。", info.CurrentVersion, latestVersion)

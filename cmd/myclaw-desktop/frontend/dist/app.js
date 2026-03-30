@@ -1235,6 +1235,7 @@ function createWailsBackend(backend) {
     },
     GetChatState: () => backend.GetChatState(),
     GetVersionInfo: () => backend.GetVersionInfo(),
+    OpenExternalURL: (url) => backend.OpenExternalURL(url),
     RefreshChatResponse: () => backend.RefreshChatResponse(),
     ExportChatMarkdown: () => backend.ExportChatMarkdown(),
     NewChatSession: () => backend.NewChatSession(),
@@ -1292,6 +1293,7 @@ function createHTTPBackend() {
     SendMessageStream: (input, handlers = {}) => streamJSON('POST', '/api/chat/stream', { input }, handlers),
     GetChatState: () => requestJSON('GET', '/api/chat/state'),
     GetVersionInfo: () => requestJSON('GET', '/api/version'),
+    OpenExternalURL: (url) => requestJSON('POST', '/api/open-external', { url }),
     RefreshChatResponse: () => requestJSON('POST', '/api/chat/refresh'),
     ExportChatMarkdown: async () => {
       const payload = await requestJSON('GET', '/api/chat/export-markdown');
@@ -1502,6 +1504,17 @@ async function checkLatestVersion() {
       const versionCompact = document.getElementById('version-compact');
       if (versionCompact) {
         versionCompact.textContent = info.currentVersion;
+      }
+    }
+    if (info?.hasUpdate && info?.releaseUrl) {
+      const ok = await state.backend.ConfirmAction(
+        '发现新版本',
+        `${info.message}\n\n是否打开发布页？`,
+      );
+      if (ok) {
+        await state.backend.OpenExternalURL(info.releaseUrl);
+        showBanner(`已打开发布页：${info.latestVersion || info.releaseUrl}`, false);
+        return;
       }
     }
     showBanner(info?.message || '暂时无法获取版本信息。', false);
