@@ -323,6 +323,62 @@ func TestBuildCurrentChatMarkdownExportFormatsWrappedOptionPayload(t *testing.T)
 	}
 }
 
+func TestBuildCurrentChatMarkdownExportFormatsAskUserInputPayload(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "knowledge.json"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "project.json"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "prompts.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	state, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("get chat state: %v", err)
+	}
+	if _, err := sessionStore.Save(context.Background(), sessionstate.Snapshot{
+		Key: desktopConversationSnapshotKey("default", state.SessionID),
+		History: []sessionstate.Message{
+			{Role: "user", Content: "导出/测试 askuserinput 选项"},
+			{Role: "assistant", Content: `<details>
+<summary>📚 讨论控制面板</summary>
+
+您可以随时输入自己的观点加入讨论，也可以选择以下操作：
+
+</details>
+
+{askuserinput: single_select, question: "接下来您想怎么走？", options: ["继续探讨（进入下一轮：HVG数量对哪个下游环节影响最大）", "深挖这个问题（继续讨论HVG的定义与目的）", "切换讨论模式", "结束讨论"]}`},
+		},
+	}); err != nil {
+		t.Fatalf("save chat snapshot: %v", err)
+	}
+
+	export, err := app.buildCurrentChatMarkdownExport(context.Background())
+	if err != nil {
+		t.Fatalf("build markdown export: %v", err)
+	}
+	for _, want := range []string{
+		"# 导出/测试 askuserinput 选项",
+		"**📚 讨论控制面板**",
+		"您可以随时输入自己的观点加入讨论，也可以选择以下操作：",
+		"接下来您想怎么走？",
+		"- 继续探讨（进入下一轮：HVG数量对哪个下游环节影响最大）",
+		"- 深挖这个问题（继续讨论HVG的定义与目的）",
+		"- 切换讨论模式",
+		"- 结束讨论",
+	} {
+		if !strings.Contains(export.Markdown, want) {
+			t.Fatalf("expected export markdown to contain %q, got:\n%s", want, export.Markdown)
+		}
+	}
+	if strings.Contains(export.Markdown, "{askuserinput:") {
+		t.Fatalf("expected askuserinput payload to be rendered, got:\n%s", export.Markdown)
+	}
+}
+
 func TestBuildCurrentChatMarkdownExportRejectsEmptyConversation(t *testing.T) {
 	t.Parallel()
 

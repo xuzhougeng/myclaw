@@ -2985,7 +2985,10 @@ function parseChatOptionsPayloadCandidate(text) {
   const jsonPayload = parseJSONChatOptionsPayload(candidate);
   if (jsonPayload) return jsonPayload;
 
-  return parseEDNChatOptionsPayload(candidate);
+  const ednPayload = parseEDNChatOptionsPayload(candidate);
+  if (ednPayload) return ednPayload;
+
+  return parseAskUserInputChatOptionsPayload(candidate);
 }
 
 function extractChatOptionContentFromFencedBlocks(text) {
@@ -2995,8 +2998,8 @@ function extractChatOptionContentFromFencedBlocks(text) {
     if (!candidate) continue;
     return {
       payload: candidate,
-      beforeText: text.slice(0, match.index).trim(),
-      afterText: text.slice((match.index || 0) + match[0].length).trim(),
+      beforeText: normalizeChatOptionContextText(text.slice(0, match.index)),
+      afterText: normalizeChatOptionContextText(text.slice((match.index || 0) + match[0].length)),
     };
   }
   return null;
@@ -3009,11 +3012,33 @@ function extractChatOptionContentFromEmbeddedObject(text) {
     if (!candidate) continue;
     return {
       payload: candidate,
-      beforeText: text.slice(0, segment.start).trim(),
-      afterText: text.slice(segment.end).trim(),
+      beforeText: normalizeChatOptionContextText(text.slice(0, segment.start)),
+      afterText: normalizeChatOptionContextText(text.slice(segment.end)),
     };
   }
   return null;
+}
+
+function normalizeChatOptionContextText(text) {
+  let normalized = String(text ?? '').replace(/\r\n?/g, '\n');
+  if (!normalized.trim()) return '';
+
+  normalized = normalized.replace(
+    /<details[^>]*>\s*<summary>([\s\S]*?)<\/summary>/gi,
+    (_match, summary) => `**${stripChatOptionHTML(summary).trim()}**\n\n`,
+  );
+  normalized = normalized.replace(/<\/details>/gi, '\n');
+  normalized = normalized.replace(/<br\s*\/?>/gi, '\n');
+  normalized = normalized.replace(/<\/(p|div|section|article|li|ul|ol)>/gi, '\n');
+  normalized = normalized.replace(/<(p|div|section|article|li|ul|ol)[^>]*>/gi, '');
+  normalized = stripChatOptionHTML(normalized);
+  normalized = normalized.replace(/[ \t]+\n/g, '\n');
+  normalized = normalized.replace(/\n{3,}/g, '\n\n');
+  return normalized.trim();
+}
+
+function stripChatOptionHTML(text) {
+  return String(text ?? '').replace(/<[^>]+>/g, '');
 }
 
 function findBraceDelimitedSegments(text) {
@@ -3078,6 +3103,31 @@ function parseEDNChatOptionsPayload(text) {
     .map((item) => unescapeChatOptionText(item[1]).trim())
     .filter(Boolean);
   return normalizeChatOptionsPayload({ question, options });
+}
+
+function parseAskUserInputChatOptionsPayload(text) {
+  const inputTypeMatch = text.match(/\baskuserinput\s*:\s*([A-Za-z_][\w-]*)/i);
+  if (!inputTypeMatch) return null;
+
+  const inputType = normalizeChatOptionScalar(inputTypeMatch[1]).toLowerCase();
+  if (inputType && inputType !== 'single_select' && inputType !== 'singleselect') {
+    return null;
+  }
+
+  const questionMatch = text.match(/\bquestion\s*:\s*"((?:\\.|[^"])*)"/s);
+  const optionsMatch = text.match(/\boptions\s*:\s*\[((?:.|\n)*)\]/s);
+  if (!questionMatch || !optionsMatch) return null;
+
+  const question = unescapeChatOptionText(questionMatch[1]).trim();
+  const options = Array.from(optionsMatch[1].matchAll(/"((?:\\.|[^"])*)"/g))
+    .map((item) => unescapeChatOptionText(item[1]).trim())
+    .filter(Boolean);
+
+  return normalizeChatOptionsPayload({
+    question,
+    questiontype: 'singleselect',
+    options,
+  });
 }
 
 function normalizeChatOptionsPayload(payload) {

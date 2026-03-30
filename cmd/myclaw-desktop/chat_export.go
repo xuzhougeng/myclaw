@@ -26,6 +26,12 @@ type chatOptionPayload struct {
 	Options  []chatOption
 }
 
+type chatOptionContent struct {
+	Payload    chatOptionPayload
+	BeforeText string
+	AfterText  string
+}
+
 type chatOption struct {
 	Label string
 	Value string
@@ -231,8 +237,16 @@ func chatMarkdownRoleLabel(role string) string {
 }
 
 func renderChatMarkdownContent(content string) string {
-	if payload, ok := parseChatOptionPayload(content); ok {
-		return renderChatOptionMarkdown(payload)
+	if optionContent, ok := extractChatOptionContent(content); ok {
+		parts := make([]string, 0, 3)
+		if optionContent.BeforeText != "" {
+			parts = append(parts, optionContent.BeforeText)
+		}
+		parts = append(parts, renderChatOptionMarkdown(optionContent.Payload))
+		if optionContent.AfterText != "" {
+			parts = append(parts, optionContent.AfterText)
+		}
+		return strings.Join(parts, "\n\n")
 	}
 	return strings.TrimSpace(content)
 }
@@ -260,15 +274,23 @@ func renderChatOptionMarkdown(payload chatOptionPayload) string {
 }
 
 func parseChatOptionPayload(content string) (chatOptionPayload, bool) {
+	optionContent, ok := extractChatOptionContent(content)
+	if !ok {
+		return chatOptionPayload{}, false
+	}
+	return optionContent.Payload, true
+}
+
+func extractChatOptionContent(content string) (chatOptionContent, bool) {
 	text := strings.TrimSpace(content)
 	if payload, ok := parseChatOptionPayloadCandidate(text); ok {
-		return payload, true
+		return chatOptionContent{Payload: payload}, true
 	}
 
-	if payload, ok := parseChatOptionPayloadFromFencedBlocks(content); ok {
-		return payload, true
+	if optionContent, ok := extractChatOptionContentFromFencedBlocks(content); ok {
+		return optionContent, true
 	}
-	return parseChatOptionPayloadFromEmbeddedObject(content)
+	return extractChatOptionContentFromEmbeddedObject(content)
 }
 
 func parseChatOptionPayloadCandidate(content string) (chatOptionPayload, bool) {
@@ -279,32 +301,86 @@ func parseChatOptionPayloadCandidate(content string) (chatOptionPayload, bool) {
 	if payload, ok := parseJSONChatOptionPayload(text); ok {
 		return payload, true
 	}
-	return parseEDNChatOptionPayload(text)
+	if payload, ok := parseEDNChatOptionPayload(text); ok {
+		return payload, true
+	}
+	return parseAskUserInputChatOptionPayload(text)
 }
 
-func parseChatOptionPayloadFromFencedBlocks(content string) (chatOptionPayload, bool) {
-	for _, match := range chatOptionFencePattern.FindAllStringSubmatch(content, -1) {
-		if len(match) < 2 {
+func extractChatOptionContentFromFencedBlocks(content string) (chatOptionContent, bool) {
+	matches := chatOptionFencePattern.FindAllStringSubmatchIndex(content, -1)
+	for _, match := range matches {
+		if len(match) < 4 {
 			continue
 		}
-		if payload, ok := parseChatOptionPayloadCandidate(match[1]); ok {
-			return payload, true
+		blockStart, blockEnd := match[0], match[1]
+		candidateStart, candidateEnd := match[2], match[3]
+		if payload, ok := parseChatOptionPayloadCandidate(content[candidateStart:candidateEnd]); ok {
+			return chatOptionContent{
+				Payload:    payload,
+				BeforeText: normalizeChatOptionContextText(content[:blockStart]),
+				AfterText:  normalizeChatOptionContextText(content[blockEnd:]),
+			}, true
 		}
 	}
-	return chatOptionPayload{}, false
+	return chatOptionContent{}, false
 }
 
-func parseChatOptionPayloadFromEmbeddedObject(content string) (chatOptionPayload, bool) {
+func extractChatOptionContentFromEmbeddedObject(content string) (chatOptionContent, bool) {
 	for _, segment := range findBraceDelimitedSegments(content) {
-		if payload, ok := parseChatOptionPayloadCandidate(segment); ok {
-			return payload, true
+		if payload, ok := parseChatOptionPayloadCandidate(segment.Text); ok {
+			return chatOptionContent{
+				Payload:    payload,
+				BeforeText: normalizeChatOptionContextText(content[:segment.Start]),
+				AfterText:  normalizeChatOptionContextText(content[segment.End:]),
+			}, true
 		}
 	}
-	return chatOptionPayload{}, false
+	return chatOptionContent{}, false
 }
 
-func findBraceDelimitedSegments(content string) []string {
-	segments := make([]string, 0, 2)
+func normalizeChatOptionContextText(content string) string {
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	normalized = strings.TrimSpace(normalized)
+	if normalized == "" {
+		return ""
+	}
+
+	detailsPattern := regexp.MustCompile(`(?is)<details[^>]*>\s*<summary>(.*?)</summary>`)
+	normalized = detailsPattern.ReplaceAllStringFunc(normalized, func(segment string) string {
+		match := detailsPattern.FindStringSubmatch(segment)
+		if len(match) < 2 {
+			return ""
+		}
+		summary := strings.TrimSpace(stripChatOptionHTML(match[1]))
+		if summary == "" {
+			return ""
+		}
+		return "**" + summary + "**\n\n"
+	})
+	normalized = regexp.MustCompile(`(?i)</details>`).ReplaceAllString(normalized, "\n")
+	normalized = regexp.MustCompile(`(?i)<br\s*/?>`).ReplaceAllString(normalized, "\n")
+	normalized = regexp.MustCompile(`(?i)</(?:p|div|section|article|li|ul|ol)>`).ReplaceAllString(normalized, "\n")
+	normalized = regexp.MustCompile(`(?i)<(?:p|div|section|article|li|ul|ol)[^>]*>`).ReplaceAllString(normalized, "")
+	normalized = stripChatOptionHTML(normalized)
+	normalized = regexp.MustCompile(`[ \t]+\n`).ReplaceAllString(normalized, "\n")
+	normalized = regexp.MustCompile(`\n{3,}`).ReplaceAllString(normalized, "\n\n")
+	return strings.TrimSpace(normalized)
+}
+
+func stripChatOptionHTML(content string) string {
+	return regexp.MustCompile(`(?s)<[^>]+>`).ReplaceAllString(content, "")
+}
+
+type braceDelimitedSegment struct {
+	Start int
+	End   int
+	Text  string
+}
+
+func findBraceDelimitedSegments(content string) []braceDelimitedSegment {
+	segments := make([]braceDelimitedSegment, 0, 2)
 	depth := 0
 	start := -1
 	inString := false
@@ -339,12 +415,61 @@ func findBraceDelimitedSegments(content string) []string {
 		}
 		depth--
 		if depth == 0 && start >= 0 {
-			segments = append(segments, content[start:i+1])
+			segments = append(segments, braceDelimitedSegment{
+				Start: start,
+				End:   i + 1,
+				Text:  content[start : i+1],
+			})
 			start = -1
 		}
 	}
 
 	return segments
+}
+
+func parseChatOptionPayloadFromFencedBlocks(content string) (chatOptionPayload, bool) {
+	if optionContent, ok := extractChatOptionContentFromFencedBlocks(content); ok {
+		return optionContent.Payload, true
+	}
+	return chatOptionPayload{}, false
+}
+
+func parseChatOptionPayloadFromEmbeddedObject(content string) (chatOptionPayload, bool) {
+	if optionContent, ok := extractChatOptionContentFromEmbeddedObject(content); ok {
+		return optionContent.Payload, true
+	}
+	return chatOptionPayload{}, false
+}
+
+func parseAskUserInputChatOptionPayload(content string) (chatOptionPayload, bool) {
+	inputTypeMatch := regexp.MustCompile(`(?i)\baskuserinput\s*:\s*([A-Za-z_][\w-]*)`).FindStringSubmatch(content)
+	if len(inputTypeMatch) < 2 {
+		return chatOptionPayload{}, false
+	}
+	inputType := strings.ToLower(normalizeChatOptionScalar(inputTypeMatch[1]))
+	if inputType != "" && inputType != "single_select" && inputType != "singleselect" {
+		return chatOptionPayload{}, false
+	}
+
+	questionMatch := regexp.MustCompile(`(?s)\bquestion\s*:\s*"((?:\\.|[^"])*)"`).FindStringSubmatch(content)
+	optionsMatch := regexp.MustCompile(`(?s)\boptions\s*:\s*\[(.*)\]`).FindStringSubmatch(content)
+	if len(questionMatch) < 2 || len(optionsMatch) < 2 {
+		return chatOptionPayload{}, false
+	}
+
+	options := make([]string, 0, 4)
+	for _, item := range chatOptionStringPattern.FindAllStringSubmatch(optionsMatch[1], -1) {
+		if len(item) < 2 {
+			continue
+		}
+		options = append(options, unescapeChatOptionText(item[1]))
+	}
+
+	return normalizeChatOptionPayload(map[string]any{
+		"question":     unescapeChatOptionText(questionMatch[1]),
+		"questiontype": "singleselect",
+		"options":      options,
+	})
 }
 
 func parseJSONChatOptionPayload(content string) (chatOptionPayload, bool) {
