@@ -32,6 +32,18 @@ type AgentStepDecision struct {
 	ToolInput string `json:"tool_input"`
 }
 
+func (s *Service) PlanNext(_ context.Context, _ string, _ []ConversationMessage, _ []AgentToolDefinition, _ AgentTaskState) (LoopDecision, error) {
+	return LoopDecision{}, nil
+}
+
+func (s *Service) SummarizeWorkingState(_ context.Context, _ AgentTaskState) (string, error) {
+	return "", nil
+}
+
+func (s *Service) SummarizeFinal(_ context.Context, _ AgentTaskState, _ string) (string, error) {
+	return "", nil
+}
+
 func (s *Service) DecideAgentStep(ctx context.Context, task string, history []ConversationMessage, tools []AgentToolDefinition, results []AgentToolResult) (AgentStepDecision, error) {
 	cfg, err := s.requireConfig(ctx)
 	if err != nil {
