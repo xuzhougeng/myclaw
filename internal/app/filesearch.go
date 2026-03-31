@@ -141,12 +141,12 @@ func (s *Service) planAndExecuteFileSearch(ctx context.Context, mc MessageContex
 	addProcessTrace(ctx, "识别需求", "将当前输入识别为文件检索请求。")
 	addProcessTrace(ctx, "匹配工具", "选中工具 `"+tool.Name+"`。")
 
-	prior := make([]ai.ToolExecution, 0, maxFileSearchPlanningRounds)
-	seenQueries := make(map[string]struct{})
+	prior := newPriorExecutions(maxFileSearchPlanningRounds)
+	tracker := newSeenQueryTracker()
 	var lastResult filesearch.ToolResult
 
 	for round := 0; round < maxFileSearchPlanningRounds; round++ {
-		decision, err := s.aiService.PlanToolUse(s.withSkillContext(ctx, mc), task, tool, prior)
+		decision, err := s.aiService.PlanToolUse(s.withSkillContext(ctx, mc), task, tool, prior.Slice())
 		if err != nil {
 			return filesearch.ToolResult{}, "", true, err
 		}
@@ -180,14 +180,14 @@ func (s *Service) planAndExecuteFileSearch(ctx context.Context, mc MessageContex
 			addProcessTrace(ctx, fmt.Sprintf("规划调用 %d", round+1), "当前规划未形成有效检索式。")
 			return filesearch.ToolResult{}, "我还不能形成有效的文件检索条件，请直接说文件名、目录、扩展名或磁盘范围。", true, nil
 		}
-		if _, ok := seenQueries[queryKey]; ok {
+		if tracker.IsDuplicate(queryKey) {
 			addProcessTrace(ctx, fmt.Sprintf("规划调用 %d", round+1), "检测到重复检索式，停止重复执行。")
 			if strings.TrimSpace(lastResult.Query) != "" || len(lastResult.Items) > 0 {
 				return lastResult, "", true, nil
 			}
 			return filesearch.ToolResult{}, "我已经尝试过等价的检索条件了，请补充更具体的文件名、目录、扩展名或时间范围。", true, nil
 		}
-		seenQueries[queryKey] = struct{}{}
+		tracker.Mark(queryKey)
 
 		result, reply, err := s.performFileSearch(ctx, toolInput)
 		if err != nil {
@@ -205,7 +205,7 @@ func (s *Service) planAndExecuteFileSearch(ctx context.Context, mc MessageContex
 
 		compactOutput := summarizeFileSearchResultForPlanner(result)
 		recordToolArtifact(ctx, tool.Name, mustMarshalJSON(toolInput), mustMarshalJSON(result), compactOutput)
-		prior = append(prior, ai.ToolExecution{
+		prior.Add(ai.ToolExecution{
 			ToolName:   tool.Name,
 			ToolInput:  mustMarshalJSON(toolInput),
 			ToolOutput: compactOutput,
