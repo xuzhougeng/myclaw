@@ -291,7 +291,7 @@ func TestDesktopChatStateIncludesWeixinConversation(t *testing.T) {
 		t.Fatalf("prime desktop chat state: %v", err)
 	}
 	if _, err := sessionStore.Save(context.Background(), sessionstate.Snapshot{
-		Key: "source:weixin:user-1|session:weixin:ctx-1",
+		Key: "source:weixin:user-1|session:weixin-user:user-1",
 		History: []sessionstate.Message{
 			{Role: "user", Content: "帮我找单细胞 pdf"},
 			{Role: "assistant", Content: "找到 2 个文件，回复序号即可发送给你。"},
@@ -307,7 +307,7 @@ func TestDesktopChatStateIncludesWeixinConversation(t *testing.T) {
 
 	found := false
 	for _, item := range state.Conversations {
-		if item.SessionID != "weixin:ctx-1" {
+		if item.SessionID != "weixin-user:user-1" {
 			continue
 		}
 		found = true
@@ -325,11 +325,11 @@ func TestDesktopChatStateIncludesWeixinConversation(t *testing.T) {
 		t.Fatalf("expected weixin conversation in chat state, got %#v", state.Conversations)
 	}
 
-	switched, err := app.SwitchChatSession("weixin:ctx-1")
+	switched, err := app.SwitchChatSession("weixin-user:user-1")
 	if err != nil {
 		t.Fatalf("switch to weixin conversation: %v", err)
 	}
-	if switched.SessionID != "weixin:ctx-1" {
+	if switched.SessionID != "weixin-user:user-1" {
 		t.Fatalf("unexpected active session after switch: %#v", switched)
 	}
 	if len(switched.Messages) != 2 {
@@ -356,7 +356,7 @@ func TestDesktopEmitChatChangedActivatesWeixinConversation(t *testing.T) {
 		t.Fatalf("prime desktop chat state: %v", err)
 	}
 	if _, err := sessionStore.Save(context.Background(), sessionstate.Snapshot{
-		Key: "source:weixin:user-1|session:weixin:ctx-1",
+		Key: "source:weixin:user-1|session:weixin-user:user-1",
 		History: []sessionstate.Message{
 			{Role: "user", Content: "你好"},
 			{Role: "assistant", Content: "你好，我在。"},
@@ -365,13 +365,13 @@ func TestDesktopEmitChatChangedActivatesWeixinConversation(t *testing.T) {
 		t.Fatalf("save weixin snapshot: %v", err)
 	}
 
-	app.emitChatChanged(weixin.ConversationUpdate{SessionID: "weixin:ctx-1", Activate: true})
+	app.emitChatChanged(weixin.ConversationUpdate{SessionID: "weixin-user:user-1", Activate: true})
 
 	state, err := app.GetChatState()
 	if err != nil {
 		t.Fatalf("get chat state: %v", err)
 	}
-	if state.SessionID != "weixin:ctx-1" {
+	if state.SessionID != "weixin-user:user-1" {
 		t.Fatalf("expected active weixin session, got %#v", state)
 	}
 	if len(state.Messages) != 2 || state.Messages[0].Text != "你好" || state.Messages[1].Text != "你好，我在。" {
@@ -406,7 +406,7 @@ func TestDesktopSendMessageContinuesWeixinConversation(t *testing.T) {
 		t.Fatalf("prime desktop chat state: %v", err)
 	}
 	if _, err := sessionStore.Save(context.Background(), sessionstate.Snapshot{
-		Key: "source:weixin:user-1|session:weixin:ctx-1",
+		Key: "source:weixin:user-1|session:weixin-user:user-1",
 		History: []sessionstate.Message{
 			{Role: "user", Content: "你好"},
 			{Role: "assistant", Content: "你好，我在。"},
@@ -414,7 +414,7 @@ func TestDesktopSendMessageContinuesWeixinConversation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save weixin snapshot: %v", err)
 	}
-	if _, err := app.SwitchChatSession("weixin:ctx-1"); err != nil {
+	if _, err := app.SwitchChatSession("weixin-user:user-1"); err != nil {
 		t.Fatalf("switch to weixin conversation: %v", err)
 	}
 
@@ -422,7 +422,7 @@ func TestDesktopSendMessageContinuesWeixinConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("continue weixin conversation: %v", err)
 	}
-	if result.SessionID != "weixin:ctx-1" || result.Reply != "继续聊" {
+	if result.SessionID != "weixin-user:user-1" || result.Reply != "继续聊" {
 		t.Fatalf("unexpected continued result: %#v", result)
 	}
 

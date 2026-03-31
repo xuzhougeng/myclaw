@@ -233,7 +233,7 @@ func TestHandleMessageRecordsSlashCommandConversation(t *testing.T) {
 
 	bridge.handleMessage(context.Background(), msg)
 
-	snapshot, ok, err := sessionStore.Load(context.Background(), "source:weixin:user-1|session:weixin:ctx-1")
+	snapshot, ok, err := sessionStore.Load(context.Background(), "source:weixin:user-1|session:weixin-user:user-1")
 	if err != nil {
 		t.Fatalf("load slash snapshot: %v", err)
 	}
@@ -332,6 +332,55 @@ func TestHandleMessageStatelessCommandsDoNotCreateConversation(t *testing.T) {
 	}
 }
 
+func TestHandleMessageReusesConversationAcrossContextTokens(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, bridgeTestAI{
+		route: aicore.RouteDecision{Command: "answer"},
+		chatFunc: func(_ context.Context, input string, history []aicore.ConversationMessage) string {
+			return "收到: " + input
+		},
+	}, reminders, nil, sessionStore, nil)
+
+	var sent SendMessageRequest
+	bridge := NewBridge(newTestClient(t, &sent), service, reminders, BridgeConfig{DataDir: root})
+
+	first := WeixinMessage{
+		FromUserID:   "user-1",
+		ContextToken: "ctx-1",
+		MessageType:  MessageTypeUser,
+		MessageState: MessageStateFinish,
+		ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "第一个问题"}}},
+	}
+	second := first
+	second.ContextToken = "ctx-2"
+	second.ItemList = []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "第二个问题"}}}
+
+	bridge.handleMessage(context.Background(), first)
+	bridge.handleMessage(context.Background(), second)
+
+	items, err := sessionStore.List(context.Background())
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one stable weixin conversation, got %#v", items)
+	}
+	if items[0].Key != "source:weixin:user-1|session:weixin-user:user-1" {
+		t.Fatalf("unexpected session key: %#v", items)
+	}
+	if len(bridge.conversationSessions) != 1 {
+		t.Fatalf("expected one bound weixin slot, got %#v", bridge.conversationSessions)
+	}
+	if sessionID := strings.TrimSpace(bridge.conversationSessions["user:user-1"]); sessionID != "weixin-user:user-1" {
+		t.Fatalf("unexpected bound session id: %#v", bridge.conversationSessions)
+	}
+}
+
 func TestHandleMessageNewCommandStartsDistinctConversation(t *testing.T) {
 	t.Parallel()
 
@@ -396,7 +445,7 @@ func TestHandleMessageAfterDeletedConversationStartsNewSession(t *testing.T) {
 	}
 
 	bridge.handleMessage(context.Background(), msg)
-	if err := sessionStore.Delete(context.Background(), "source:weixin:user-1|session:weixin:ctx-1"); err != nil {
+	if err := sessionStore.Delete(context.Background(), "source:weixin:user-1|session:weixin-user:user-1"); err != nil {
 		t.Fatalf("delete original snapshot: %v", err)
 	}
 
@@ -419,7 +468,9 @@ func TestHandleMessageAfterDeletedConversationStartsNewSession(t *testing.T) {
 }
 
 type bridgeTestAI struct {
-	intent aicore.FileSearchIntent
+	intent   aicore.FileSearchIntent
+	route    aicore.RouteDecision
+	chatFunc func(context.Context, string, []aicore.ConversationMessage) string
 }
 
 func (f bridgeTestAI) IsConfigured(context.Context) (bool, error) {
@@ -427,7 +478,7 @@ func (f bridgeTestAI) IsConfigured(context.Context) (bool, error) {
 }
 
 func (f bridgeTestAI) RouteCommand(context.Context, string) (aicore.RouteDecision, error) {
-	return aicore.RouteDecision{}, nil
+	return f.route, nil
 }
 
 func (f bridgeTestAI) BuildSearchPlan(context.Context, string) (aicore.SearchPlan, error) {
@@ -446,7 +497,10 @@ func (f bridgeTestAI) Answer(context.Context, string, []knowledge.Entry) (string
 	return "", nil
 }
 
-func (f bridgeTestAI) Chat(context.Context, string, []aicore.ConversationMessage) (string, error) {
+func (f bridgeTestAI) Chat(ctx context.Context, input string, history []aicore.ConversationMessage) (string, error) {
+	if f.chatFunc != nil {
+		return f.chatFunc(ctx, input, history), nil
+	}
 	return "", nil
 }
 

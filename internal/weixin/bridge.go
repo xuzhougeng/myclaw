@@ -324,13 +324,20 @@ func (b *Bridge) sendChunkedReply(ctx context.Context, toUserID, contextToken, t
 }
 
 func weixinSessionID(msg WeixinMessage) string {
-	if strings.TrimSpace(msg.ContextToken) != "" {
-		return "weixin:" + strings.TrimSpace(msg.ContextToken)
-	}
 	if strings.TrimSpace(msg.FromUserID) != "" {
 		return "weixin-user:" + strings.TrimSpace(msg.FromUserID)
 	}
+	if strings.TrimSpace(msg.ContextToken) != "" {
+		return "weixin:" + strings.TrimSpace(msg.ContextToken)
+	}
 	return "weixin"
+}
+
+func legacyContextSessionID(msg WeixinMessage) string {
+	if strings.TrimSpace(msg.ContextToken) == "" {
+		return ""
+	}
+	return "weixin:" + strings.TrimSpace(msg.ContextToken)
 }
 
 func (b *Bridge) handleStatelessCommand(ctx context.Context, msg WeixinMessage, command string) error {

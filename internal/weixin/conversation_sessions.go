@@ -25,12 +25,10 @@ func (b *Bridge) conversationSlotKey(msg WeixinMessage) string {
 	userID := strings.TrimSpace(msg.FromUserID)
 	contextToken := strings.TrimSpace(msg.ContextToken)
 	switch {
-	case userID != "" && contextToken != "":
-		return "user:" + userID + "|context:" + contextToken
-	case contextToken != "":
-		return "context:" + contextToken
 	case userID != "":
 		return "user:" + userID
+	case contextToken != "":
+		return "context:" + contextToken
 	default:
 		return "default"
 	}
@@ -148,6 +146,25 @@ func (b *Bridge) resolveConversationLifecycleLocked(ctx context.Context, msg Wei
 			return app.ConversationLifecycleResult{}, "", err
 		}
 		legacyExists = ok
+	}
+	if !legacyExists {
+		contextLegacyID := legacyContextSessionID(msg)
+		switch {
+		case contextLegacyID == "":
+		case contextLegacyID == legacyID:
+		case contextLegacyID == boundID:
+			legacyID = contextLegacyID
+			legacyExists = boundExists
+		default:
+			ok, err := b.conversationExists(ctx, b.conversationContext(msg, contextLegacyID))
+			if err != nil {
+				return app.ConversationLifecycleResult{}, "", err
+			}
+			if ok {
+				legacyID = contextLegacyID
+				legacyExists = true
+			}
+		}
 	}
 
 	input := app.ConversationLifecycleInput{
