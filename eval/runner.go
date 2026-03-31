@@ -44,6 +44,8 @@ func RunStage(ctx context.Context, svc *ai.Service, tc TestCase, demoTools map[s
 		rawOutput, err = runToolPlan(ctx, svc, tc, demoTools)
 	case "agent_step":
 		rawOutput, err = runAgentStep(ctx, svc, tc, demoTools)
+	case "agent_loop":
+		rawOutput, err = runAgentLoop(ctx, svc, tc, demoTools)
 	default:
 		return result, fmt.Errorf("unknown stage: %s", tc.Stage)
 	}

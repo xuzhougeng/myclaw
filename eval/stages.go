@@ -3,6 +3,7 @@ package eval
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"myclaw/internal/ai"
 )
@@ -85,21 +86,7 @@ func runAgentStep(ctx context.Context, svc *ai.Service, tc TestCase, demoTools m
 			return nil, err
 		}
 	}
-	var tools []ai.AgentToolDefinition
-	for _, name := range tc.Tools {
-		if cap, ok := demoTools[name]; ok {
-			tools = append(tools, ai.AgentToolDefinition{
-				Name:              cap.Name,
-				Purpose:           cap.Purpose,
-				Description:       cap.Description,
-				InputContract:     cap.InputContract,
-				OutputContract:    cap.OutputContract,
-				Usage:             cap.Usage,
-				InputJSONExample:  cap.InputJSONExample,
-				OutputJSONExample: cap.OutputJSONExample,
-			})
-		}
-	}
+	tools := toolsFromCaps(tc.Tools, demoTools)
 	var results []ai.AgentToolResult
 	if len(tc.Results) > 0 {
 		if err := json.Unmarshal(tc.Results, &results); err != nil {
@@ -116,4 +103,39 @@ func runAgentStep(ctx context.Context, svc *ai.Service, tc TestCase, demoTools m
 		"tool_name":  decision.ToolName,
 		"tool_input": decision.ToolInput,
 	}, nil
+}
+
+// toolsFromCaps converts named ToolCapability entries from demoTools into
+// AgentToolDefinition values for use by agent stage handlers.
+func toolsFromCaps(names []string, demoTools map[string]ai.ToolCapability) []ai.AgentToolDefinition {
+	var tools []ai.AgentToolDefinition
+	for _, name := range names {
+		if cap, ok := demoTools[name]; ok {
+			tools = append(tools, ai.AgentToolDefinition{
+				Name:              cap.Name,
+				Purpose:           cap.Purpose,
+				Description:       cap.Description,
+				InputContract:     cap.InputContract,
+				OutputContract:    cap.OutputContract,
+				Usage:             cap.Usage,
+				InputJSONExample:  cap.InputJSONExample,
+				OutputJSONExample: cap.OutputJSONExample,
+			})
+		}
+	}
+	return tools
+}
+
+// runAgentLoop handles the "agent_loop" stage.
+// TODO: implement once ai.AgentTaskState and svc.PlanAgentLoopStep exist:
+//
+//	var state ai.AgentTaskState
+//	if len(tc.State) > 0 { json.Unmarshal(tc.State, &state) }
+//	history := unmarshalHistory(tc.History)
+//	tools := toolsFromCaps(tc.Tools, demoTools)
+//	decision, err := svc.PlanAgentLoopStep(ctx, tc.Task, history, tools, state)
+//	return map[string]any{"action": string(decision.Action), "tool_name": decision.ToolName,
+//	    "answer": decision.Answer, "reason": decision.Reason}, err
+func runAgentLoop(_ context.Context, _ *ai.Service, _ TestCase, _ map[string]ai.ToolCapability) (map[string]any, error) {
+	return nil, fmt.Errorf("agent_loop stage requires PlanAgentLoopStep — not yet implemented")
 }

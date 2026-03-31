@@ -26,6 +26,10 @@ type TestCase struct {
 	// agent_step specific
 	History json.RawMessage `json:"history,omitempty"`
 	Results json.RawMessage `json:"results,omitempty"`
+
+	// agent_loop specific
+	State    json.RawMessage `json:"state,omitempty"`
+	MaxSteps int             `json:"max_steps,omitempty"`
 }
 
 func LoadDataset(path string) ([]TestCase, error) {
