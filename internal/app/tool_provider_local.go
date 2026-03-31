@@ -43,138 +43,165 @@ func (p *localAgentToolProvider) ListAgentTools(context.Context, MessageContext)
 }
 
 func (p *localAgentToolProvider) ExecuteAgentTool(ctx context.Context, mc MessageContext, toolName, rawInput string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(toolName)) {
-	case "knowledge_search":
-		var args struct {
-			Query string `json:"query"`
-		}
-		if err := decodeAgentToolInput(rawInput, &args); err != nil {
-			return "", err
-		}
-		args.Query = strings.TrimSpace(args.Query)
-		if args.Query == "" {
-			return "", fmt.Errorf("knowledge_search requires query")
-		}
-		results, err := p.service.searchCandidates(ctx, []string{args.Query}, nil, retrievalCandidateLimit)
-		if err != nil {
-			return "", err
-		}
-		if len(results) == 0 {
-			return "没有命中的知识。", nil
-		}
-		var builder strings.Builder
-		builder.WriteString(fmt.Sprintf("命中 %d 条知识：\n", len(results)))
-		for index, result := range results {
-			builder.WriteString(fmt.Sprintf("%d. #%s score=%d %s\n",
-				index+1,
-				shortID(result.Entry.ID),
-				result.Score,
-				preview(result.Entry.Text, maxReplyPreviewRunes),
-			))
-		}
-		return strings.TrimSpace(builder.String()), nil
-	case "remember":
-		var args struct {
-			Text string `json:"text"`
-		}
-		if err := decodeAgentToolInput(rawInput, &args); err != nil {
-			return "", err
-		}
-		args.Text = strings.TrimSpace(args.Text)
-		if args.Text == "" {
-			return "", fmt.Errorf("remember requires text")
-		}
-		entry, err := p.service.store.Add(ctx, knowledge.Entry{
-			Text:       args.Text,
-			Source:     sourceLabel(mc),
-			RecordedAt: time.Now(),
-		})
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("已记住 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes)), nil
-	case "append_knowledge":
-		var args struct {
-			ID   string `json:"id"`
-			Text string `json:"text"`
-		}
-		if err := decodeAgentToolInput(rawInput, &args); err != nil {
-			return "", err
-		}
-		return p.service.appendKnowledge(ctx, args.ID, args.Text)
-	case "forget_knowledge":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := decodeAgentToolInput(rawInput, &args); err != nil {
-			return "", err
-		}
-		return p.service.forgetKnowledge(ctx, args.ID)
-	case filesearch.ToolName:
-		var args filesearch.ToolInput
-		if err := decodeAgentToolInput(rawInput, &args); err != nil {
-			return "", err
-		}
-		result, reply, err := p.service.performFileSearch(ctx, args)
-		if err != nil {
-			return "", err
-		}
-		if reply != "" {
-			return reply, nil
-		}
-		return filesearch.FormatSearchResult(result), nil
-	case "reminder_list":
-		var args map[string]any
-		if err := decodeAgentToolInput(rawInput, &args); err != nil {
-			return "", err
-		}
-		if p.service.reminders == nil {
-			return "提醒功能未启用。", nil
-		}
-		items, err := p.service.reminders.List(ctx, reminder.Target{Interface: mc.Interface, UserID: mc.UserID})
-		if err != nil {
-			return "", err
-		}
-		return formatReminderList(items), nil
-	case "reminder_add":
-		var args struct {
-			Spec string `json:"spec"`
-		}
-		if err := decodeAgentToolInput(rawInput, &args); err != nil {
-			return "", err
-		}
-		if p.service.reminders == nil {
-			return "提醒功能未启用。", nil
-		}
-		item, err := p.service.scheduleReminderSpec(ctx, reminder.Target{
-			Interface: mc.Interface,
-			UserID:    mc.UserID,
-		}, args.Spec)
-		if err != nil {
-			return "", err
-		}
-		return formatReminderCreated(item), nil
-	case "reminder_remove":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := decodeAgentToolInput(rawInput, &args); err != nil {
-			return "", err
-		}
-		if p.service.reminders == nil {
-			return "提醒功能未启用。", nil
-		}
-		item, ok, err := p.service.reminders.Remove(ctx, reminder.Target{Interface: mc.Interface, UserID: mc.UserID}, args.ID)
-		if err != nil {
-			return "", err
-		}
-		if !ok {
-			return fmt.Sprintf("没有找到提醒 %q。", args.ID), nil
-		}
-		return fmt.Sprintf("已删除提醒 #%s\n内容: %s", shortID(item.ID), item.Message), nil
-	default:
+	handlers := map[string]func(context.Context, MessageContext, string) (string, error){
+		"knowledge_search": p.executeKnowledgeSearch,
+		"remember":         p.executeRemember,
+		"append_knowledge": p.executeAppendKnowledge,
+		"forget_knowledge": p.executeForgetKnowledge,
+		filesearch.ToolName: p.executeFileSearch,
+		"reminder_list":   p.executeReminderList,
+		"reminder_add":    p.executeReminderAdd,
+		"reminder_remove": p.executeReminderRemove,
+	}
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	handler, ok := handlers[name]
+	if !ok {
 		return "", fmt.Errorf("unknown local tool %q", toolName)
 	}
+	return handler(ctx, mc, rawInput)
+}
+
+func (p *localAgentToolProvider) executeKnowledgeSearch(ctx context.Context, _ MessageContext, rawInput string) (string, error) {
+	var args struct {
+		Query string `json:"query"`
+	}
+	if err := decodeAgentToolInput(rawInput, &args); err != nil {
+		return "", err
+	}
+	args.Query = strings.TrimSpace(args.Query)
+	if args.Query == "" {
+		return "", fmt.Errorf("knowledge_search requires query")
+	}
+	results, err := p.service.searchCandidates(ctx, []string{args.Query}, nil, retrievalCandidateLimit)
+	if err != nil {
+		return "", err
+	}
+	if len(results) == 0 {
+		return "没有命中的知识。", nil
+	}
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("命中 %d 条知识：\n", len(results)))
+	for index, result := range results {
+		builder.WriteString(fmt.Sprintf("%d. #%s score=%d %s\n",
+			index+1,
+			shortID(result.Entry.ID),
+			result.Score,
+			preview(result.Entry.Text, maxReplyPreviewRunes),
+		))
+	}
+	return strings.TrimSpace(builder.String()), nil
+}
+
+func (p *localAgentToolProvider) executeRemember(ctx context.Context, mc MessageContext, rawInput string) (string, error) {
+	var args struct {
+		Text string `json:"text"`
+	}
+	if err := decodeAgentToolInput(rawInput, &args); err != nil {
+		return "", err
+	}
+	args.Text = strings.TrimSpace(args.Text)
+	if args.Text == "" {
+		return "", fmt.Errorf("remember requires text")
+	}
+	entry, err := p.service.store.Add(ctx, knowledge.Entry{
+		Text:       args.Text,
+		Source:     sourceLabel(mc),
+		RecordedAt: time.Now(),
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("已记住 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes)), nil
+}
+
+func (p *localAgentToolProvider) executeAppendKnowledge(ctx context.Context, _ MessageContext, rawInput string) (string, error) {
+	var args struct {
+		ID   string `json:"id"`
+		Text string `json:"text"`
+	}
+	if err := decodeAgentToolInput(rawInput, &args); err != nil {
+		return "", err
+	}
+	return p.service.appendKnowledge(ctx, args.ID, args.Text)
+}
+
+func (p *localAgentToolProvider) executeForgetKnowledge(ctx context.Context, _ MessageContext, rawInput string) (string, error) {
+	var args struct {
+		ID string `json:"id"`
+	}
+	if err := decodeAgentToolInput(rawInput, &args); err != nil {
+		return "", err
+	}
+	return p.service.forgetKnowledge(ctx, args.ID)
+}
+
+func (p *localAgentToolProvider) executeFileSearch(ctx context.Context, _ MessageContext, rawInput string) (string, error) {
+	var args filesearch.ToolInput
+	if err := decodeAgentToolInput(rawInput, &args); err != nil {
+		return "", err
+	}
+	result, reply, err := p.service.performFileSearch(ctx, args)
+	if err != nil {
+		return "", err
+	}
+	if reply != "" {
+		return reply, nil
+	}
+	return filesearch.FormatSearchResult(result), nil
+}
+
+func (p *localAgentToolProvider) executeReminderList(ctx context.Context, mc MessageContext, rawInput string) (string, error) {
+	if err := decodeAgentToolInput(rawInput, &struct{}{}); err != nil {
+		return "", err
+	}
+	if p.service.reminders == nil {
+		return "提醒功能未启用。", nil
+	}
+	items, err := p.service.reminders.List(ctx, reminder.Target{Interface: mc.Interface, UserID: mc.UserID})
+	if err != nil {
+		return "", err
+	}
+	return formatReminderList(items), nil
+}
+
+func (p *localAgentToolProvider) executeReminderAdd(ctx context.Context, mc MessageContext, rawInput string) (string, error) {
+	var args struct {
+		Spec string `json:"spec"`
+	}
+	if err := decodeAgentToolInput(rawInput, &args); err != nil {
+		return "", err
+	}
+	if p.service.reminders == nil {
+		return "提醒功能未启用。", nil
+	}
+	item, err := p.service.scheduleReminderSpec(ctx, reminder.Target{
+		Interface: mc.Interface,
+		UserID:    mc.UserID,
+	}, args.Spec)
+	if err != nil {
+		return "", err
+	}
+	return formatReminderCreated(item), nil
+}
+
+func (p *localAgentToolProvider) executeReminderRemove(ctx context.Context, mc MessageContext, rawInput string) (string, error) {
+	var args struct {
+		ID string `json:"id"`
+	}
+	if err := decodeAgentToolInput(rawInput, &args); err != nil {
+		return "", err
+	}
+	if p.service.reminders == nil {
+		return "提醒功能未启用。", nil
+	}
+	item, ok, err := p.service.reminders.Remove(ctx, reminder.Target{Interface: mc.Interface, UserID: mc.UserID}, args.ID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return fmt.Sprintf("没有找到提醒 %q。", args.ID), nil
+	}
+	return fmt.Sprintf("已删除提醒 #%s\n内容: %s", shortID(item.ID), item.Message), nil
 }
 
 func decodeAgentToolInput(raw string, out any) error {
