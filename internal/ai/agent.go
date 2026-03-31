@@ -33,16 +33,54 @@ type AgentStepDecision struct {
 	ToolInput string `json:"tool_input"`
 }
 
-func (s *Service) PlanNext(_ context.Context, _ string, _ []ConversationMessage, _ []AgentToolDefinition, _ AgentTaskState) (LoopDecision, error) {
-	return LoopDecision{}, nil
-}
-
-func (s *Service) SummarizeWorkingState(_ context.Context, _ AgentTaskState) (string, error) {
-	return "", nil
-}
-
-func (s *Service) SummarizeFinal(_ context.Context, _ AgentTaskState, _ string) (string, error) {
-	return "", nil
+// appendToolListToPrompt writes the canonical tool-listing block into b.
+func appendToolListToPrompt(b *strings.Builder, tools []AgentToolDefinition) {
+	b.WriteString("可用工具：\n")
+	for _, tool := range tools {
+		b.WriteString("- ")
+		b.WriteString(tool.Name)
+		if provider := strings.TrimSpace(tool.Provider); provider != "" {
+			b.WriteString(" [provider=")
+			b.WriteString(provider)
+			if kind := strings.TrimSpace(tool.ProviderKind); kind != "" {
+				b.WriteString(", kind=")
+				b.WriteString(kind)
+			}
+			b.WriteString("]")
+		}
+		if level := strings.TrimSpace(tool.SideEffectLevel); level != "" {
+			b.WriteString(" [side_effect=")
+			b.WriteString(level)
+			b.WriteString("]")
+		}
+		b.WriteString(": ")
+		b.WriteString(strings.TrimSpace(tool.Description))
+		if purpose := strings.TrimSpace(tool.Purpose); purpose != "" && purpose != strings.TrimSpace(tool.Description) {
+			b.WriteString(" | purpose: ")
+			b.WriteString(purpose)
+		}
+		if inputContract := strings.TrimSpace(tool.InputContract); inputContract != "" {
+			b.WriteString(" | input contract: ")
+			b.WriteString(inputContract)
+		}
+		if outputContract := strings.TrimSpace(tool.OutputContract); outputContract != "" {
+			b.WriteString(" | output contract: ")
+			b.WriteString(outputContract)
+		}
+		if usage := strings.TrimSpace(tool.Usage); usage != "" {
+			b.WriteString(" | usage: ")
+			b.WriteString(usage)
+		}
+		if example := strings.TrimSpace(tool.InputJSONExample); example != "" {
+			b.WriteString(" | input json example: ")
+			b.WriteString(example)
+		}
+		if example := strings.TrimSpace(tool.OutputJSONExample); example != "" {
+			b.WriteString(" | output json example: ")
+			b.WriteString(example)
+		}
+		b.WriteString("\n")
+	}
 }
 
 func (s *Service) DecideAgentStep(ctx context.Context, task string, history []ConversationMessage, tools []AgentToolDefinition, results []AgentToolResult) (AgentStepDecision, error) {
@@ -89,47 +127,7 @@ func (s *Service) DecideAgentStep(ctx context.Context, task string, history []Co
 		prompt.WriteString("\n")
 	}
 
-	prompt.WriteString("可用工具：\n")
-	for _, tool := range tools {
-		prompt.WriteString("- ")
-		prompt.WriteString(tool.Name)
-		if provider := strings.TrimSpace(tool.Provider); provider != "" {
-			prompt.WriteString(" [provider=")
-			prompt.WriteString(provider)
-			if kind := strings.TrimSpace(tool.ProviderKind); kind != "" {
-				prompt.WriteString(", kind=")
-				prompt.WriteString(kind)
-			}
-			prompt.WriteString("]")
-		}
-		prompt.WriteString(": ")
-		prompt.WriteString(strings.TrimSpace(tool.Description))
-		if purpose := strings.TrimSpace(tool.Purpose); purpose != "" && purpose != strings.TrimSpace(tool.Description) {
-			prompt.WriteString(" | purpose: ")
-			prompt.WriteString(purpose)
-		}
-		if inputContract := strings.TrimSpace(tool.InputContract); inputContract != "" {
-			prompt.WriteString(" | input contract: ")
-			prompt.WriteString(inputContract)
-		}
-		if outputContract := strings.TrimSpace(tool.OutputContract); outputContract != "" {
-			prompt.WriteString(" | output contract: ")
-			prompt.WriteString(outputContract)
-		}
-		if usage := strings.TrimSpace(tool.Usage); usage != "" {
-			prompt.WriteString(" | usage: ")
-			prompt.WriteString(usage)
-		}
-		if example := strings.TrimSpace(tool.InputJSONExample); example != "" {
-			prompt.WriteString(" | input json example: ")
-			prompt.WriteString(example)
-		}
-		if example := strings.TrimSpace(tool.OutputJSONExample); example != "" {
-			prompt.WriteString(" | output json example: ")
-			prompt.WriteString(example)
-		}
-		prompt.WriteString("\n")
-	}
+	appendToolListToPrompt(&prompt, tools)
 
 	if len(results) > 0 {
 		prompt.WriteString("\n已经执行过的工具结果：\n")
