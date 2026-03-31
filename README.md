@@ -328,7 +328,21 @@ workflow 上传的 artifact 现在只包含 NSIS 安装器：
 
 - `*-installer.exe`
 
-如果你想在本地 Windows 手动构建桌面安装器，可以在 `cmd/myclaw-desktop/` 下执行：
+如果你想在本地 Windows 手动构建桌面安装器，优先直接运行仓库脚本：
+
+```powershell
+.\scripts\build-desktop-windows-portable.ps1 -Arch amd64
+.\scripts\package-desktop-windows.ps1 -Version 0.1.0
+```
+
+这两个脚本会优先使用 `PATH` 里的 `wails`；如果没找到，会自动回退到仓库 `go.mod` 锁定版本的 `go run github.com/wailsapp/wails/v2/cmd/wails@<version>`。
+
+如果脚本走的是 `go run` 回退，且你没有显式设置 `GOPROXY/GOSUMDB`，脚本会临时注入一组更适合国内网络的默认值：
+
+- `GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct`
+- `GOSUMDB=sum.golang.google.cn`
+
+如果你只想手工调用 Wails，也可以在 `cmd/myclaw-desktop/` 下执行：
 
 ```powershell
 wails build -platform windows/amd64 -o myclaw-amd64.exe -nsis -webview2 download -m -s
