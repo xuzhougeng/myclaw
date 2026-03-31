@@ -2010,6 +2010,50 @@ select {
   transform: translateY(0);
 }
 
+.chat-process {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(196, 122, 92, 0.28);
+  background: rgba(196, 122, 92, 0.06);
+}
+
+.chat-process summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.chat-process-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.chat-process-step {
+  min-width: 0;
+}
+
+.chat-process-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chat-process-detail {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
 .chat-meta {
   display: flex;
   flex-wrap: wrap;

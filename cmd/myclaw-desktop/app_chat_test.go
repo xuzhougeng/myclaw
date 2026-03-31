@@ -138,6 +138,9 @@ func TestDesktopSendMessageReturnsAndPersistsUsage(t *testing.T) {
 	if result.Usage.InputTokens != 140 || result.Usage.OutputTokens != 28 || result.Usage.CachedTokens != 36 || result.Usage.TotalTokens != 168 {
 		t.Fatalf("unexpected response usage: %#v", result.Usage)
 	}
+	if len(result.Process) == 0 {
+		t.Fatalf("expected debug process payload, got %#v", result)
+	}
 
 	state, err := app.GetChatState()
 	if err != nil {
@@ -152,6 +155,9 @@ func TestDesktopSendMessageReturnsAndPersistsUsage(t *testing.T) {
 	}
 	if last.Usage.InputTokens != 140 || last.Usage.OutputTokens != 28 || last.Usage.CachedTokens != 36 || last.Usage.TotalTokens != 168 {
 		t.Fatalf("unexpected persisted usage: %#v", last.Usage)
+	}
+	if len(last.Process) == 0 {
+		t.Fatalf("expected persisted debug process on assistant message, got %#v", last)
 	}
 }
 
@@ -197,6 +203,20 @@ func TestDesktopSendMessageUsesFileSearchTool(t *testing.T) {
 	}
 	if !strings.Contains(result.Reply, "找到 1 个文件") || !strings.Contains(result.Reply, `D:\exports\report.csv`) {
 		t.Fatalf("unexpected file search reply: %#v", result)
+	}
+	if len(result.Process) < 3 {
+		t.Fatalf("expected debug process on file search reply, got %#v", result.Process)
+	}
+	if result.Process[0].Title == "" || result.Process[0].Detail == "" {
+		t.Fatalf("expected structured debug steps, got %#v", result.Process)
+	}
+
+	state, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("get chat state: %v", err)
+	}
+	if len(state.Messages) == 0 || len(state.Messages[len(state.Messages)-1].Process) < 3 {
+		t.Fatalf("expected persisted debug process in chat state, got %#v", state.Messages)
 	}
 }
 

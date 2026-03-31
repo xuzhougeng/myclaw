@@ -20,6 +20,11 @@ type ConversationMessage struct {
 	Content string `json:"content"`
 }
 
+type CallTraceStep struct {
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
+}
+
 type ToolCapability struct {
 	Name             string `json:"name"`
 	Description      string `json:"description"`

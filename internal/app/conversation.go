@@ -141,6 +141,7 @@ func (s *Service) handleAIDecision(ctx context.Context, mc MessageContext, text 
 	if err != nil {
 		return "", err
 	}
+	addProcessTrace(ctx, "AI 路由", "command="+strings.TrimSpace(decision.Command)+"\nmode="+string(mode))
 
 	switch decision.Command {
 	case "remember":
@@ -204,17 +205,21 @@ func (s *Service) handleAIDecision(ctx context.Context, mc MessageContext, text 
 			if err != nil {
 				return "", err
 			}
+			addProcessTrace(ctx, "执行模式", "mode=knowledge\nentries="+fmt.Sprintf("%d", len(entries)))
 			reply, err := s.aiService.Answer(ctx, question, entries)
 			if err == nil {
 				s.maybeAppendConversationHistory(ctx, mc, question, reply)
 			}
 			return reply, err
 		case ModeAgent:
+			addProcessTrace(ctx, "执行模式", "mode=agent")
 			return s.handleAgentQuestion(ctx, mc, question)
 		case ModeDirect:
 			fallthrough
 		default:
-			reply, err := s.aiService.Chat(ctx, question, s.conversationHistory(ctx, mc))
+			history := s.conversationHistory(ctx, mc)
+			addProcessTrace(ctx, "执行模式", "mode=direct\nhistory="+fmt.Sprintf("%d", len(history)))
+			reply, err := s.aiService.Chat(ctx, question, history)
 			if err == nil {
 				s.maybeAppendConversationHistory(ctx, mc, question, reply)
 			}
@@ -238,6 +243,7 @@ func (s *Service) handleAIDecisionStream(ctx context.Context, mc MessageContext,
 	if err != nil {
 		return "", err
 	}
+	addProcessTrace(ctx, "AI 路由", "command="+strings.TrimSpace(decision.Command)+"\nmode="+string(mode))
 
 	switch decision.Command {
 	case "remember":
@@ -365,12 +371,14 @@ func (s *Service) handleAIDecisionStream(ctx context.Context, mc MessageContext,
 			if err != nil {
 				return "", err
 			}
+			addProcessTrace(ctx, "执行模式", "mode=knowledge\nentries="+fmt.Sprintf("%d", len(entries)))
 			reply, err := s.streamOrAnswer(ctx, question, entries, onDelta)
 			if err == nil {
 				s.maybeAppendConversationHistory(ctx, mc, question, reply)
 			}
 			return reply, err
 		case ModeAgent:
+			addProcessTrace(ctx, "执行模式", "mode=agent")
 			reply, err := s.handleAgentQuestion(ctx, mc, question)
 			if err == nil && onDelta != nil && reply != "" {
 				onDelta(reply)
@@ -379,7 +387,9 @@ func (s *Service) handleAIDecisionStream(ctx context.Context, mc MessageContext,
 		case ModeDirect:
 			fallthrough
 		default:
-			reply, err := s.streamOrChat(ctx, question, s.conversationHistory(ctx, mc), onDelta)
+			history := s.conversationHistory(ctx, mc)
+			addProcessTrace(ctx, "执行模式", "mode=direct\nhistory="+fmt.Sprintf("%d", len(history)))
+			reply, err := s.streamOrChat(ctx, question, history, onDelta)
 			if err == nil {
 				s.maybeAppendConversationHistory(ctx, mc, question, reply)
 			}

@@ -35,13 +35,16 @@ func (s *Service) handleAgentQuestion(ctx context.Context, mc MessageContext, qu
 			if reply == "" {
 				return "", fmt.Errorf("agent returned empty answer")
 			}
+			addProcessTrace(ctx, fmt.Sprintf("Agent 决策 %d", step+1), "action=answer\nreply="+preview(reply, maxReplyPreviewRunes))
 			s.maybeAppendConversationHistory(ctx, mc, question, reply)
 			return reply, nil
 		case "tool":
+			addProcessTrace(ctx, fmt.Sprintf("Agent 决策 %d", step+1), "action=tool\ntool="+strings.TrimSpace(decision.ToolName)+"\ninput="+strings.TrimSpace(decision.ToolInput))
 			output, err := s.toolProviders.Execute(ctx, mc, decision.ToolName, decision.ToolInput)
 			if err != nil {
 				output = "工具执行失败: " + err.Error()
 			}
+			addProcessTrace(ctx, fmt.Sprintf("Agent 工具结果 %d", step+1), preview(output, maxReplyPreviewRunes))
 			results = append(results, ai.AgentToolResult{
 				ToolName:  strings.TrimSpace(decision.ToolName),
 				ToolInput: strings.TrimSpace(decision.ToolInput),

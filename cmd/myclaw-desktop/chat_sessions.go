@@ -34,10 +34,11 @@ type ChatConversation struct {
 }
 
 type ChatMessage struct {
-	Role  string         `json:"role"`
-	Text  string         `json:"text"`
-	Time  string         `json:"time"`
-	Usage *ai.TokenUsage `json:"usage,omitempty"`
+	Role    string             `json:"role"`
+	Text    string             `json:"text"`
+	Time    string             `json:"time"`
+	Usage   *ai.TokenUsage     `json:"usage,omitempty"`
+	Process []ai.CallTraceStep `json:"process,omitempty"`
 }
 
 type ChatState struct {
@@ -577,10 +578,11 @@ func toChatMessages(snapshot sessionstate.Snapshot) []ChatMessage {
 			continue
 		}
 		messages = append(messages, ChatMessage{
-			Role:  role,
-			Text:  text,
-			Time:  "",
-			Usage: item.Usage,
+			Role:    role,
+			Text:    text,
+			Time:    "",
+			Usage:   item.Usage,
+			Process: item.Process,
 		})
 	}
 	return messages

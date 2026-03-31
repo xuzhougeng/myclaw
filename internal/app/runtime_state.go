@@ -79,11 +79,16 @@ func (s *Service) appendConversationHistory(ctx context.Context, mc MessageConte
 
 	limits := s.conversationHistoryLimitsFor(mc)
 	usage := ai.UsageFromContext(ctx)
+	process := ai.CallTraceFromContext(ctx)
 	history := append([]sessionstate.Message(nil), snapshot.History...)
 	var assistantUsage *ai.TokenUsage
 	if !usage.IsZero() {
 		usageCopy := usage
 		assistantUsage = &usageCopy
+	}
+	var assistantProcess []ai.CallTraceStep
+	if len(process) > 0 {
+		assistantProcess = append([]ai.CallTraceStep(nil), process...)
 	}
 	history = append(history,
 		sessionstate.Message{
@@ -94,6 +99,7 @@ func (s *Service) appendConversationHistory(ctx context.Context, mc MessageConte
 			Role:    "assistant",
 			Content: trimConversationHistoryText(assistantReply, limits.Runes),
 			Usage:   assistantUsage,
+			Process: assistantProcess,
 		},
 	)
 	snapshot.History = trimSessionHistory(history, limits)
@@ -195,6 +201,7 @@ func trimSessionHistory(history []sessionstate.Message, limits conversationHisto
 			Role:    role,
 			Content: content,
 			Usage:   item.Usage,
+			Process: item.Process,
 		})
 	}
 	if limits.Messages <= 0 || len(out) <= limits.Messages {

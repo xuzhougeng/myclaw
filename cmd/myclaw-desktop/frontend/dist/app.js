@@ -1924,6 +1924,7 @@ async function sendMessage(rawText = null, displayText = null) {
     placeholder.text = result.reply || placeholder.text;
     placeholder.time = result.timestamp || nowLabel();
     placeholder.usage = normalizeTokenUsage(result.usage);
+    placeholder.process = normalizeChatProcess(result.process);
     placeholder.streaming = false;
     syncCurrentChatConversationFromMessages();
     renderChat();
@@ -2067,6 +2068,7 @@ async function refreshCurrentChatResponse() {
     placeholder.text = result.reply || placeholder.text;
     placeholder.time = result.timestamp || nowLabel();
     placeholder.usage = normalizeTokenUsage(result.usage);
+    placeholder.process = normalizeChatProcess(result.process);
     placeholder.streaming = false;
     syncCurrentChatConversationFromMessages();
     renderChat();
@@ -3370,6 +3372,7 @@ function renderChat() {
           <div class="chat-avatar">${message.role === 'user' ? '◐' : message.role === 'system' ? '◇' : '○'}</div>
           <div class="chat-bubble">
             ${renderChatMessageContent(message)}
+            ${renderChatProcess(message)}
             ${renderChatMessageFooter(message, index)}
           </div>
         </div>
@@ -3379,6 +3382,24 @@ function renderChat() {
   container.scrollTop = container.scrollHeight;
   renderChatContentActions();
   renderChatComposerState();
+}
+
+function renderChatProcess(message) {
+  const steps = normalizeChatProcess(message?.process);
+  if (message?.role !== 'assistant' || steps.length === 0) return '';
+  return `
+    <details class="chat-process">
+      <summary>调试过程</summary>
+      <ol class="chat-process-list">
+        ${steps.map((step) => `
+          <li class="chat-process-step">
+            ${step.title ? `<div class="chat-process-title">${escapeHTML(step.title)}</div>` : ''}
+            ${step.detail ? `<pre class="chat-process-detail">${escapeHTML(step.detail)}</pre>` : ''}
+          </li>
+        `).join('')}
+      </ol>
+    </details>
+  `;
 }
 
 function renderChatContentActions() {
@@ -3825,6 +3846,7 @@ function applyChatState(nextState) {
     text: message.text,
     time: message.time || '',
     usage: normalizeTokenUsage(message.usage),
+    process: normalizeChatProcess(message.process),
   }));
   renderChatSessions();
   renderChat();
@@ -3870,6 +3892,7 @@ function syncCurrentChatConversationFromMessages() {
       text: message.text,
       time: message.time || '',
       usage: normalizeTokenUsage(message.usage),
+      process: normalizeChatProcess(message.process),
     })),
   };
   renderChatSessions();
@@ -4151,6 +4174,16 @@ function formatTokenUsage(usage) {
   return `input ${value.inputTokens} · output ${value.outputTokens} · cached ${value.cachedTokens} · total ${value.totalTokens}`;
 }
 
+function normalizeChatProcess(payload) {
+  if (!Array.isArray(payload)) return [];
+  return payload
+    .map((item) => ({
+      title: String(item?.title || '').trim(),
+      detail: String(item?.detail || '').trim(),
+    }))
+    .filter((item) => item.title || item.detail);
+}
+
 function normalizeChatState(payload) {
   const source = Array.isArray(payload) ? payload[0] : payload;
   const next = {
@@ -4179,6 +4212,7 @@ function normalizeChatState(payload) {
       text: item?.text || '',
       time: item?.time || '',
       usage: normalizeTokenUsage(item?.usage),
+      process: normalizeChatProcess(item?.process),
     }))
     : [];
   return next;

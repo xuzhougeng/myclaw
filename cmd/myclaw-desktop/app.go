@@ -200,11 +200,12 @@ type ChatPromptState struct {
 }
 
 type ChatResponse struct {
-	Reply          string         `json:"reply"`
-	Timestamp      string         `json:"timestamp"`
-	SessionID      string         `json:"sessionId,omitempty"`
-	SessionChanged bool           `json:"sessionChanged,omitempty"`
-	Usage          *ai.TokenUsage `json:"usage,omitempty"`
+	Reply          string             `json:"reply"`
+	Timestamp      string             `json:"timestamp"`
+	SessionID      string             `json:"sessionId,omitempty"`
+	SessionChanged bool               `json:"sessionChanged,omitempty"`
+	Usage          *ai.TokenUsage     `json:"usage,omitempty"`
+	Process        []ai.CallTraceStep `json:"process,omitempty"`
 }
 
 type ChatStreamEvent struct {
@@ -1093,7 +1094,7 @@ func (a *DesktopApp) SendMessageStream(requestID, input string) (ChatResponse, e
 }
 
 func (a *DesktopApp) sendMessage(ctx context.Context, input string, onDelta func(string)) (ChatResponse, error) {
-	ctx = ai.WithUsageCollector(ctx)
+	ctx = ai.WithCallTraceCollector(ai.WithUsageCollector(ctx))
 	project, err := a.currentProject(ctx)
 	if err != nil {
 		return ChatResponse{}, err
@@ -1125,16 +1126,22 @@ func (a *DesktopApp) sendMessage(ctx context.Context, input string, onDelta func
 		return ChatResponse{}, err
 	}
 	usage := ai.UsageFromContext(ctx)
+	process := ai.CallTraceFromContext(ctx)
 	var usagePayload *ai.TokenUsage
 	if !usage.IsZero() {
 		usageCopy := usage
 		usagePayload = &usageCopy
+	}
+	var processPayload []ai.CallTraceStep
+	if len(process) > 0 {
+		processPayload = append([]ai.CallTraceStep(nil), process...)
 	}
 	return ChatResponse{
 		Reply:     reply,
 		Timestamp: time.Now().Local().Format("2006-01-02 15:04:05"),
 		SessionID: mc.SessionID,
 		Usage:     usagePayload,
+		Process:   processPayload,
 	}, nil
 }
 
