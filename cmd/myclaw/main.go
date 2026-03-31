@@ -60,6 +60,7 @@ func main() {
 	sessionStore := sessionstate.NewStore(filepath.Join(dataDir, "sessions", "items.json"))
 	skillLoader := skilllib.NewLoader(skilllib.DefaultDirs(dataDir)...)
 	service := app.NewServiceWithRuntime(store, aiService, reminderManager, skillLoader, sessionStore, promptStore)
+	service.SetFileSearchEverythingPath(envOrDefault("MYCLAW_WEIXIN_EVERYTHING_PATH", ""))
 	bridge := weixin.NewBridge(weixin.NewClient("", ""), service, reminderManager, weixin.BridgeConfig{
 		DataDir:        dataDir,
 		EverythingPath: envOrDefault("MYCLAW_WEIXIN_EVERYTHING_PATH", ""),

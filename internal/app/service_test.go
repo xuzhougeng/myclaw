@@ -1619,6 +1619,77 @@ func TestBuildWeixinFileSearchIntentBuildsToolCall(t *testing.T) {
 	}
 }
 
+func TestHandleMessageNaturalFileSearchExecutesTool(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, fakeAI{
+		configured: true,
+		fileSearchIntent: ai.FileSearchIntent{
+			Enabled: true,
+			Query:   "d: *.csv",
+		},
+		route: ai.RouteDecision{Command: "answer"},
+	}, reminders)
+	service.SetFileSearchEverythingPath("es.exe")
+	service.SetFileSearchExecutor(func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
+		if everythingPath != "es.exe" {
+			t.Fatalf("unexpected everything path: %q", everythingPath)
+		}
+		if input.Query != "d: *.csv" {
+			t.Fatalf("unexpected query: %#v", input)
+		}
+		return filesearch.ToolResult{
+			Tool:  filesearch.ToolName,
+			Query: input.Query,
+			Items: []filesearch.ResultItem{
+				{Index: 1, Name: "report.csv", Path: `D:\data\report.csv`},
+			},
+		}, nil
+	})
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{Interface: "desktop", SessionID: "desktop-1"}, "查找D盘的csv文件")
+	if err != nil {
+		t.Fatalf("handle natural file search: %v", err)
+	}
+	if !strings.Contains(reply, "找到 1 个文件") || !strings.Contains(reply, `D:\data\report.csv`) {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
+func TestHandleMessageSlashFindExecutesToolOutsideWeixin(t *testing.T) {
+	t.Parallel()
+
+	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	service := NewService(store, nil, reminders)
+	service.SetFileSearchEverythingPath("es.exe")
+	service.SetFileSearchExecutor(func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
+		if everythingPath != "es.exe" {
+			t.Fatalf("unexpected everything path: %q", everythingPath)
+		}
+		if input.Query != "output.csv" {
+			t.Fatalf("unexpected query: %#v", input)
+		}
+		return filesearch.ToolResult{
+			Tool:  filesearch.ToolName,
+			Query: input.Query,
+			Items: []filesearch.ResultItem{
+				{Index: 1, Name: "output.csv", Path: `D:\exports\output.csv`},
+			},
+		}, nil
+	})
+
+	reply, err := service.HandleMessage(context.Background(), MessageContext{Interface: "desktop", SessionID: "desktop-1"}, "/find output.csv")
+	if err != nil {
+		t.Fatalf("handle slash find: %v", err)
+	}
+	if !strings.Contains(reply, "找到 1 个文件") || !strings.Contains(reply, `D:\exports\output.csv`) {
+		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
 type fakeAI struct {
 	configured       bool
 	route            ai.RouteDecision

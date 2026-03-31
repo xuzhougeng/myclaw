@@ -46,6 +46,16 @@ func TestInspectInputPolicy(t *testing.T) {
 			wantActivateConv:   false,
 		},
 		{
+			name:               "send transport tool",
+			input:              "/send 1",
+			wantCommand:        "/send",
+			wantExecution:      CommandExecutionTransportTool,
+			wantKnown:          true,
+			wantControl:        false,
+			wantPersistHistory: false,
+			wantActivateConv:   false,
+		},
+		{
 			name:      "unknown input",
 			input:     "/unknown",
 			wantKnown: false,

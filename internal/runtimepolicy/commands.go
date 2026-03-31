@@ -35,6 +35,7 @@ var commandPolicies = []CommandPolicy{
 	{Command: "/remember", Aliases: []string{"/r"}, Execution: CommandExecutionService, PersistHistory: true, ActivateConversation: true},
 	{Command: "/remember-file", Aliases: []string{"/ingest"}, Execution: CommandExecutionService, PersistHistory: true, ActivateConversation: true},
 	{Command: "/find", Execution: CommandExecutionTransportTool, PersistHistory: false, ActivateConversation: false},
+	{Command: "/send", Execution: CommandExecutionTransportTool, PersistHistory: false, ActivateConversation: false},
 	{Command: "/append", Execution: CommandExecutionService, PersistHistory: true, ActivateConversation: true},
 	{Command: "/skills", Execution: CommandExecutionService, PersistHistory: true, ActivateConversation: true},
 	{Command: "/show-skill", Execution: CommandExecutionService, PersistHistory: true, ActivateConversation: true},

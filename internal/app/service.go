@@ -54,6 +54,8 @@ type Service struct {
 	toolProviders   *agentToolProviders
 	settingsMu      sync.RWMutex
 	weixinHistory   conversationHistoryLimits
+	fileSearchPath  string
+	fileSearchExec  filesearch.SearchExecutor
 	modeMu          sync.RWMutex
 	modeMap         map[string]Mode
 	loadedSkillsMu  sync.RWMutex
@@ -116,6 +118,7 @@ func NewServiceWithRuntime(store *knowledge.Store, aiService aiBackend, reminder
 		promptStore:     promptStore,
 		sessionStore:    sessionStore,
 		weixinHistory:   defaultWeixinConversationHistoryLimits(),
+		fileSearchExec:  filesearch.ExecuteWithEverything,
 		modeMap:         make(map[string]Mode),
 		loadedSkillsMap: make(map[string]map[string]skilllib.Skill),
 	}
@@ -146,14 +149,14 @@ func (s *Service) SetWeixinHistoryLimits(messages int, runes int) {
 }
 
 func (s *Service) BuildWeixinFileSearchQuery(ctx context.Context, mc MessageContext, input string) (string, bool, error) {
-	intent, ok, err := s.BuildWeixinFileSearchIntent(ctx, mc, input)
+	intent, ok, err := s.BuildFileSearchIntent(ctx, mc, input)
 	if err != nil || !ok {
 		return "", ok, err
 	}
 	return strings.TrimSpace(intent.Query), true, nil
 }
 
-func (s *Service) BuildWeixinFileSearchIntent(ctx context.Context, mc MessageContext, input string) (ai.FileSearchIntent, bool, error) {
+func (s *Service) BuildFileSearchIntent(ctx context.Context, mc MessageContext, input string) (ai.FileSearchIntent, bool, error) {
 	if s.aiService == nil {
 		return ai.FileSearchIntent{}, false, nil
 	}
@@ -187,6 +190,10 @@ func (s *Service) BuildWeixinFileSearchIntent(ctx context.Context, mc MessageCon
 		return ai.FileSearchIntent{}, false, nil
 	}
 	return intent, true, nil
+}
+
+func (s *Service) BuildWeixinFileSearchIntent(ctx context.Context, mc MessageContext, input string) (ai.FileSearchIntent, bool, error) {
+	return s.BuildFileSearchIntent(ctx, mc, input)
 }
 
 func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input string) (string, error) {
@@ -225,6 +232,10 @@ func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input st
 	}
 
 	if reply, ok, err := s.tryHandleDirectFileIngest(ctx, mc, text); ok || err != nil {
+		return reply, err
+	}
+
+	if reply, ok, err := s.tryHandleFileSearch(ctx, mc, text); ok || err != nil {
 		return reply, err
 	}
 
@@ -288,6 +299,13 @@ func (s *Service) HandleMessageStream(ctx context.Context, mc MessageContext, in
 	}
 
 	if reply, ok, err := s.tryHandleDirectFileIngest(ctx, mc, text); ok || err != nil {
+		if err == nil && onDelta != nil && reply != "" {
+			onDelta(reply)
+		}
+		return reply, err
+	}
+
+	if reply, ok, err := s.tryHandleFileSearch(ctx, mc, text); ok || err != nil {
 		if err == nil && onDelta != nil && reply != "" {
 			onDelta(reply)
 		}

@@ -493,7 +493,7 @@ func (a *DesktopApp) GetSettings() (AppSettings, error) {
 		return AppSettings{}, errors.New("设置服务尚未启用")
 	}
 	messages, runes := a.service.WeixinHistoryLimits()
-	everythingPath := ""
+	everythingPath := a.service.FileSearchEverythingPath()
 	if a.weixinBridge != nil {
 		everythingPath = a.weixinBridge.EverythingPath()
 	}
@@ -532,6 +532,7 @@ func (a *DesktopApp) SaveSettings(input AppSettingsInput) (AppSettings, error) {
 		}
 	}
 	a.service.SetWeixinHistoryLimits(input.WeixinHistoryMessages, input.WeixinHistoryRunes)
+	a.service.SetFileSearchEverythingPath(input.WeixinEverythingPath)
 	if a.weixinBridge != nil {
 		a.weixinBridge.SetEverythingPath(input.WeixinEverythingPath)
 	}
@@ -1161,6 +1162,7 @@ func (a *DesktopApp) applyPersistedSettings() {
 		return
 	}
 	a.service.SetWeixinHistoryLimits(cfg.WeixinHistoryMessages, cfg.WeixinHistoryRunes)
+	a.service.SetFileSearchEverythingPath(cfg.WeixinEverythingPath)
 	if a.weixinBridge != nil {
 		a.weixinBridge.SetEverythingPath(cfg.WeixinEverythingPath)
 	}

@@ -9,6 +9,7 @@ import (
 
 	"myclaw/internal/ai"
 	appsvc "myclaw/internal/app"
+	"myclaw/internal/filesearch"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/projectstate"
 	"myclaw/internal/promptlib"
@@ -151,6 +152,49 @@ func TestDesktopSendMessageReturnsAndPersistsUsage(t *testing.T) {
 	}
 	if last.Usage.InputTokens != 140 || last.Usage.OutputTokens != 28 || last.Usage.CachedTokens != 36 || last.Usage.TotalTokens != 168 {
 		t.Fatalf("unexpected persisted usage: %#v", last.Usage)
+	}
+}
+
+func TestDesktopSendMessageUsesFileSearchTool(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "knowledge.json"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "project.json"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "prompts.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, desktopTestAI{
+		route: ai.RouteDecision{Command: "answer"},
+		fileSearchIntent: ai.FileSearchIntent{
+			Enabled: true,
+			Query:   "d: *.csv",
+		},
+	}, reminders, nil, sessionStore, promptStore)
+	service.SetFileSearchEverythingPath("es.exe")
+	service.SetFileSearchExecutor(func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
+		if everythingPath != "es.exe" {
+			t.Fatalf("unexpected everything path: %q", everythingPath)
+		}
+		if input.Query != "d: *.csv" {
+			t.Fatalf("unexpected query: %#v", input)
+		}
+		return filesearch.ToolResult{
+			Tool:  filesearch.ToolName,
+			Query: input.Query,
+			Items: []filesearch.ResultItem{
+				{Index: 1, Name: "report.csv", Path: `D:\exports\report.csv`},
+			},
+		}, nil
+	})
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	result, err := app.SendMessage("查找D盘的csv文件")
+	if err != nil {
+		t.Fatalf("send file search message: %v", err)
+	}
+	if !strings.Contains(result.Reply, "找到 1 个文件") || !strings.Contains(result.Reply, `D:\exports\report.csv`) {
+		t.Fatalf("unexpected file search reply: %#v", result)
 	}
 }
 
@@ -789,9 +833,10 @@ func TestBuildCurrentChatMarkdownExportRejectsEmptyConversation(t *testing.T) {
 }
 
 type desktopTestAI struct {
-	route          ai.RouteDecision
-	chatFunc       func(context.Context, string, []ai.ConversationMessage) string
-	chatResultFunc func(context.Context, string, []ai.ConversationMessage) (string, error)
+	route            ai.RouteDecision
+	fileSearchIntent ai.FileSearchIntent
+	chatFunc         func(context.Context, string, []ai.ConversationMessage) string
+	chatResultFunc   func(context.Context, string, []ai.ConversationMessage) (string, error)
 }
 
 func (f desktopTestAI) IsConfigured(context.Context) (bool, error) {
@@ -807,7 +852,7 @@ func (f desktopTestAI) BuildSearchPlan(context.Context, string) (ai.SearchPlan, 
 }
 
 func (f desktopTestAI) BuildFileSearchIntent(context.Context, string) (ai.FileSearchIntent, error) {
-	return ai.FileSearchIntent{}, nil
+	return f.fileSearchIntent, nil
 }
 
 func (f desktopTestAI) ReviewAnswerCandidates(context.Context, string, []knowledge.Entry) ([]string, error) {

@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	ToolName     = "everything_file_search"
-	DefaultLimit = 10
-	ShortcutName = "/find"
+	ToolName         = "everything_file_search"
+	DefaultLimit     = 10
+	ShortcutName     = "/find"
+	SendShortcutName = "/send"
 )
 
 var (
@@ -131,6 +132,10 @@ func CommandHelpText() string {
 - PDF: ` + "`*.pdf`" + `
 - 今天修改: ` + "`dm:today`" + `
 - 近两天新建: ` + "`dc:last48hours`" + `
+
+微信发送:
+- 先用 ` + ShortcutName + ` 查找候选文件
+- 再用 ` + SendShortcutName + ` <序号> 发送对应文件
 `)
 }
 

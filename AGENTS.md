@@ -37,7 +37,7 @@ When adding a new tool unit:
   Purpose: Search local Windows files via Everything (`es.exe`) using either native queries or structured semantic filters.
   Input contract: `query`, `keywords`, `drives`, `known_folders`, `paths`, `extensions`, `date_field`, `date_value`, `limit`.
   Output contract: executed query, effective limit, result count, ordered file items with `index`, `name`, and `path`.
-  Shortcut registration: `/find` and `/find help`, registered by the WeChat bridge at runtime after bridge startup.
+  Shortcut registration: `/find` and `/find help`, handled by the shared app runtime; WeChat additionally supports `/send <序号>` through its interface adapter.
   Current pipeline split: intent recognition in `internal/ai` and `internal/app`; search execution and selection state in `internal/filesearch`; WeChat file delivery in `internal/weixin/filesender.go`.
 
 ## Testing Guidelines

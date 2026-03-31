@@ -150,7 +150,7 @@ func (h *ShortcutHandler) resolveInput(ctx context.Context, text string, resolve
 	if strings.HasPrefix(strings.ToLower(command), ShortcutName) {
 		rawQuery := strings.TrimSpace(strings.TrimPrefix(command, ShortcutName))
 		if rawQuery == "" {
-			return ToolInput{}, shortcutUsageText(), true, nil
+			return ToolInput{}, ShortcutUsageText(), true, nil
 		}
 		if strings.EqualFold(rawQuery, "help") || rawQuery == "帮助" {
 			return ToolInput{}, CommandHelpText(), true, nil
@@ -187,22 +187,28 @@ func (h *ShortcutHandler) tryHandlePendingSelection(ctx context.Context, req Sho
 	}
 
 	selection, ok := h.PendingSelection(slotKey)
+	command := normalizeShortcutCommand(req.Text)
 	if !ok {
+		if strings.HasPrefix(strings.ToLower(command), SendShortcutName) {
+			return "当前没有待发送文件，请先使用 /find 查找。", true, nil
+		}
 		return "", false, nil
 	}
 
-	trimmed := strings.TrimSpace(req.Text)
-	if trimmed == "" {
+	if !strings.HasPrefix(strings.ToLower(command), SendShortcutName) {
 		return "", false, nil
 	}
-	if IsCancelSelection(trimmed) {
+	arg := strings.TrimSpace(strings.TrimPrefix(command, SendShortcutName))
+	if arg == "" {
+		return "用法: /send <序号>\n例如: /send 1", true, nil
+	}
+	if IsCancelSelection(arg) {
 		h.ClearPendingSelection(slotKey)
-		return "已取消本次文件选择。", true, nil
+		return "已取消本次文件发送。", true, nil
 	}
-
-	index, ok := ParseSelectionIndex(trimmed, len(selection.Paths))
+	index, ok := ParseSelectionIndex(arg, len(selection.Paths))
 	if !ok {
-		return "", false, nil
+		return "请使用 `/send <序号>` 发送文件，例如 `/send 1`。", true, nil
 	}
 	if req.SendSelectedFile == nil {
 		return "", true, fmt.Errorf("filesearch: missing file sender")
@@ -259,7 +265,7 @@ func FormatPendingSelection(query string, paths []string) string {
 		lines = append(lines, "   "+item)
 	}
 	lines = append(lines, fmt.Sprintf("检索式: %s", query))
-	lines = append(lines, "回复 1-"+strconv.Itoa(len(paths))+" 选择，回复 0 / 取消 结束。")
+	lines = append(lines, "发送请用 `/send 1-"+strconv.Itoa(len(paths))+"`，取消请用 `/send cancel`。")
 	return strings.Join(lines, "\n")
 }
 
@@ -307,6 +313,38 @@ func normalizeShortcutCommand(text string) string {
 
 func shortcutUsageText() string {
 	return "用法: /find <关键词>\n例如: /find 单细胞*.pdf"
+}
+
+func ShortcutUsageText() string {
+	return shortcutUsageText()
+}
+
+func FormatSearchResult(result ToolResult) string {
+	if len(result.Items) == 0 {
+		query := strings.TrimSpace(result.Query)
+		if query == "" {
+			return "没有找到匹配文件。"
+		}
+		return fmt.Sprintf("没有找到匹配文件：%s", query)
+	}
+
+	lines := []string{
+		fmt.Sprintf("找到 %d 个文件：", len(result.Items)),
+	}
+	for idx, item := range result.Items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = fileBaseName(item.Path)
+		}
+		lines = append(lines, fmt.Sprintf("%d. %s", idx+1, name))
+		if strings.TrimSpace(item.Path) != "" {
+			lines = append(lines, "   "+item.Path)
+		}
+	}
+	if query := strings.TrimSpace(result.Query); query != "" {
+		lines = append(lines, fmt.Sprintf("检索式: %s", query))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func resultItemPaths(items []ResultItem) []string {

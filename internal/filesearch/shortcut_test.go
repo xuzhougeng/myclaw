@@ -53,7 +53,7 @@ func TestShortcutHandlerSearchAndSelection(t *testing.T) {
 	var sentPath string
 	resp, err = handler.Handle(context.Background(), ShortcutRequest{
 		SlotKey: "weixin:ctx-1",
-		Text:    "2",
+		Text:    "/send 2",
 		SendSelectedFile: func(_ context.Context, path string) error {
 			sentPath = path
 			return nil

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"myclaw/internal/filesearch"
 	"myclaw/internal/knowledge"
 )
 
@@ -17,6 +18,7 @@ var serviceCommandHandlers = map[string]commandHandler{
 	"/remember":      handleRememberCommand,
 	"/remember-file": handleRememberFileCommand,
 	"/find":          handleFindCommand,
+	"/send":          handleSendCommand,
 	"/append":        handleAppendCommand,
 	"/translate":     handleTranslateCommand,
 	"/debug-search":  handleDebugSearchCommand,
@@ -38,7 +40,8 @@ const helpCommandText = "可用命令:\n" +
 	"/new — 开启新对话（terminal / desktop）\n" +
 	"/remember <内容> 或 记住：<内容> — 保存一条知识\n" +
 	"/remember-file <路径> — 总结图片/PDF并存入知识库\n" +
-	"/find <关键词> — 微信里按关键词找文件并发送给自己\n" +
+	"/find <关键词> — 搜索本地文件\n" +
+	"/send <序号> — 微信里发送上一轮 /find 结果中的文件\n" +
 	"/append <ID前缀> <内容> — 追加到已有知识\n" +
 	"/skills — 查看技能库和当前会话已加载技能\n" +
 	"/show-skill <技能名> — 查看某个技能内容\n" +
@@ -107,11 +110,19 @@ func handleRememberFileCommand(s *Service, ctx context.Context, mc MessageContex
 	return s.ingestFilePath(ctx, mc, body)
 }
 
-func handleFindCommand(_ *Service, _ context.Context, mc MessageContext, _ string, _ []string) (string, error) {
-	if !strings.EqualFold(strings.TrimSpace(mc.Interface), "weixin") {
-		return "当前只支持在微信中使用 /find。", nil
+func handleFindCommand(s *Service, ctx context.Context, mc MessageContext, input string, _ []string) (string, error) {
+	reply, handled, err := s.tryHandleFileSearch(ctx, mc, input)
+	if handled || err != nil {
+		return reply, err
 	}
-	return "请直接发送 `/find <关键词>`，微信 bridge 会返回前 10 个候选文件供选择。", nil
+	return filesearch.ShortcutUsageText(), nil
+}
+
+func handleSendCommand(_ *Service, _ context.Context, mc MessageContext, _ string, _ []string) (string, error) {
+	if !strings.EqualFold(strings.TrimSpace(mc.Interface), "weixin") {
+		return "当前只支持在微信中使用 /send。先使用 /find 查看候选文件。", nil
+	}
+	return "请先使用 `/find` 查找文件，再使用 `/send <序号>` 发送。", nil
 }
 
 func handleAppendCommand(s *Service, ctx context.Context, mc MessageContext, input string, fields []string) (string, error) {

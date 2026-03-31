@@ -185,7 +185,7 @@ func TestHandleMessageFileFindDoesNotCreateConversation(t *testing.T) {
 		t.Fatalf("unexpected search reply: %#v", sent.Msg)
 	}
 
-	msg.ItemList = []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "1"}}}
+	msg.ItemList = []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "/send 1"}}}
 	bridge.handleMessage(context.Background(), msg)
 
 	items, err = sessionStore.List(context.Background())
