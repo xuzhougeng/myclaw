@@ -17,6 +17,7 @@ type AgentToolDefinition struct {
 	Usage             string
 	InputJSONExample  string
 	OutputJSONExample string
+	SideEffectLevel   string
 }
 
 type AgentToolResult struct {
