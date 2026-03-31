@@ -100,8 +100,40 @@ func (s *Service) appendConversationHistory(ctx context.Context, mc MessageConte
 	_ = s.saveSessionSnapshot(ctx, snapshot)
 }
 
+func (s *Service) maybeAppendConversationHistory(ctx context.Context, mc MessageContext, userInput, assistantReply string) {
+	if !conversationPersistenceEnabled(ctx) {
+		return
+	}
+	s.appendConversationHistory(ctx, mc, userInput, assistantReply)
+}
+
 func (s *Service) RecordConversationTurn(ctx context.Context, mc MessageContext, userInput, assistantReply string) {
 	s.appendConversationHistory(ctx, mc, userInput, assistantReply)
+}
+
+func (s *Service) ConversationExists(ctx context.Context, mc MessageContext) (bool, error) {
+	if s.sessionStore == nil {
+		return false, nil
+	}
+	_, ok, err := s.sessionStore.Load(ctx, conversationSessionKey(mc))
+	return ok, err
+}
+
+func (s *Service) EnsureConversation(ctx context.Context, mc MessageContext) error {
+	if s.sessionStore == nil {
+		return nil
+	}
+
+	key := conversationSessionKey(mc)
+	if key == "" {
+		return nil
+	}
+	if _, ok, err := s.sessionStore.Load(ctx, key); err != nil {
+		return err
+	} else if ok {
+		return nil
+	}
+	return s.saveSessionSnapshot(ctx, sessionstate.Snapshot{Key: key})
 }
 
 func (s *Service) persistedLoadedSkillNames(mc MessageContext) []string {

@@ -14,6 +14,7 @@ import (
 	"myclaw/internal/promptlib"
 	"myclaw/internal/reminder"
 	"myclaw/internal/sessionstate"
+	"myclaw/internal/weixin"
 )
 
 func TestDesktopChatSessionsCanBeCreatedAndSwitched(t *testing.T) {
@@ -310,10 +311,10 @@ func TestDesktopChatStateIncludesWeixinConversation(t *testing.T) {
 			continue
 		}
 		found = true
-		if !item.ReadOnly {
-			t.Fatalf("expected weixin conversation to be read-only: %#v", item)
+		if item.ReadOnly {
+			t.Fatalf("expected weixin conversation to stay writable in desktop chat: %#v", item)
 		}
-		if item.Source != "weixin:user-1" || item.SourceLabel != "微信 · user-1" {
+		if item.Source != "weixin:user-1" || item.SourceLabel != "微信" {
 			t.Fatalf("unexpected weixin source metadata: %#v", item)
 		}
 		if item.Active {
@@ -339,7 +340,7 @@ func TestDesktopChatStateIncludesWeixinConversation(t *testing.T) {
 	}
 }
 
-func TestDesktopSendMessageRejectsWeixinConversation(t *testing.T) {
+func TestDesktopEmitChatChangedActivatesWeixinConversation(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -363,12 +364,74 @@ func TestDesktopSendMessageRejectsWeixinConversation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save weixin snapshot: %v", err)
 	}
+
+	app.emitChatChanged(weixin.ConversationUpdate{SessionID: "weixin:ctx-1", Activate: true})
+
+	state, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("get chat state: %v", err)
+	}
+	if state.SessionID != "weixin:ctx-1" {
+		t.Fatalf("expected active weixin session, got %#v", state)
+	}
+	if len(state.Messages) != 2 || state.Messages[0].Text != "你好" || state.Messages[1].Text != "你好，我在。" {
+		t.Fatalf("expected activated weixin history, got %#v", state.Messages)
+	}
+}
+
+func TestDesktopSendMessageContinuesWeixinConversation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "knowledge.json"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "project.json"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "prompts.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, desktopTestAI{
+		route: ai.RouteDecision{Command: "answer"},
+		chatFunc: func(_ context.Context, input string, history []ai.ConversationMessage) string {
+			if input != "继续说" {
+				t.Fatalf("unexpected continued input: %q", input)
+			}
+			if len(history) != 2 || history[0].Content != "你好" || history[1].Content != "你好，我在。" {
+				t.Fatalf("unexpected continued history: %#v", history)
+			}
+			return "继续聊"
+		},
+	}, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	if _, err := app.GetChatState(); err != nil {
+		t.Fatalf("prime desktop chat state: %v", err)
+	}
+	if _, err := sessionStore.Save(context.Background(), sessionstate.Snapshot{
+		Key: "source:weixin:user-1|session:weixin:ctx-1",
+		History: []sessionstate.Message{
+			{Role: "user", Content: "你好"},
+			{Role: "assistant", Content: "你好，我在。"},
+		},
+	}); err != nil {
+		t.Fatalf("save weixin snapshot: %v", err)
+	}
 	if _, err := app.SwitchChatSession("weixin:ctx-1"); err != nil {
 		t.Fatalf("switch to weixin conversation: %v", err)
 	}
 
-	if _, err := app.SendMessage("继续说"); err == nil || !strings.Contains(err.Error(), "只支持查看历史") {
-		t.Fatalf("expected read-only session error, got %v", err)
+	result, err := app.SendMessage("继续说")
+	if err != nil {
+		t.Fatalf("continue weixin conversation: %v", err)
+	}
+	if result.SessionID != "weixin:ctx-1" || result.Reply != "继续聊" {
+		t.Fatalf("unexpected continued result: %#v", result)
+	}
+
+	state, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("reload chat state: %v", err)
+	}
+	if len(state.Messages) != 4 || state.Messages[2].Text != "继续说" || state.Messages[3].Text != "继续聊" {
+		t.Fatalf("expected continued weixin history, got %#v", state.Messages)
 	}
 }
 

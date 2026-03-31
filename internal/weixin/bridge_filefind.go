@@ -42,7 +42,7 @@ func (b *Bridge) EverythingPath() string {
 	return b.everythingPath
 }
 
-func (b *Bridge) maybeHandleFileFind(ctx context.Context, msg WeixinMessage, text string) (string, bool, error) {
+func (b *Bridge) maybeHandleFileFind(ctx context.Context, msg WeixinMessage, messageContext app.MessageContext, text string) (string, bool, error) {
 	if reply, handled, err := b.tryHandlePendingFileSelection(ctx, msg, text); handled || err != nil {
 		return reply, true, err
 	}
@@ -58,7 +58,7 @@ func (b *Bridge) maybeHandleFileFind(ctx context.Context, msg WeixinMessage, tex
 		}
 	}
 
-	input, handled, err := b.buildFileSearchToolInput(ctx, msg, text)
+	input, handled, err := b.buildFileSearchToolInput(ctx, messageContext, text)
 	if err != nil || !handled {
 		return "", handled, err
 	}
@@ -76,12 +76,12 @@ func (b *Bridge) maybeHandleFileFind(ctx context.Context, msg WeixinMessage, tex
 		}
 	}
 	if len(result.Items) == 0 {
-		b.clearPendingFileSelection(weixinSessionID(msg))
+		b.clearPendingFileSelection(b.conversationSlotKey(msg))
 		return fmt.Sprintf("没有找到匹配文件：%s", result.Query), true, nil
 	}
 
 	paths := resultItemPaths(result.Items)
-	b.savePendingFileSelection(weixinSessionID(msg), pendingFileSelection{
+	b.savePendingFileSelection(b.conversationSlotKey(msg), pendingFileSelection{
 		Query:     result.Query,
 		Paths:     append([]string(nil), paths...),
 		CreatedAt: time.Now(),
@@ -90,7 +90,7 @@ func (b *Bridge) maybeHandleFileFind(ctx context.Context, msg WeixinMessage, tex
 }
 
 func (b *Bridge) tryHandlePendingFileSelection(ctx context.Context, msg WeixinMessage, text string) (string, bool, error) {
-	selection, ok := b.pendingFileSelection(weixinSessionID(msg))
+	selection, ok := b.pendingFileSelection(b.conversationSlotKey(msg))
 	if !ok {
 		return "", false, nil
 	}
@@ -101,7 +101,7 @@ func (b *Bridge) tryHandlePendingFileSelection(ctx context.Context, msg WeixinMe
 	}
 
 	if isCancelSelection(trimmed) {
-		b.clearPendingFileSelection(weixinSessionID(msg))
+		b.clearPendingFileSelection(b.conversationSlotKey(msg))
 		return "已取消本次文件选择。", true, nil
 	}
 
@@ -115,7 +115,7 @@ func (b *Bridge) tryHandlePendingFileSelection(ctx context.Context, msg WeixinMe
 		return "", true, err
 	}
 
-	b.clearPendingFileSelection(weixinSessionID(msg))
+	b.clearPendingFileSelection(b.conversationSlotKey(msg))
 	return fmt.Sprintf("已通过 ClawBot 发送文件 %d: %s", index, fileBaseName(target)), true, nil
 }
 
@@ -193,13 +193,8 @@ func normalizeSlashCommand(text string) string {
 	return text
 }
 
-func (b *Bridge) buildFileSearchToolInput(ctx context.Context, msg WeixinMessage, text string) (filesearch.ToolInput, bool, error) {
+func (b *Bridge) buildFileSearchToolInput(ctx context.Context, messageContext app.MessageContext, text string) (filesearch.ToolInput, bool, error) {
 	command := normalizeSlashCommand(text)
-	messageContext := app.MessageContext{
-		UserID:    msg.FromUserID,
-		Interface: "weixin",
-		SessionID: weixinSessionID(msg),
-	}
 
 	if strings.HasPrefix(strings.ToLower(command), "/find") {
 		rawQuery := strings.TrimSpace(strings.TrimPrefix(command, "/find"))

@@ -91,7 +91,7 @@ func (a *DesktopApp) SwitchChatSession(sessionID string) (ChatState, error) {
 	if !ok {
 		return ChatState{}, errors.New("未找到要切换的对话")
 	}
-	if !session.ReadOnly && a.sessionStore != nil {
+	if a.sessionStore != nil {
 		if _, err := a.sessionStore.Save(context.Background(), session.Snapshot); err != nil {
 			return ChatState{}, err
 		}
@@ -123,9 +123,6 @@ func (a *DesktopApp) RenameChatSession(sessionID, title string) (ChatState, erro
 	if !ok {
 		return ChatState{}, errors.New("未找到要重命名的对话")
 	}
-	if session.ReadOnly {
-		return ChatState{}, errors.New("微信会话只支持查看历史，不能改名")
-	}
 
 	session.Snapshot.Title = title
 	if _, err := a.sessionStore.Save(context.Background(), session.Snapshot); err != nil {
@@ -153,9 +150,6 @@ func (a *DesktopApp) DeleteChatSession(sessionID string) (ChatState, error) {
 	if !ok {
 		return ChatState{}, errors.New("未找到要删除的对话")
 	}
-	if session.ReadOnly {
-		return ChatState{}, errors.New("微信会话只支持查看历史，不能删除")
-	}
 
 	currentSessionID, err := a.currentChatSession(context.Background(), project)
 	if err != nil {
@@ -170,7 +164,7 @@ func (a *DesktopApp) DeleteChatSession(sessionID string) (ChatState, error) {
 	if err != nil {
 		return ChatState{}, err
 	}
-	if nextSessionID, ok := firstDesktopChatSession(remaining); ok {
+	if nextSessionID, ok := firstChatSession(remaining); ok {
 		if currentSessionID == sessionID || a.rememberedChatSession(project) == sessionID {
 			a.rememberChatSession(project, nextSessionID)
 		}
@@ -199,19 +193,11 @@ func (a *DesktopApp) RefreshChatResponse() (ChatResponse, error) {
 	if err != nil {
 		return ChatResponse{}, err
 	}
-	if session.ReadOnly {
-		return ChatResponse{}, errors.New("当前会话来自微信，只支持查看历史；请新建本地对话后继续")
-	}
-
-	snapshot, ok, err := a.loadChatSessionSnapshot(context.Background(), project, session.SessionID)
-	if err != nil {
-		return ChatResponse{}, err
-	}
-	if !ok {
+	if strings.TrimSpace(session.Snapshot.Key) == "" {
 		return ChatResponse{}, errors.New("当前对话没有可刷新的回复")
 	}
 
-	trimmedSnapshot, input, err := trimmedChatSnapshotForRefresh(snapshot)
+	trimmedSnapshot, input, err := trimmedChatSnapshotForRefresh(session.Snapshot)
 	if err != nil {
 		return ChatResponse{}, err
 	}
@@ -223,7 +209,7 @@ func (a *DesktopApp) RefreshChatResponse() (ChatResponse, error) {
 
 	result, err := a.sendMessage(context.Background(), input, nil)
 	if err != nil {
-		if _, restoreErr := a.sessionStore.Save(context.Background(), snapshot); restoreErr != nil {
+		if _, restoreErr := a.sessionStore.Save(context.Background(), session.Snapshot); restoreErr != nil {
 			return ChatResponse{}, fmt.Errorf("%w；恢复原回复失败: %v", err, restoreErr)
 		}
 		return ChatResponse{}, err
@@ -293,7 +279,7 @@ func (a *DesktopApp) chatMessageContext(ctx context.Context, project string) (ap
 	if err != nil {
 		return appsvc.MessageContext{}, err
 	}
-	if session.ReadOnly {
+	if !isDesktopConversationSource(session.Source) {
 		return externalMessageContext(session.Source, session.SessionID), nil
 	}
 	return desktopMessageContext(project, session.SessionID), nil
@@ -314,7 +300,7 @@ func (a *DesktopApp) currentChatSession(ctx context.Context, project string) (st
 		}
 	}
 
-	if sessionID, ok := firstDesktopChatSession(sessions); ok {
+	if sessionID, ok := firstChatSession(sessions); ok {
 		a.rememberChatSession(project, sessionID)
 		return sessionID, nil
 	}
@@ -347,9 +333,7 @@ func (a *DesktopApp) rememberChatSession(project, sessionID string) {
 	a.chatSessionMap[project] = sessionID
 	a.chatSessionMu.Unlock()
 
-	if isDesktopChatSessionForProject(sessionID, project) {
-		a.persistChatSessionSelection(project, sessionID)
-	}
+	a.persistChatSessionSelection(project, sessionID)
 }
 
 func (a *DesktopApp) persistChatSessionSelection(project, sessionID string) {
@@ -520,14 +504,12 @@ func isWeixinConversationSource(source string) bool {
 }
 
 func conversationReadOnly(source string) bool {
-	return isWeixinConversationSource(source)
+	return false
 }
 
 func conversationSourceLabel(source string) string {
 	name, userID := splitConversationSource(source)
 	switch {
-	case strings.EqualFold(name, "weixin") && userID != "":
-		return "微信 · " + userID
 	case strings.EqualFold(name, "weixin"):
 		return "微信"
 	case strings.EqualFold(name, desktopInterface):
@@ -548,11 +530,9 @@ func splitConversationSource(source string) (name string, userID string) {
 	return strings.TrimSpace(name), strings.TrimSpace(userID)
 }
 
-func firstDesktopChatSession(sessions []chatSessionSnapshot) (string, bool) {
+func firstChatSession(sessions []chatSessionSnapshot) (string, bool) {
 	for _, item := range sessions {
-		if !item.ReadOnly {
-			return item.SessionID, true
-		}
+		return item.SessionID, true
 	}
 	return "", false
 }

@@ -35,7 +35,7 @@ func (s *Service) handleAgentQuestion(ctx context.Context, mc MessageContext, qu
 			if reply == "" {
 				return "", fmt.Errorf("agent returned empty answer")
 			}
-			s.appendConversationHistory(ctx, mc, question, reply)
+			s.maybeAppendConversationHistory(ctx, mc, question, reply)
 			return reply, nil
 		case "tool":
 			output, err := s.toolProviders.Execute(ctx, mc, decision.ToolName, decision.ToolInput)

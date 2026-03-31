@@ -157,7 +157,8 @@ func TestMaybeHandleFileFindSearchAndSelection(t *testing.T) {
 	}
 
 	msg := WeixinMessage{FromUserID: "user-1", ContextToken: "ctx-1"}
-	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, "/find 单细胞")
+	mc := bridge.conversationContext(msg, weixinSessionID(msg))
+	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, mc, "/find 单细胞")
 	if err != nil {
 		t.Fatalf("search file: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestMaybeHandleFileFindSearchAndSelection(t *testing.T) {
 		t.Fatalf("unexpected search reply: %q", reply)
 	}
 
-	reply, handled, err = bridge.maybeHandleFileFind(context.Background(), msg, "2")
+	reply, handled, err = bridge.maybeHandleFileFind(context.Background(), msg, mc, "2")
 	if err != nil {
 		t.Fatalf("select file: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestMaybeHandleFileFindSearchAndSelection(t *testing.T) {
 	if !strings.Contains(reply, "已通过 ClawBot 发送文件 2") {
 		t.Fatalf("unexpected selection reply: %q", reply)
 	}
-	if _, ok := bridge.pendingFileSelection(weixinSessionID(msg)); ok {
+	if _, ok := bridge.pendingFileSelection(bridge.conversationSlotKey(msg)); ok {
 		t.Fatal("expected pending selection to be cleared")
 	}
 }
@@ -224,8 +225,9 @@ func TestMaybeHandleNaturalFileFindUsesAIIntent(t *testing.T) {
 		}, nil
 	}
 	msg := WeixinMessage{FromUserID: "user-1", ContextToken: "ctx-1"}
+	mc := bridge.conversationContext(msg, weixinSessionID(msg))
 
-	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, "查找 D 盘单细胞相关的PDF文件")
+	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, mc, "查找 D 盘单细胞相关的PDF文件")
 	if err != nil {
 		t.Fatalf("natural search: %v", err)
 	}
@@ -245,8 +247,9 @@ func TestMaybeHandleFindHelpReturnsModuleHelp(t *testing.T) {
 		EverythingPath: "es.exe",
 	})
 	msg := WeixinMessage{FromUserID: "user-1", ContextToken: "ctx-1"}
+	mc := bridge.conversationContext(msg, weixinSessionID(msg))
 
-	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, "/find help")
+	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, mc, "/find help")
 	if err != nil {
 		t.Fatalf("find help: %v", err)
 	}
@@ -290,8 +293,9 @@ func TestMaybeHandleSlashFindUsesAIIntentForNaturalLanguageQuery(t *testing.T) {
 		}, nil
 	}
 	msg := WeixinMessage{FromUserID: "user-1", ContextToken: "ctx-1"}
+	mc := bridge.conversationContext(msg, weixinSessionID(msg))
 
-	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, "/find 查找下载目录下的pdf文件")
+	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, mc, "/find 查找下载目录下的pdf文件")
 	if err != nil {
 		t.Fatalf("slash natural search: %v", err)
 	}
@@ -381,6 +385,140 @@ func TestHandleMessageRecordsFileFindConversation(t *testing.T) {
 	}
 	if !strings.Contains(snapshot.History[3].Content, "已通过 ClawBot 发送文件 1") {
 		t.Fatalf("unexpected recorded selection reply: %#v", snapshot.History[3])
+	}
+}
+
+func TestHandleMessageRecordsSlashCommandConversation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, nil)
+	if _, err := store.Add(context.Background(), knowledge.Entry{Text: "第一条知识"}); err != nil {
+		t.Fatalf("add knowledge: %v", err)
+	}
+
+	var sent SendMessageRequest
+	bridge := NewBridge(newTestClient(t, &sent), service, reminders, BridgeConfig{DataDir: root})
+	msg := WeixinMessage{
+		FromUserID:   "user-1",
+		ContextToken: "ctx-1",
+		MessageType:  MessageTypeUser,
+		MessageState: MessageStateFinish,
+		ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "/list"}}},
+	}
+
+	bridge.handleMessage(context.Background(), msg)
+
+	snapshot, ok, err := sessionStore.Load(context.Background(), "source:weixin:user-1|session:weixin:ctx-1")
+	if err != nil {
+		t.Fatalf("load slash snapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected slash command conversation to be recorded")
+	}
+	if len(snapshot.History) != 2 {
+		t.Fatalf("expected slash history, got %#v", snapshot.History)
+	}
+	if snapshot.History[0].Content != "/list" {
+		t.Fatalf("unexpected recorded command: %#v", snapshot.History[0])
+	}
+	if !strings.Contains(snapshot.History[1].Content, "当前对话已开始。") {
+		t.Fatalf("expected new conversation notice, got %#v", snapshot.History[1])
+	}
+	if !strings.Contains(snapshot.History[1].Content, "第一条知识") {
+		t.Fatalf("expected slash reply to be recorded, got %#v", snapshot.History[1])
+	}
+	if !strings.Contains(extractText(sent.Msg), "当前对话已开始。") {
+		t.Fatalf("expected outbound notice, got %#v", sent.Msg)
+	}
+}
+
+func TestHandleMessageNewCommandStartsDistinctConversation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, nil)
+
+	var sent SendMessageRequest
+	bridge := NewBridge(newTestClient(t, &sent), service, reminders, BridgeConfig{DataDir: root})
+	msg := WeixinMessage{
+		FromUserID:   "user-1",
+		ContextToken: "ctx-1",
+		MessageType:  MessageTypeUser,
+		MessageState: MessageStateFinish,
+		ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "/new"}}},
+	}
+
+	bridge.handleMessage(context.Background(), msg)
+
+	slot := bridge.conversationSlotKey(msg)
+	sessionID := strings.TrimSpace(bridge.conversationSessions[slot])
+	if sessionID == "" || sessionID == weixinSessionID(msg) {
+		t.Fatalf("expected explicit /new to allocate a distinct session id, got %q", sessionID)
+	}
+	snapshot, ok, err := sessionStore.Load(context.Background(), "source:weixin:user-1|session:"+sessionID)
+	if err != nil {
+		t.Fatalf("load new snapshot: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected new session snapshot for %q", sessionID)
+	}
+	if len(snapshot.History) != 2 || snapshot.History[0].Content != "/new" || snapshot.History[1].Content != "已进入新对话。" {
+		t.Fatalf("unexpected /new history: %#v", snapshot.History)
+	}
+	if extractText(sent.Msg) != "已进入新对话。" {
+		t.Fatalf("unexpected /new outbound reply: %#v", sent.Msg)
+	}
+}
+
+func TestHandleMessageAfterDeletedConversationStartsNewSession(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, nil)
+	if _, err := store.Add(context.Background(), knowledge.Entry{Text: "第一条知识"}); err != nil {
+		t.Fatalf("add knowledge: %v", err)
+	}
+
+	var sent SendMessageRequest
+	bridge := NewBridge(newTestClient(t, &sent), service, reminders, BridgeConfig{DataDir: root})
+	msg := WeixinMessage{
+		FromUserID:   "user-1",
+		ContextToken: "ctx-1",
+		MessageType:  MessageTypeUser,
+		MessageState: MessageStateFinish,
+		ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "/list"}}},
+	}
+
+	bridge.handleMessage(context.Background(), msg)
+	if err := sessionStore.Delete(context.Background(), "source:weixin:user-1|session:weixin:ctx-1"); err != nil {
+		t.Fatalf("delete original snapshot: %v", err)
+	}
+
+	bridge.handleMessage(context.Background(), msg)
+
+	sessionID := strings.TrimSpace(bridge.conversationSessions[bridge.conversationSlotKey(msg)])
+	if sessionID == "" || sessionID == weixinSessionID(msg) {
+		t.Fatalf("expected deleted conversation to be replaced, got %q", sessionID)
+	}
+	snapshot, ok, err := sessionStore.Load(context.Background(), "source:weixin:user-1|session:"+sessionID)
+	if err != nil {
+		t.Fatalf("load recreated snapshot: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected recreated snapshot for %q", sessionID)
+	}
+	if !strings.Contains(snapshot.History[1].Content, "之前对话已丢失，已进入新对话。") {
+		t.Fatalf("expected recreated session notice, got %#v", snapshot.History)
 	}
 }
 

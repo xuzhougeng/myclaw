@@ -206,7 +206,7 @@ func (s *Service) handleAIDecision(ctx context.Context, mc MessageContext, text 
 			}
 			reply, err := s.aiService.Answer(ctx, question, entries)
 			if err == nil {
-				s.appendConversationHistory(ctx, mc, question, reply)
+				s.maybeAppendConversationHistory(ctx, mc, question, reply)
 			}
 			return reply, err
 		case ModeAgent:
@@ -216,7 +216,7 @@ func (s *Service) handleAIDecision(ctx context.Context, mc MessageContext, text 
 		default:
 			reply, err := s.aiService.Chat(ctx, question, s.conversationHistory(ctx, mc))
 			if err == nil {
-				s.appendConversationHistory(ctx, mc, question, reply)
+				s.maybeAppendConversationHistory(ctx, mc, question, reply)
 			}
 			return reply, err
 		}
@@ -367,7 +367,7 @@ func (s *Service) handleAIDecisionStream(ctx context.Context, mc MessageContext,
 			}
 			reply, err := s.streamOrAnswer(ctx, question, entries, onDelta)
 			if err == nil {
-				s.appendConversationHistory(ctx, mc, question, reply)
+				s.maybeAppendConversationHistory(ctx, mc, question, reply)
 			}
 			return reply, err
 		case ModeAgent:
@@ -381,7 +381,7 @@ func (s *Service) handleAIDecisionStream(ctx context.Context, mc MessageContext,
 		default:
 			reply, err := s.streamOrChat(ctx, question, s.conversationHistory(ctx, mc), onDelta)
 			if err == nil {
-				s.appendConversationHistory(ctx, mc, question, reply)
+				s.maybeAppendConversationHistory(ctx, mc, question, reply)
 			}
 			return reply, err
 		}

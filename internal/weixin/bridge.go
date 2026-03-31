@@ -34,17 +34,20 @@ type BridgeConfig struct {
 }
 
 type Bridge struct {
-	client         *Client
-	service        *app.Service
-	reminders      *reminder.Manager
-	config         BridgeConfig
-	conversationMu sync.RWMutex
-	onConversation func()
-	findMu         sync.Mutex
-	pendingFind    map[string]pendingFileSelection
-	everythingPath string
-	searchFiles    func(context.Context, string, filesearch.ToolInput) (filesearch.ToolResult, error)
-	sendFile       func(context.Context, string, string, string) error
+	client               *Client
+	service              *app.Service
+	reminders            *reminder.Manager
+	config               BridgeConfig
+	conversationMu       sync.RWMutex
+	onConversation       func(ConversationUpdate)
+	sessionMu            sync.Mutex
+	conversationSessions map[string]string
+	conversationLoaded   bool
+	findMu               sync.Mutex
+	pendingFind          map[string]pendingFileSelection
+	everythingPath       string
+	searchFiles          func(context.Context, string, filesearch.ToolInput) (filesearch.ToolResult, error)
+	sendFile             func(context.Context, string, string, string) error
 }
 
 func NewBridge(client *Client, service *app.Service, reminders *reminder.Manager, config BridgeConfig) *Bridge {
@@ -63,18 +66,18 @@ func NewBridge(client *Client, service *app.Service, reminders *reminder.Manager
 	return bridge
 }
 
-func (b *Bridge) SetConversationUpdatedHook(fn func()) {
+func (b *Bridge) SetConversationUpdatedHook(fn func(ConversationUpdate)) {
 	b.conversationMu.Lock()
 	b.onConversation = fn
 	b.conversationMu.Unlock()
 }
 
-func (b *Bridge) notifyConversationUpdated() {
+func (b *Bridge) notifyConversationUpdated(update ConversationUpdate) {
 	b.conversationMu.RLock()
 	fn := b.onConversation
 	b.conversationMu.RUnlock()
 	if fn != nil {
-		fn()
+		fn(update)
 	}
 }
 
@@ -214,10 +217,31 @@ func (b *Bridge) Run(ctx context.Context) error {
 func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 	text := extractText(msg)
 	log.Printf("[weixin] inbound from=%s text=%s", msg.FromUserID, truncate(text, 80))
-	messageContext := app.MessageContext{
-		UserID:    msg.FromUserID,
-		Interface: "weixin",
-		SessionID: weixinSessionID(msg),
+	normalized := strings.ToLower(normalizeSlashCommand(text))
+	if normalized == "/new" {
+		messageContext, err := b.startNewConversation(ctx, msg)
+		if err != nil {
+			log.Printf("[weixin] start new conversation failed: %v", err)
+			if sendErr := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, "开启新对话失败，请稍后重试。"); sendErr != nil {
+				log.Printf("[weixin] send /new failure reply failed: %v", sendErr)
+			}
+			return
+		}
+		reply := "已进入新对话。"
+		if b.service != nil && strings.TrimSpace(text) != "" {
+			b.service.RecordConversationTurn(ctx, messageContext, text, reply)
+		}
+		b.notifyConversationUpdated(ConversationUpdate{SessionID: messageContext.SessionID, Activate: true})
+		if err := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); err != nil {
+			log.Printf("[weixin] send /new reply failed: %v", err)
+		}
+		return
+	}
+
+	messageContext, conversationNotice, activateConversation, err := b.bindConversationSession(ctx, msg)
+	if err != nil {
+		log.Printf("[weixin] bind conversation session failed: %v", err)
+		return
 	}
 
 	if b.reminders != nil {
@@ -229,15 +253,17 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 		}))
 	}
 
-	if reply, handled, err := b.maybeHandleFileFind(ctx, msg, text); handled {
+	serviceCtx := app.WithConversationPersistenceDisabled(ctx)
+	if reply, handled, err := b.maybeHandleFileFind(serviceCtx, msg, messageContext, text); handled {
 		if err != nil {
 			log.Printf("[weixin] handle /find failed: %v", err)
 			reply = "处理文件查找失败，请稍后重试。"
 		}
+		reply = prefixConversationNotice(conversationNotice, reply)
 		if b.service != nil && strings.TrimSpace(text) != "" && strings.TrimSpace(reply) != "" {
 			b.service.RecordConversationTurn(ctx, messageContext, text, reply)
-			b.notifyConversationUpdated()
 		}
+		b.notifyConversationUpdated(ConversationUpdate{SessionID: messageContext.SessionID, Activate: activateConversation})
 		if strings.TrimSpace(reply) != "" {
 			if sendErr := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); sendErr != nil {
 				log.Printf("[weixin] send /find reply failed: %v", sendErr)
@@ -246,15 +272,41 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 		return
 	}
 
-	reply, err := b.service.HandleMessage(ctx, messageContext, text)
+	if b.service == nil {
+		reply := prefixConversationNotice(conversationNotice, "处理失败，服务尚未初始化。")
+		b.notifyConversationUpdated(ConversationUpdate{SessionID: messageContext.SessionID, Activate: activateConversation})
+		if err := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); err != nil {
+			log.Printf("[weixin] send service unavailable reply failed: %v", err)
+		}
+		return
+	}
+
+	reply, err := b.service.HandleMessage(serviceCtx, messageContext, text)
 	if err != nil {
 		log.Printf("[weixin] handle message failed: %v", err)
 		reply = "处理失败，请稍后重试。"
 	}
-	b.notifyConversationUpdated()
+	reply = prefixConversationNotice(conversationNotice, reply)
+	if b.service != nil && strings.TrimSpace(text) != "" && strings.TrimSpace(reply) != "" {
+		b.service.RecordConversationTurn(ctx, messageContext, text, reply)
+	}
+	b.notifyConversationUpdated(ConversationUpdate{SessionID: messageContext.SessionID, Activate: activateConversation})
 
 	if err := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); err != nil {
 		log.Printf("[weixin] send reply failed: %v", err)
+	}
+}
+
+func prefixConversationNotice(notice, reply string) string {
+	notice = strings.TrimSpace(notice)
+	reply = strings.TrimSpace(reply)
+	switch {
+	case notice == "":
+		return reply
+	case reply == "":
+		return notice
+	default:
+		return notice + "\n\n" + reply
 	}
 }
 
