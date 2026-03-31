@@ -119,6 +119,63 @@ func (b *Bridge) conversationExists(ctx context.Context, mc app.MessageContext) 
 	return b.service.ConversationExists(ctx, mc)
 }
 
+func (b *Bridge) resolveConversationLifecycleLocked(ctx context.Context, msg WeixinMessage, mode app.ConversationLifecycleMode) (app.ConversationLifecycleResult, string, error) {
+	if err := b.ensureConversationSessionsLocked(); err != nil {
+		return app.ConversationLifecycleResult{}, "", err
+	}
+
+	slot := b.conversationSlotKey(msg)
+	boundID := strings.TrimSpace(b.conversationSessions[slot])
+	legacyID := weixinSessionID(msg)
+
+	boundExists := false
+	if boundID != "" {
+		ok, err := b.conversationExists(ctx, b.conversationContext(msg, boundID))
+		if err != nil {
+			return app.ConversationLifecycleResult{}, "", err
+		}
+		boundExists = ok
+	}
+
+	legacyExists := false
+	switch {
+	case legacyID == "":
+	case legacyID == boundID:
+		legacyExists = boundExists
+	default:
+		ok, err := b.conversationExists(ctx, b.conversationContext(msg, legacyID))
+		if err != nil {
+			return app.ConversationLifecycleResult{}, "", err
+		}
+		legacyExists = ok
+	}
+
+	input := app.ConversationLifecycleInput{
+		Mode:                     mode,
+		BoundConversationID:      boundID,
+		LegacyConversationID:     legacyID,
+		BoundConversationExists:  boundExists,
+		LegacyConversationExists: legacyExists,
+	}
+	if mode == app.ConversationLifecycleForceNew || (mode == app.ConversationLifecycleBindOrCreate && boundID != "" && !boundExists) {
+		input.NextConversationID = newWeixinConversationSessionID(msg)
+	}
+
+	result, err := app.ResolveConversationLifecycle(input)
+	return result, slot, err
+}
+
+func (b *Bridge) currentConversationContext(ctx context.Context, msg WeixinMessage) (app.MessageContext, error) {
+	b.sessionMu.Lock()
+	defer b.sessionMu.Unlock()
+
+	result, _, err := b.resolveConversationLifecycleLocked(ctx, msg, app.ConversationLifecycleLookup)
+	if err != nil {
+		return app.MessageContext{}, err
+	}
+	return b.conversationContext(msg, result.ConversationID), nil
+}
+
 func (b *Bridge) ensureConversation(ctx context.Context, mc app.MessageContext) error {
 	if b.service == nil {
 		return nil
@@ -130,76 +187,56 @@ func (b *Bridge) bindConversationSession(ctx context.Context, msg WeixinMessage)
 	b.sessionMu.Lock()
 	defer b.sessionMu.Unlock()
 
-	if err := b.ensureConversationSessionsLocked(); err != nil {
-		return app.MessageContext{}, "", false, err
-	}
-
-	slot := b.conversationSlotKey(msg)
-	legacySessionID := weixinSessionID(msg)
-	if sessionID := strings.TrimSpace(b.conversationSessions[slot]); sessionID != "" {
-		mc := b.conversationContext(msg, sessionID)
-		ok, err := b.conversationExists(ctx, mc)
-		if err != nil {
-			return app.MessageContext{}, "", false, err
-		}
-		if ok {
-			return mc, "", false, nil
-		}
-
-		nextSessionID := newWeixinConversationSessionID(msg)
-		b.conversationSessions[slot] = nextSessionID
-		if err := b.saveConversationSessionsLocked(); err != nil {
-			return app.MessageContext{}, "", false, err
-		}
-		b.clearPendingFileSelection(slot)
-
-		mc = b.conversationContext(msg, nextSessionID)
-		if err := b.ensureConversation(ctx, mc); err != nil {
-			return app.MessageContext{}, "", false, err
-		}
-		return mc, "之前对话已丢失，已进入新对话。", true, nil
-	}
-
-	legacyContext := b.conversationContext(msg, legacySessionID)
-	ok, err := b.conversationExists(ctx, legacyContext)
+	result, slot, err := b.resolveConversationLifecycleLocked(ctx, msg, app.ConversationLifecycleBindOrCreate)
 	if err != nil {
 		return app.MessageContext{}, "", false, err
 	}
 
-	b.conversationSessions[slot] = legacySessionID
-	if err := b.saveConversationSessionsLocked(); err != nil {
-		return app.MessageContext{}, "", false, err
+	if result.PersistBinding {
+		b.conversationSessions[slot] = result.BindingConversationID
+		if err := b.saveConversationSessionsLocked(); err != nil {
+			return app.MessageContext{}, "", false, err
+		}
+	}
+	if result.ClearInterfaceState {
+		if b.fileSearch != nil {
+			b.fileSearch.ClearPendingSelection(slot)
+		}
 	}
 
-	if ok {
-		return legacyContext, "", false, nil
+	mc := b.conversationContext(msg, result.ConversationID)
+	if result.EnsureConversation {
+		if err := b.ensureConversation(ctx, mc); err != nil {
+			return app.MessageContext{}, "", false, err
+		}
 	}
-
-	if err := b.ensureConversation(ctx, legacyContext); err != nil {
-		return app.MessageContext{}, "", false, err
-	}
-	return legacyContext, "当前对话已开始。", true, nil
+	return mc, result.Notice, result.ActivateConversation, nil
 }
 
 func (b *Bridge) startNewConversation(ctx context.Context, msg WeixinMessage) (app.MessageContext, error) {
 	b.sessionMu.Lock()
 	defer b.sessionMu.Unlock()
 
-	if err := b.ensureConversationSessionsLocked(); err != nil {
+	result, slot, err := b.resolveConversationLifecycleLocked(ctx, msg, app.ConversationLifecycleForceNew)
+	if err != nil {
 		return app.MessageContext{}, err
 	}
 
-	slot := b.conversationSlotKey(msg)
-	sessionID := newWeixinConversationSessionID(msg)
-	b.conversationSessions[slot] = sessionID
+	b.conversationSessions[slot] = result.BindingConversationID
 	if err := b.saveConversationSessionsLocked(); err != nil {
 		return app.MessageContext{}, err
 	}
-	b.clearPendingFileSelection(slot)
+	if result.ClearInterfaceState {
+		if b.fileSearch != nil {
+			b.fileSearch.ClearPendingSelection(slot)
+		}
+	}
 
-	mc := b.conversationContext(msg, sessionID)
-	if err := b.ensureConversation(ctx, mc); err != nil {
-		return app.MessageContext{}, err
+	mc := b.conversationContext(msg, result.ConversationID)
+	if result.EnsureConversation {
+		if err := b.ensureConversation(ctx, mc); err != nil {
+			return app.MessageContext{}, err
+		}
 	}
 	return mc, nil
 }

@@ -60,7 +60,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		switch {
 		case line == "/exit" || line == "/quit":
 			return nil
-		case line == "/new":
+		case app.IsNewConversationCommand(line):
 			r.session = fmt.Sprintf("terminal-repl:%d", time.Now().UnixNano())
 			fmt.Fprintln(r.output, "已开启新对话。")
 		case line == "/help":

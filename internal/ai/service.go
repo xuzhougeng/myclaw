@@ -18,6 +18,7 @@ import (
 	"myclaw/internal/filesearch"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/modelconfig"
+	"myclaw/internal/runtimepolicy"
 )
 
 type RouteDecision struct {
@@ -144,7 +145,7 @@ func (s *Service) RouteCommand(ctx context.Context, input string) (RouteDecision
 		"properties": map[string]any{
 			"command": map[string]any{
 				"type": "string",
-				"enum": []string{"remember", "append", "append_last", "forget", "notice_add", "notice_list", "notice_remove", "list", "stats", "help", "answer"},
+				"enum": runtimepolicy.RouteDecisionCommands(),
 			},
 			"memory_text": map[string]any{
 				"type": "string",

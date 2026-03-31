@@ -1097,7 +1097,7 @@ func (a *DesktopApp) sendMessage(ctx context.Context, input string, onDelta func
 	if err != nil {
 		return ChatResponse{}, err
 	}
-	if strings.EqualFold(strings.TrimSpace(input), "/new") {
+	if appsvc.IsNewConversationCommand(input) {
 		state, err := a.NewChatSession()
 		if err != nil {
 			return ChatResponse{}, err

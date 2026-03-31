@@ -1,6 +1,60 @@
 # myclaw
 
-`myclaw` 现在是一个最小化的 Go 桌面常驻工具，当前支持三类入口：本地终端 REPL、微信桥接，以及基于 Wails v2 的桌面前端。它可以把需要记住的内容存进本地知识库，并在配置模型后用 AI 做意图识别、整理记忆和基于知识库回答。
+`myclaw` 是一个跨终端、桌面和微信三种入口的个人智能助理。它的目标不是做三个彼此独立的小程序，而是做一个统一的对话内核，再通过不同接口把能力暴露给用户。
+
+当前仓库正在进行一次架构收口。下面的“设计原则”和 Mermaid 图描述的是本轮重构要遵守的目标架构，不代表所有历史实现都已经完全符合；后续代码修改应优先向这套模型靠拢，而不是继续在接口层堆分支。
+
+## 设计原则
+
+- 终端、桌面端、微信端都只是接口层。它们负责收发消息、展示结果、触发少量接口专属动作，不负责定义核心业务语义。
+- 核心流程是“先解析当前对话，再处理消息”。命令、普通提问、工具调用都应建立在统一的会话解析结果之上。
+- `/new` 的语义不是“执行一个特殊命令”，而是“把当前接口槽位重新绑定到一个新的对话”。
+- 微信端默认绑定一个已有对话；如果当前槽位没有已绑定对话，才建立一个新的默认对话。
+- 命令和工具默认运行在当前对话上下文中；是否写入历史、是否允许创建新对话、是否触发桌面 UI 激活，应该由统一策略决定，而不是由某个接口临时硬编码。
+- 微信端是更薄的远程控制接口，可以能力更少，但不能拥有与桌面端完全不同的核心对话规则。
+
+## 目标架构
+
+```mermaid
+flowchart TD
+    subgraph Interfaces["Interface Layer"]
+        terminal["Terminal REPL"]
+        desktop["Desktop UI / HTTP Dev"]
+        weixin["Weixin Bridge"]
+    end
+
+    envelope["Message Envelope\ninterface · user · slot · input"]
+    resolver["Conversation Resolver\nresolve current conversation\n/new => rebind slot"]
+    runtime["Conversation Runtime\ncommand routing · mode routing · intent recognition · tool dispatch"]
+    policy["Command / Tool Policy\nneed conversation?\npersist history?\ncan create conversation?\nactivate desktop UI?\nallowed interfaces?"]
+    session["Session Store"]
+    kb["Knowledge Store"]
+    reminders["Reminder Store"]
+    ai["AI Services\nrouting · extraction · answer"]
+    tools["Tool Units\nfilesearch · ingest · reminder · ..."]
+
+    terminal --> envelope
+    desktop --> envelope
+    weixin --> envelope
+
+    envelope --> resolver
+    resolver <--> session
+    resolver --> runtime
+    policy --> runtime
+    runtime --> session
+    runtime <--> kb
+    runtime <--> reminders
+    runtime <--> ai
+    runtime <--> tools
+```
+
+## 会话语义
+
+- 每个接口都先把输入封装成统一消息，再进入会话解析层。
+- 桌面端和终端通过显式会话选择或创建来确定当前会话。
+- 微信端通过“接口槽位”确定当前会话。默认复用已有绑定；只有输入 `/new` 或绑定丢失时，才切换到新对话。
+- “查看帮助”“查看知识库状态”“找文件”“发文件”等动作是否写入聊天历史，不由接口决定，而应由统一命令策略决定。
+- 同一个动作在不同接口上可以有不同的可用性和返回形式，但不应该拥有不同的会话生命周期定义。
 
 当前版本刻意保持简单：
 
@@ -16,15 +70,17 @@
 ## 目录
 
 ```text
-cmd/myclaw            程序入口
-internal/ai           OpenAI responses 调用
-internal/app          最小消息处理逻辑
+cmd/myclaw            CLI / terminal 入口
+cmd/myclaw-desktop    Wails 桌面端与 HTTP dev 入口
+internal/app          统一对话运行时、会话逻辑、命令分发
+internal/ai           AI 路由、提取、回答
+internal/filesearch   独立文件检索工具单元
 internal/knowledge    本地知识库存储
-internal/modelconfig  模型环境变量读取
+internal/modelconfig  模型配置读取与存储
 internal/reminder     提醒调度与持久化
-internal/terminal     终端 REPL
-internal/weixin       iLink 微信桥接最小实现
-cmd/myclaw-desktop    Wails 桌面前端入口
+internal/runtimepolicy 跨接口共享的命令/输入策略定义
+internal/terminal     终端接口适配
+internal/weixin       微信接口适配、消息桥接与文件发送能力
 ```
 
 ## 运行

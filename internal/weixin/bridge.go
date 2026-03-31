@@ -43,25 +43,18 @@ type Bridge struct {
 	sessionMu            sync.Mutex
 	conversationSessions map[string]string
 	conversationLoaded   bool
-	findMu               sync.Mutex
-	pendingFind          map[string]pendingFileSelection
-	everythingPath       string
-	searchFiles          func(context.Context, string, filesearch.ToolInput) (filesearch.ToolResult, error)
-	sendFile             func(context.Context, string, string, string) error
+	fileSearch           *filesearch.ShortcutHandler
+	fileSender           *FileSender
 }
 
 func NewBridge(client *Client, service *app.Service, reminders *reminder.Manager, config BridgeConfig) *Bridge {
 	bridge := &Bridge{
-		client:         client,
-		service:        service,
-		reminders:      reminders,
-		config:         config,
-		pendingFind:    make(map[string]pendingFileSelection),
-		everythingPath: strings.TrimSpace(config.EverythingPath),
-	}
-	bridge.searchFiles = filesearch.ExecuteWithEverything
-	bridge.sendFile = func(ctx context.Context, toUserID, contextToken, filePath string) error {
-		return bridge.client.SendFileMessage(ctx, toUserID, contextToken, filePath)
+		client:     client,
+		service:    service,
+		reminders:  reminders,
+		config:     config,
+		fileSearch: filesearch.NewShortcutHandler(strings.TrimSpace(config.EverythingPath), filesearch.ExecuteWithEverything),
+		fileSender: NewFileSender(client),
 	}
 	return bridge
 }
@@ -217,8 +210,8 @@ func (b *Bridge) Run(ctx context.Context) error {
 func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 	text := extractText(msg)
 	log.Printf("[weixin] inbound from=%s text=%s", msg.FromUserID, truncate(text, 80))
-	normalized := strings.ToLower(normalizeSlashCommand(text))
-	if normalized == "/new" {
+	inputPolicy := app.InspectInputPolicy(text)
+	if inputPolicy.IsConversationControl && inputPolicy.Command == "/new" {
 		messageContext, err := b.startNewConversation(ctx, msg)
 		if err != nil {
 			log.Printf("[weixin] start new conversation failed: %v", err)
@@ -238,6 +231,32 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 		return
 	}
 
+	if inputPolicy.IsKnownCommand && inputPolicy.Execution == app.CommandExecutionService && !inputPolicy.PersistHistory && !inputPolicy.ActivateConversation {
+		if err := b.handleStatelessCommand(ctx, msg, app.CanonicalizeCommandInput(text)); err != nil {
+			log.Printf("[weixin] handle stateless command failed: %v", err)
+		}
+		return
+	}
+
+	statelessMessageContext, err := b.currentConversationContext(ctx, msg)
+	if err != nil {
+		log.Printf("[weixin] resolve stateless message context failed: %v", err)
+		return
+	}
+	serviceCtx := app.WithConversationPersistenceDisabled(ctx)
+	if reply, handled, err := b.handleFileSearch(serviceCtx, msg, statelessMessageContext, text); handled {
+		if err != nil {
+			log.Printf("[weixin] handle /find failed: %v", err)
+			reply = "处理文件查找失败，请稍后重试。"
+		}
+		if strings.TrimSpace(reply) != "" {
+			if sendErr := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); sendErr != nil {
+				log.Printf("[weixin] send /find reply failed: %v", sendErr)
+			}
+		}
+		return
+	}
+
 	messageContext, conversationNotice, activateConversation, err := b.bindConversationSession(ctx, msg)
 	if err != nil {
 		log.Printf("[weixin] bind conversation session failed: %v", err)
@@ -251,25 +270,6 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 			text := fmt.Sprintf("提醒时间到了：%s", item.Message)
 			return b.sendChunkedReply(ctx, userID, contextToken, text)
 		}))
-	}
-
-	serviceCtx := app.WithConversationPersistenceDisabled(ctx)
-	if reply, handled, err := b.maybeHandleFileFind(serviceCtx, msg, messageContext, text); handled {
-		if err != nil {
-			log.Printf("[weixin] handle /find failed: %v", err)
-			reply = "处理文件查找失败，请稍后重试。"
-		}
-		reply = prefixConversationNotice(conversationNotice, reply)
-		if b.service != nil && strings.TrimSpace(text) != "" && strings.TrimSpace(reply) != "" {
-			b.service.RecordConversationTurn(ctx, messageContext, text, reply)
-		}
-		b.notifyConversationUpdated(ConversationUpdate{SessionID: messageContext.SessionID, Activate: activateConversation})
-		if strings.TrimSpace(reply) != "" {
-			if sendErr := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); sendErr != nil {
-				log.Printf("[weixin] send /find reply failed: %v", sendErr)
-			}
-		}
-		return
 	}
 
 	if b.service == nil {
@@ -331,6 +331,75 @@ func weixinSessionID(msg WeixinMessage) string {
 		return "weixin-user:" + strings.TrimSpace(msg.FromUserID)
 	}
 	return "weixin"
+}
+
+func (b *Bridge) handleStatelessCommand(ctx context.Context, msg WeixinMessage, command string) error {
+	reply := "处理失败，服务尚未初始化。"
+	if b.service != nil {
+		messageContext, err := b.currentConversationContext(ctx, msg)
+		if err != nil {
+			return err
+		}
+		serviceCtx := app.WithConversationPersistenceDisabled(ctx)
+
+		nextReply, err := b.service.HandleMessage(serviceCtx, messageContext, command)
+		if err != nil {
+			reply = "处理失败，请稍后重试。"
+		} else if strings.TrimSpace(nextReply) != "" {
+			reply = nextReply
+		}
+	}
+	return b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply)
+}
+
+func (b *Bridge) SetEverythingPath(path string) {
+	if b.fileSearch == nil {
+		return
+	}
+	b.fileSearch.SetEverythingPath(path)
+}
+
+func (b *Bridge) EverythingPath() string {
+	if b.fileSearch == nil {
+		return ""
+	}
+	return b.fileSearch.EverythingPath()
+}
+
+func (b *Bridge) handleFileSearch(ctx context.Context, msg WeixinMessage, messageContext app.MessageContext, text string) (string, bool, error) {
+	if b.fileSearch == nil {
+		return "", false, nil
+	}
+
+	response, err := b.fileSearch.Handle(ctx, filesearch.ShortcutRequest{
+		SlotKey: b.conversationSlotKey(msg),
+		Text:    text,
+		ResolveIntent: func(ctx context.Context, input string) (filesearch.ToolInput, bool, error) {
+			return b.resolveFileSearchToolInput(ctx, messageContext, input)
+		},
+		SendSelectedFile: func(ctx context.Context, path string) error {
+			if b.fileSender == nil {
+				return fmt.Errorf("weixin file sender is not initialized")
+			}
+			return b.fileSender.Send(ctx, msg.FromUserID, msg.ContextToken, path)
+		},
+	})
+	if strings.HasPrefix(response.Reply, "已发送文件 ") {
+		response.Reply = strings.Replace(response.Reply, "已发送文件", "已通过 ClawBot 发送文件", 1)
+	}
+	return response.Reply, response.Handled, err
+}
+
+func (b *Bridge) resolveFileSearchToolInput(ctx context.Context, messageContext app.MessageContext, input string) (filesearch.ToolInput, bool, error) {
+	if b.service == nil {
+		return filesearch.ToolInput{}, false, nil
+	}
+
+	intent, ok, err := b.service.BuildWeixinFileSearchIntent(ctx, messageContext, input)
+	if err != nil || !ok {
+		return filesearch.ToolInput{}, ok, err
+	}
+	return intent.ToolInput, true, nil
 }
 
 func (b *Bridge) finalizeLogin(status *QRCodeStatusResponse) (Account, error) {

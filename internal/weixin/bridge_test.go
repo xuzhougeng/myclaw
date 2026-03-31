@@ -114,200 +114,7 @@ func TestLoadAccountUsesSavedCredentials(t *testing.T) {
 	}
 }
 
-func TestMaybeHandleFileFindSearchAndSelection(t *testing.T) {
-	t.Parallel()
-
-	bridge := NewBridge(NewClient("https://unit.test", ""), nil, nil, BridgeConfig{
-		DataDir:        t.TempDir(),
-		EverythingPath: "es.exe",
-	})
-
-	paths := []string{
-		`E:\xwechat_files\a.pdf`,
-		`E:\xwechat_files\b.pdf`,
-	}
-	bridge.searchFiles = func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
-		if everythingPath != "es.exe" {
-			t.Fatalf("unexpected everything path: %q", everythingPath)
-		}
-		if input.Query != "单细胞" {
-			t.Fatalf("unexpected query: %q", input.Query)
-		}
-		if input.Limit != findResultLimit {
-			t.Fatalf("unexpected limit: %d", input.Limit)
-		}
-		return filesearch.ToolResult{
-			Tool:  filesearch.ToolName,
-			Query: input.Query,
-			Limit: input.Limit,
-			Count: len(paths),
-			Items: []filesearch.ResultItem{
-				{Index: 1, Name: "a.pdf", Path: paths[0]},
-				{Index: 2, Name: "b.pdf", Path: paths[1]},
-			},
-		}, nil
-	}
-
-	var sentTo, sentToken, sentPath string
-	bridge.sendFile = func(_ context.Context, toUserID, contextToken, filePath string) error {
-		sentTo = toUserID
-		sentToken = contextToken
-		sentPath = filePath
-		return nil
-	}
-
-	msg := WeixinMessage{FromUserID: "user-1", ContextToken: "ctx-1"}
-	mc := bridge.conversationContext(msg, weixinSessionID(msg))
-	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, mc, "/find 单细胞")
-	if err != nil {
-		t.Fatalf("search file: %v", err)
-	}
-	if !handled {
-		t.Fatal("expected /find to be handled")
-	}
-	if !strings.Contains(reply, "找到 2 个文件") || !strings.Contains(reply, `E:\xwechat_files\b.pdf`) {
-		t.Fatalf("unexpected search reply: %q", reply)
-	}
-
-	reply, handled, err = bridge.maybeHandleFileFind(context.Background(), msg, mc, "2")
-	if err != nil {
-		t.Fatalf("select file: %v", err)
-	}
-	if !handled {
-		t.Fatal("expected selection to be handled")
-	}
-	if sentTo != "user-1" || sentToken != "ctx-1" || sentPath != paths[1] {
-		t.Fatalf("unexpected send target: to=%q token=%q path=%q", sentTo, sentToken, sentPath)
-	}
-	if !strings.Contains(reply, "已通过 ClawBot 发送文件 2") {
-		t.Fatalf("unexpected selection reply: %q", reply)
-	}
-	if _, ok := bridge.pendingFileSelection(bridge.conversationSlotKey(msg)); ok {
-		t.Fatal("expected pending selection to be cleared")
-	}
-}
-
-func TestMaybeHandleNaturalFileFindUsesAIIntent(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	store := knowledge.NewStore(filepath.Join(root, "entries.json"))
-	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
-	service := appsvc.NewService(store, bridgeTestAI{
-		intent: aicore.FileSearchIntent{
-			Enabled: true,
-			Query:   "d: ext:pdf 单细胞",
-		},
-	}, reminders)
-
-	bridge := NewBridge(NewClient("https://unit.test", ""), service, reminders, BridgeConfig{
-		DataDir:        root,
-		EverythingPath: "es.exe",
-	})
-	bridge.searchFiles = func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
-		if everythingPath != "es.exe" {
-			t.Fatalf("unexpected everything path: %q", everythingPath)
-		}
-		if input.Query != "d: ext:pdf 单细胞" {
-			t.Fatalf("unexpected query: %q", input.Query)
-		}
-		if input.Limit != findResultLimit {
-			t.Fatalf("unexpected limit: %d", input.Limit)
-		}
-		return filesearch.ToolResult{
-			Tool:  filesearch.ToolName,
-			Query: input.Query,
-			Limit: input.Limit,
-			Count: 1,
-			Items: []filesearch.ResultItem{
-				{Index: 1, Name: "单细胞报告.pdf", Path: `D:\docs\单细胞报告.pdf`},
-			},
-		}, nil
-	}
-	msg := WeixinMessage{FromUserID: "user-1", ContextToken: "ctx-1"}
-	mc := bridge.conversationContext(msg, weixinSessionID(msg))
-
-	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, mc, "查找 D 盘单细胞相关的PDF文件")
-	if err != nil {
-		t.Fatalf("natural search: %v", err)
-	}
-	if !handled {
-		t.Fatal("expected natural language file find to be handled")
-	}
-	if !strings.Contains(reply, "检索式: d: ext:pdf 单细胞") {
-		t.Fatalf("unexpected reply: %q", reply)
-	}
-}
-
-func TestMaybeHandleFindHelpReturnsModuleHelp(t *testing.T) {
-	t.Parallel()
-
-	bridge := NewBridge(NewClient("https://unit.test", ""), nil, nil, BridgeConfig{
-		DataDir:        t.TempDir(),
-		EverythingPath: "es.exe",
-	})
-	msg := WeixinMessage{FromUserID: "user-1", ContextToken: "ctx-1"}
-	mc := bridge.conversationContext(msg, weixinSessionID(msg))
-
-	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, mc, "/find help")
-	if err != nil {
-		t.Fatalf("find help: %v", err)
-	}
-	if !handled {
-		t.Fatal("expected /find help to be handled")
-	}
-	if !strings.Contains(reply, filesearch.ToolName) || !strings.Contains(reply, "/find help") {
-		t.Fatalf("unexpected help reply: %q", reply)
-	}
-}
-
-func TestMaybeHandleSlashFindUsesAIIntentForNaturalLanguageQuery(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	store := knowledge.NewStore(filepath.Join(root, "entries.json"))
-	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
-	service := appsvc.NewService(store, bridgeTestAI{
-		intent: aicore.FileSearchIntent{
-			Enabled: true,
-			Query:   "file: shell:Downloads *.pdf",
-		},
-	}, reminders)
-
-	bridge := NewBridge(NewClient("https://unit.test", ""), service, reminders, BridgeConfig{
-		DataDir:        root,
-		EverythingPath: "es.exe",
-	})
-	bridge.searchFiles = func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
-		if input.Query != "file: shell:Downloads *.pdf" {
-			t.Fatalf("unexpected query: %q", input.Query)
-		}
-		return filesearch.ToolResult{
-			Tool:  filesearch.ToolName,
-			Query: input.Query,
-			Limit: input.Limit,
-			Count: 1,
-			Items: []filesearch.ResultItem{
-				{Index: 1, Name: "单细胞.pdf", Path: `C:\Users\demo\Downloads\单细胞.pdf`},
-			},
-		}, nil
-	}
-	msg := WeixinMessage{FromUserID: "user-1", ContextToken: "ctx-1"}
-	mc := bridge.conversationContext(msg, weixinSessionID(msg))
-
-	reply, handled, err := bridge.maybeHandleFileFind(context.Background(), msg, mc, "/find 查找下载目录下的pdf文件")
-	if err != nil {
-		t.Fatalf("slash natural search: %v", err)
-	}
-	if !handled {
-		t.Fatal("expected /find natural language file find to be handled")
-	}
-	if !strings.Contains(reply, "检索式: file: shell:Downloads *.pdf") {
-		t.Fatalf("unexpected reply: %q", reply)
-	}
-}
-
-func TestHandleMessageRecordsFileFindConversation(t *testing.T) {
+func TestHandleMessageFileFindDoesNotCreateConversation(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -326,7 +133,7 @@ func TestHandleMessageRecordsFileFindConversation(t *testing.T) {
 		DataDir:        root,
 		EverythingPath: "es.exe",
 	})
-	bridge.searchFiles = func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
+	bridge.fileSearch.SetSearchExecutor(func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
 		return filesearch.ToolResult{
 			Tool:  filesearch.ToolName,
 			Query: input.Query,
@@ -336,8 +143,16 @@ func TestHandleMessageRecordsFileFindConversation(t *testing.T) {
 				{Index: 1, Name: "单细胞报告.pdf", Path: `D:\docs\单细胞报告.pdf`},
 			},
 		}, nil
-	}
-	bridge.sendFile = func(context.Context, string, string, string) error { return nil }
+	})
+	var sentFiles []string
+	bridge.fileSender.SetSendFunc(func(_ context.Context, _ string, _ string, filePath string) error {
+		sentFiles = append(sentFiles, filePath)
+		return nil
+	})
+	var updates []ConversationUpdate
+	bridge.SetConversationUpdatedHook(func(update ConversationUpdate) {
+		updates = append(updates, update)
+	})
 
 	msg := WeixinMessage{
 		FromUserID:   "user-1",
@@ -350,41 +165,47 @@ func TestHandleMessageRecordsFileFindConversation(t *testing.T) {
 	}
 	bridge.handleMessage(context.Background(), msg)
 
-	snapshot, ok, err := sessionStore.Load(context.Background(), "source:weixin:user-1|session:weixin:ctx-1")
+	items, err := sessionStore.List(context.Background())
 	if err != nil {
-		t.Fatalf("load recorded snapshot: %v", err)
+		t.Fatalf("list recorded snapshots: %v", err)
 	}
-	if !ok {
-		t.Fatal("expected file find conversation to be recorded")
+	if len(items) != 0 {
+		t.Fatalf("expected file find search to avoid creating sessions, got %#v", items)
 	}
-	if len(snapshot.History) != 2 {
-		t.Fatalf("expected user+assistant history, got %#v", snapshot.History)
+	if len(bridge.conversationSessions) != 0 {
+		t.Fatalf("expected file find search to avoid binding sessions, got %#v", bridge.conversationSessions)
 	}
-	if snapshot.History[0].Content != "帮我找单细胞 pdf" {
-		t.Fatalf("unexpected recorded user message: %#v", snapshot.History[0])
-	}
-	if !strings.Contains(snapshot.History[1].Content, "找到 1 个文件") || !strings.Contains(snapshot.History[1].Content, "检索式: d: ext:pdf 单细胞") {
-		t.Fatalf("unexpected recorded assistant reply: %#v", snapshot.History[1])
+	if len(updates) != 0 {
+		t.Fatalf("expected file find search to avoid chat activation, got %#v", updates)
 	}
 	if sent.Msg.ToUserID != "user-1" || sent.Msg.ContextToken != "ctx-1" {
 		t.Fatalf("unexpected send target: %#v", sent.Msg)
+	}
+	if !strings.Contains(extractText(sent.Msg), "找到 1 个文件") || !strings.Contains(extractText(sent.Msg), "检索式: d: ext:pdf 单细胞") {
+		t.Fatalf("unexpected search reply: %#v", sent.Msg)
 	}
 
 	msg.ItemList = []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "1"}}}
 	bridge.handleMessage(context.Background(), msg)
 
-	snapshot, ok, err = sessionStore.Load(context.Background(), "source:weixin:user-1|session:weixin:ctx-1")
+	items, err = sessionStore.List(context.Background())
 	if err != nil {
-		t.Fatalf("reload recorded snapshot: %v", err)
+		t.Fatalf("list snapshots after selection: %v", err)
 	}
-	if !ok || len(snapshot.History) != 4 {
-		t.Fatalf("expected selection turn to be recorded, got %#v", snapshot.History)
+	if len(items) != 0 {
+		t.Fatalf("expected file selection to avoid creating sessions, got %#v", items)
 	}
-	if snapshot.History[2].Content != "1" {
-		t.Fatalf("unexpected recorded selection: %#v", snapshot.History[2])
+	if len(bridge.conversationSessions) != 0 {
+		t.Fatalf("expected file selection to avoid binding sessions, got %#v", bridge.conversationSessions)
 	}
-	if !strings.Contains(snapshot.History[3].Content, "已通过 ClawBot 发送文件 1") {
-		t.Fatalf("unexpected recorded selection reply: %#v", snapshot.History[3])
+	if len(updates) != 0 {
+		t.Fatalf("expected file selection to avoid chat activation, got %#v", updates)
+	}
+	if len(sentFiles) != 1 || sentFiles[0] != `D:\docs\单细胞报告.pdf` {
+		t.Fatalf("unexpected sent files: %#v", sentFiles)
+	}
+	if !strings.Contains(extractText(sent.Msg), "已通过 ClawBot 发送文件 1") {
+		t.Fatalf("unexpected selection reply: %#v", sent.Msg)
 	}
 }
 
@@ -433,6 +254,81 @@ func TestHandleMessageRecordsSlashCommandConversation(t *testing.T) {
 	}
 	if !strings.Contains(extractText(sent.Msg), "当前对话已开始。") {
 		t.Fatalf("expected outbound notice, got %#v", sent.Msg)
+	}
+}
+
+func TestHandleMessageStatelessCommandsDoNotCreateConversation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		command         string
+		seedKnowledge   bool
+		wantReplySubstr string
+	}{
+		{
+			name:            "help",
+			command:         "/help",
+			wantReplySubstr: "可用命令:",
+		},
+		{
+			name:            "stats",
+			command:         "/stats",
+			seedKnowledge:   true,
+			wantReplySubstr: "知识条数: 1",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			store := knowledge.NewStore(filepath.Join(root, "entries.json"))
+			reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+			sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+			service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, nil)
+			if tc.seedKnowledge {
+				if _, err := store.Add(context.Background(), knowledge.Entry{Text: "第一条知识"}); err != nil {
+					t.Fatalf("add knowledge: %v", err)
+				}
+			}
+
+			var sent SendMessageRequest
+			bridge := NewBridge(newTestClient(t, &sent), service, reminders, BridgeConfig{DataDir: root})
+			var updates []ConversationUpdate
+			bridge.SetConversationUpdatedHook(func(update ConversationUpdate) {
+				updates = append(updates, update)
+			})
+
+			msg := WeixinMessage{
+				FromUserID:   "user-1",
+				ContextToken: "ctx-1",
+				MessageType:  MessageTypeUser,
+				MessageState: MessageStateFinish,
+				ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: tc.command}}},
+			}
+
+			bridge.handleMessage(context.Background(), msg)
+
+			items, err := sessionStore.List(context.Background())
+			if err != nil {
+				t.Fatalf("list sessions: %v", err)
+			}
+			if len(items) != 0 {
+				t.Fatalf("expected stateless command to avoid creating sessions, got %#v", items)
+			}
+			if len(bridge.conversationSessions) != 0 {
+				t.Fatalf("expected stateless command to avoid binding weixin sessions, got %#v", bridge.conversationSessions)
+			}
+			if len(updates) != 0 {
+				t.Fatalf("expected stateless command to avoid chat activation, got %#v", updates)
+			}
+			if !strings.Contains(extractText(sent.Msg), tc.wantReplySubstr) {
+				t.Fatalf("unexpected outbound reply: %#v", sent.Msg)
+			}
+		})
 	}
 }
 
