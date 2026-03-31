@@ -80,6 +80,19 @@ func (s *Service) conversationHistory(ctx context.Context, mc MessageContext) []
 }
 
 func (s *Service) appendConversationHistory(ctx context.Context, mc MessageContext, userInput, assistantReply string) {
+	s.appendConversationHistoryWithSummary(ctx, mc, userInput, assistantReply, turnSummaryFromContext(ctx))
+}
+
+func (s *Service) maybeAppendConversationHistory(ctx context.Context, mc MessageContext, userInput, assistantReply string) {
+	if !conversationPersistenceEnabled(ctx) {
+		return
+	}
+	s.appendConversationHistory(ctx, mc, userInput, assistantReply)
+}
+
+// appendConversationHistoryWithSummary persists a turn with an explicit final summary.
+// If finalSummary is empty, falls back to assistantReply for ContextSummary.
+func (s *Service) appendConversationHistoryWithSummary(ctx context.Context, mc MessageContext, userInput, assistantReply, finalSummary string) {
 	snapshot, err := s.sessionSnapshot(ctx, mc)
 	if err != nil {
 		return
@@ -98,7 +111,7 @@ func (s *Service) appendConversationHistory(ctx context.Context, mc MessageConte
 	if len(process) > 0 {
 		assistantProcess = append([]ai.CallTraceStep(nil), process...)
 	}
-	assistantContextSummary := turnSummaryFromContext(ctx)
+	assistantContextSummary := strings.TrimSpace(finalSummary)
 	if assistantContextSummary == "" {
 		assistantContextSummary = assistantReply
 	}
@@ -117,13 +130,6 @@ func (s *Service) appendConversationHistory(ctx context.Context, mc MessageConte
 	)
 	snapshot.History = trimSessionHistory(history, limits)
 	_ = s.saveSessionSnapshot(ctx, snapshot)
-}
-
-func (s *Service) maybeAppendConversationHistory(ctx context.Context, mc MessageContext, userInput, assistantReply string) {
-	if !conversationPersistenceEnabled(ctx) {
-		return
-	}
-	s.appendConversationHistory(ctx, mc, userInput, assistantReply)
 }
 
 func (s *Service) RecordConversationTurn(ctx context.Context, mc MessageContext, userInput, assistantReply string) {

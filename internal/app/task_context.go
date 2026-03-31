@@ -33,6 +33,18 @@ func recordToolArtifact(ctx context.Context, toolName, toolInput, rawOutput, sum
 	})
 }
 
+func setWorkingSummary(ctx context.Context, summary string) {
+	taskcontext.SetWorkingSummary(ctx, strings.TrimSpace(summary))
+}
+
+func workingSummaryFromContext(ctx context.Context) string {
+	return strings.TrimSpace(taskcontext.WorkingSummary(ctx))
+}
+
+func artifactsSummaryFromContext(ctx context.Context) string {
+	return taskcontext.ArtifactsSummary(ctx)
+}
+
 func summarizeToolOutputForModel(output string) string {
 	output = strings.TrimSpace(strings.ReplaceAll(output, "\r\n", "\n"))
 	if output == "" {
