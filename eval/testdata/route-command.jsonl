@@ -1,0 +1,10 @@
+{"id":"route-001","stage":"route_command","input":"提醒我明天 09:00 开周会","expect":{"command":"notice_add","reminder_spec":"明天 09:00 开周会"},"judge":{"command":"exact","reminder_spec":"contains"}}
+{"id":"route-002","stage":"route_command","input":"把 #abcd 这条再补充：需要带截图","expect":{"command":"append","knowledge_id":"abcd","append_text":"需要带截图"},"judge":{"command":"exact","knowledge_id":"exact","append_text":"contains"}}
+{"id":"route-003","stage":"route_command","input":"帮我看看 MCP 文档怎么定义 tool calls","expect":{"command":"answer","question":"MCP 文档怎么定义 tool calls"},"judge":{"command":"exact","question":"contains"}}
+{"id":"route-004","stage":"route_command","input":"记一下：OpenAI responses API 已经替代旧接口","expect":{"command":"memory_add","memory_text":"OpenAI responses API 已经替代旧接口"},"judge":{"command":"exact","memory_text":"contains"}}
+{"id":"route-005","stage":"route_command","input":"删除提醒 #remind123","expect":{"command":"notice_remove","reminder_id":"remind123"},"judge":{"command":"exact","reminder_id":"exact"}}
+{"id":"route-006","stage":"route_command","input":"搜索我之前记过的 fitz 相关笔记","expect":{"command":"search","question":"fitz"},"judge":{"command":"exact","question":"contains"}}
+{"id":"route-007","stage":"route_command","input":"今天天气真好","expect":{"command":"answer","question":"今天天气真好"},"judge":{"command":"exact"}}
+{"id":"route-008","stage":"route_command","input":"提醒我下周一交报告","expect":{"command":"notice_add","reminder_spec":"下周一交报告"},"judge":{"command":"exact","reminder_spec":"contains"}}
+{"id":"route-009","stage":"route_command","input":"把 #xyz 这条删掉","expect":{"command":"knowledge_remove","knowledge_id":"xyz"},"judge":{"command":"exact","knowledge_id":"exact"}}
+{"id":"route-010","stage":"route_command","input":"解释一下什么是 agent","expect":{"command":"answer","question":"什么是 agent"},"judge":{"command":"exact","question":"contains"}}

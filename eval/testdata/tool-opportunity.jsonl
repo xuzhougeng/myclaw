@@ -1,0 +1,5 @@
+{"id":"tool-opp-001","stage":"tool_opportunity","task":"帮我找下载目录最近两天的 pdf","tools":["everything_file_search"],"expect":{"tool_names":["everything_file_search"]},"judge":{"tool_names":"exact"}}
+{"id":"tool-opp-002","stage":"tool_opportunity","task":"解释一下 MCP 的 tool calls 是什么","tools":["everything_file_search"],"expect":{"tool_names":[]},"judge":{"tool_names":"exact"}}
+{"id":"tool-opp-003","stage":"tool_opportunity","task":"搜索我的文档里有没有关于 API 的说明","tools":["everything_file_search","knowledge_search"],"expect":{"tool_names":["knowledge_search"]},"judge":{"tool_names":"exact"}}
+{"id":"tool-opp-004","stage":"tool_opportunity","task":"今天天气怎么样","tools":["everything_file_search","web_search"],"expect":{"tool_names":[]},"judge":{"tool_names":"exact"}}
+{"id":"tool-opp-005","stage":"tool_opportunity","task":"查找项目根目录下的所有 go 文件","tools":["everything_file_search"],"expect":{"tool_names":["everything_file_search"]},"judge":{"tool_names":"exact"}}

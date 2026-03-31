@@ -1,0 +1,5 @@
+{"id":"search-001","stage":"search_plan","input":"去年我记过 OpenAI responses API 的切换说明吗","expect":{"queries":["OpenAI responses API","切换说明"],"keywords":["OpenAI","responses API"]},"judge":{"queries":"contains_all","keywords":"contains_all"}}
+{"id":"search-002","stage":"search_plan","input":"我之前记过 fitz 处理 PDF 的坑吗","expect":{"queries":["fitz PDF","处理 PDF 的坑"],"keywords":["fitz","PDF"]},"judge":{"queries":"contains_all","keywords":"contains_all"}}
+{"id":"search-003","stage":"search_plan","input":"找一下关于 MCP tool calls 的笔记","expect":{"queries":["MCP tool calls"],"keywords":["MCP","tool calls"]},"judge":{"queries":"contains_all","keywords":"contains_all"}}
+{"id":"search-004","stage":"search_plan","input":"搜索 Go 并发相关的内容","expect":{"queries":["Go 并发"],"keywords":["Go","并发"]},"judge":{"queries":"contains_all","keywords":"contains_all"}}
+{"id":"search-005","stage":"search_plan","input":"查找 Docker 部署的注意事项","expect":{"queries":["Docker 部署","注意事项"],"keywords":["Docker","部署"]},"judge":{"queries":"contains_all","keywords":"contains_all"}}
