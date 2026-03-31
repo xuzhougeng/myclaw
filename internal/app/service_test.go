@@ -1551,71 +1551,134 @@ func TestHandleMessageStreamUsesStreamingChat(t *testing.T) {
 	}
 }
 
-func TestBuildWeixinFileSearchQueryUsesAIIntent(t *testing.T) {
+func TestResolveFileSearchUsesToolPlanner(t *testing.T) {
 	t.Parallel()
 
 	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
 	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
 	service := NewService(store, fakeAI{
-		configured: true,
-		fileSearchIntent: ai.FileSearchIntent{
-			Enabled: true,
-			Query:   "d: ext:pdf 单细胞",
+		configured:        true,
+		toolOpportunities: []ai.ToolOpportunity{{ToolName: filesearch.ToolName, Goal: "查找下载目录下的 pdf 文件"}},
+		toolPlanDecision: ai.ToolPlanDecision{
+			Action:    "tool",
+			ToolName:  filesearch.ToolName,
+			ToolInput: `{"known_folders":["downloads"],"extensions":["pdf"]}`,
 		},
 	}, reminders)
+	service.SetFileSearchEverythingPath("es.exe")
+	service.SetFileSearchExecutor(func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
+		if everythingPath != "es.exe" {
+			t.Fatalf("unexpected everything path: %q", everythingPath)
+		}
+		query := filesearch.CompileQuery(input)
+		if query != "file: shell:Downloads *.pdf" {
+			t.Fatalf("unexpected query: %#v", input)
+		}
+		return filesearch.ToolResult{
+			Tool:  filesearch.ToolName,
+			Query: query,
+			Items: []filesearch.ResultItem{
+				{Index: 1, Name: "doc.pdf", Path: `D:\downloads\doc.pdf`},
+			},
+		}, nil
+	})
 
-	query, ok, err := service.BuildWeixinFileSearchQuery(context.Background(), MessageContext{
+	result, reply, handled, err := service.ResolveFileSearch(context.Background(), MessageContext{
 		UserID:    "u1",
 		Interface: "weixin",
 		SessionID: "s1",
 	}, "查找 D 盘单细胞相关的PDF文件")
 	if err != nil {
-		t.Fatalf("build file search query: %v", err)
+		t.Fatalf("resolve file search: %v", err)
 	}
-	if !ok {
-		t.Fatal("expected file search intent to be recognized")
+	if !handled {
+		t.Fatal("expected file search to be recognized")
 	}
-	if query != "d: ext:pdf 单细胞" {
-		t.Fatalf("unexpected query: %q", query)
+	if reply != "" {
+		t.Fatalf("expected result, got reply %q", reply)
+	}
+	if result.Query != "file: shell:Downloads *.pdf" {
+		t.Fatalf("unexpected result: %#v", result)
 	}
 }
 
-func TestBuildWeixinFileSearchIntentBuildsToolCall(t *testing.T) {
+func TestHandleMessageNaturalFileSearchRefinesAcrossRounds(t *testing.T) {
 	t.Parallel()
 
 	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
 	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
+	planCalls := 0
 	service := NewService(store, fakeAI{
-		configured: true,
-		fileSearchIntent: ai.FileSearchIntent{
-			Enabled:  true,
-			ToolName: filesearch.ToolName,
-			ToolInput: filesearch.ToolInput{
-				KnownFolders: []string{"downloads"},
-				Extensions:   []string{"pdf"},
-			},
+		configured:        true,
+		toolOpportunities: []ai.ToolOpportunity{{ToolName: filesearch.ToolName, Goal: "查找 D 盘 csv 文件"}},
+		toolPlanFunc: func(_ context.Context, task string, tool ai.ToolCapability, prior []ai.ToolExecution) ai.ToolPlanDecision {
+			planCalls++
+			if tool.Name != filesearch.ToolName {
+				t.Fatalf("unexpected tool: %#v", tool)
+			}
+			if planCalls == 1 {
+				if len(prior) != 0 {
+					t.Fatalf("expected empty prior executions, got %#v", prior)
+				}
+				return ai.ToolPlanDecision{
+					Action:    "tool",
+					ToolName:  filesearch.ToolName,
+					ToolInput: `{"drives":["d"],"extensions":["csv"],"keywords":["report"]}`,
+				}
+			}
+			if len(prior) != 1 || !strings.Contains(prior[0].ToolOutput, `"count":0`) {
+				t.Fatalf("expected first empty result in prior executions, got %#v", prior)
+			}
+			return ai.ToolPlanDecision{
+				Action:    "tool",
+				ToolName:  filesearch.ToolName,
+				ToolInput: `{"drives":["d"],"extensions":["csv"]}`,
+			}
 		},
 	}, reminders)
+	service.SetFileSearchEverythingPath("es.exe")
+	searchCalls := 0
+	service.SetFileSearchExecutor(func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
+		searchCalls++
+		if everythingPath != "es.exe" {
+			t.Fatalf("unexpected everything path: %q", everythingPath)
+		}
+		query := filesearch.CompileQuery(input)
+		switch searchCalls {
+		case 1:
+			if query != "file: d: *.csv report" {
+				t.Fatalf("unexpected first query: %#v", input)
+			}
+			return filesearch.ToolResult{
+				Tool:  filesearch.ToolName,
+				Query: query,
+			}, nil
+		case 2:
+			if query != "file: d: *.csv" {
+				t.Fatalf("unexpected second query: %#v", input)
+			}
+			return filesearch.ToolResult{
+				Tool:  filesearch.ToolName,
+				Query: query,
+				Items: []filesearch.ResultItem{
+					{Index: 1, Name: "report.csv", Path: `D:\data\report.csv`},
+				},
+			}, nil
+		default:
+			t.Fatalf("unexpected search call count: %d", searchCalls)
+			return filesearch.ToolResult{}, nil
+		}
+	})
 
-	intent, ok, err := service.BuildWeixinFileSearchIntent(context.Background(), MessageContext{
-		UserID:    "u1",
-		Interface: "weixin",
-		SessionID: "s1",
-	}, "查找下载目录下的pdf文件")
+	reply, err := service.HandleMessage(context.Background(), MessageContext{Interface: "desktop", SessionID: "desktop-1"}, "查找D盘的csv文件")
 	if err != nil {
-		t.Fatalf("build file search intent: %v", err)
+		t.Fatalf("handle natural file search with refinement: %v", err)
 	}
-	if !ok {
-		t.Fatal("expected file search intent to be recognized")
+	if planCalls != 2 || searchCalls != 2 {
+		t.Fatalf("expected two planning rounds and two search rounds, got plan=%d search=%d", planCalls, searchCalls)
 	}
-	if intent.ToolName != filesearch.ToolName {
-		t.Fatalf("unexpected tool name: %#v", intent)
-	}
-	if intent.Query != "file: shell:Downloads *.pdf" {
-		t.Fatalf("unexpected query: %#v", intent)
-	}
-	if intent.ToolInput.Limit != filesearch.DefaultLimit {
-		t.Fatalf("expected default limit, got %#v", intent.ToolInput)
+	if !strings.Contains(reply, "找到 1 个文件") || !strings.Contains(reply, `D:\data\report.csv`) {
+		t.Fatalf("unexpected reply: %q", reply)
 	}
 }
 
@@ -1625,10 +1688,12 @@ func TestHandleMessageNaturalFileSearchExecutesTool(t *testing.T) {
 	store := knowledge.NewStore(filepath.Join(t.TempDir(), "entries.json"))
 	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(t.TempDir(), "reminders.json")))
 	service := NewService(store, fakeAI{
-		configured: true,
-		fileSearchIntent: ai.FileSearchIntent{
-			Enabled: true,
-			Query:   "d: *.csv",
+		configured:        true,
+		toolOpportunities: []ai.ToolOpportunity{{ToolName: filesearch.ToolName, Goal: "查找 D 盘 csv 文件"}},
+		toolPlanDecision: ai.ToolPlanDecision{
+			Action:    "tool",
+			ToolName:  filesearch.ToolName,
+			ToolInput: `{"query":"d: *.csv"}`,
 		},
 		route: ai.RouteDecision{Command: "answer"},
 	}, reminders)
@@ -1637,12 +1702,13 @@ func TestHandleMessageNaturalFileSearchExecutesTool(t *testing.T) {
 		if everythingPath != "es.exe" {
 			t.Fatalf("unexpected everything path: %q", everythingPath)
 		}
-		if input.Query != "d: *.csv" {
+		query := filesearch.CompileQuery(input)
+		if query != "d: *.csv" {
 			t.Fatalf("unexpected query: %#v", input)
 		}
 		return filesearch.ToolResult{
 			Tool:  filesearch.ToolName,
-			Query: input.Query,
+			Query: query,
 			Items: []filesearch.ResultItem{
 				{Index: 1, Name: "report.csv", Path: `D:\data\report.csv`},
 			},
@@ -1691,21 +1757,24 @@ func TestHandleMessageSlashFindExecutesToolOutsideWeixin(t *testing.T) {
 }
 
 type fakeAI struct {
-	configured       bool
-	route            ai.RouteDecision
-	searchPlan       ai.SearchPlan
-	fileSearchIntent ai.FileSearchIntent
-	reviewIDs        []string
-	answer           string
-	answerFunc       func(string, []knowledge.Entry) string
-	chat             string
-	chatFunc         func(context.Context, string, []ai.ConversationMessage) string
-	agentStep        ai.AgentStepDecision
-	agentStepFunc    func(context.Context, string, []ai.ConversationMessage, []ai.AgentToolDefinition, []ai.AgentToolResult) ai.AgentStepDecision
-	translation      string
-	translationFunc  func(context.Context, string) string
-	pdfSummary       string
-	imageSummary     string
+	configured          bool
+	route               ai.RouteDecision
+	searchPlan          ai.SearchPlan
+	toolOpportunities   []ai.ToolOpportunity
+	toolOpportunityFunc func(context.Context, string, []ai.ToolCapability) []ai.ToolOpportunity
+	toolPlanDecision    ai.ToolPlanDecision
+	toolPlanFunc        func(context.Context, string, ai.ToolCapability, []ai.ToolExecution) ai.ToolPlanDecision
+	reviewIDs           []string
+	answer              string
+	answerFunc          func(string, []knowledge.Entry) string
+	chat                string
+	chatFunc            func(context.Context, string, []ai.ConversationMessage) string
+	agentStep           ai.AgentStepDecision
+	agentStepFunc       func(context.Context, string, []ai.ConversationMessage, []ai.AgentToolDefinition, []ai.AgentToolResult) ai.AgentStepDecision
+	translation         string
+	translationFunc     func(context.Context, string) string
+	pdfSummary          string
+	imageSummary        string
 }
 
 func (f fakeAI) IsConfigured(context.Context) (bool, error) {
@@ -1720,8 +1789,18 @@ func (f fakeAI) BuildSearchPlan(context.Context, string) (ai.SearchPlan, error) 
 	return f.searchPlan, nil
 }
 
-func (f fakeAI) BuildFileSearchIntent(context.Context, string) (ai.FileSearchIntent, error) {
-	return f.fileSearchIntent, nil
+func (f fakeAI) DetectToolOpportunities(ctx context.Context, task string, tools []ai.ToolCapability) ([]ai.ToolOpportunity, error) {
+	if f.toolOpportunityFunc != nil {
+		return f.toolOpportunityFunc(ctx, task, tools), nil
+	}
+	return f.toolOpportunities, nil
+}
+
+func (f fakeAI) PlanToolUse(ctx context.Context, task string, tool ai.ToolCapability, prior []ai.ToolExecution) (ai.ToolPlanDecision, error) {
+	if f.toolPlanFunc != nil {
+		return f.toolPlanFunc(ctx, task, tool, prior), nil
+	}
+	return f.toolPlanDecision, nil
 }
 
 func (f fakeAI) ReviewAnswerCandidates(context.Context, string, []knowledge.Entry) ([]string, error) {

@@ -165,10 +165,12 @@ func TestDesktopSendMessageUsesFileSearchTool(t *testing.T) {
 	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
 	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
 	service := appsvc.NewServiceWithRuntime(store, desktopTestAI{
-		route: ai.RouteDecision{Command: "answer"},
-		fileSearchIntent: ai.FileSearchIntent{
-			Enabled: true,
-			Query:   "d: *.csv",
+		route:             ai.RouteDecision{Command: "answer"},
+		toolOpportunities: []ai.ToolOpportunity{{ToolName: filesearch.ToolName, Goal: "查找 D 盘 csv 文件"}},
+		toolPlanDecision: ai.ToolPlanDecision{
+			Action:    "tool",
+			ToolName:  filesearch.ToolName,
+			ToolInput: `{"query":"d: *.csv"}`,
 		},
 	}, reminders, nil, sessionStore, promptStore)
 	service.SetFileSearchEverythingPath("es.exe")
@@ -833,10 +835,11 @@ func TestBuildCurrentChatMarkdownExportRejectsEmptyConversation(t *testing.T) {
 }
 
 type desktopTestAI struct {
-	route            ai.RouteDecision
-	fileSearchIntent ai.FileSearchIntent
-	chatFunc         func(context.Context, string, []ai.ConversationMessage) string
-	chatResultFunc   func(context.Context, string, []ai.ConversationMessage) (string, error)
+	route             ai.RouteDecision
+	toolOpportunities []ai.ToolOpportunity
+	toolPlanDecision  ai.ToolPlanDecision
+	chatFunc          func(context.Context, string, []ai.ConversationMessage) string
+	chatResultFunc    func(context.Context, string, []ai.ConversationMessage) (string, error)
 }
 
 func (f desktopTestAI) IsConfigured(context.Context) (bool, error) {
@@ -851,8 +854,12 @@ func (f desktopTestAI) BuildSearchPlan(context.Context, string) (ai.SearchPlan, 
 	return ai.SearchPlan{}, nil
 }
 
-func (f desktopTestAI) BuildFileSearchIntent(context.Context, string) (ai.FileSearchIntent, error) {
-	return f.fileSearchIntent, nil
+func (f desktopTestAI) DetectToolOpportunities(context.Context, string, []ai.ToolCapability) ([]ai.ToolOpportunity, error) {
+	return f.toolOpportunities, nil
+}
+
+func (f desktopTestAI) PlanToolUse(context.Context, string, ai.ToolCapability, []ai.ToolExecution) (ai.ToolPlanDecision, error) {
+	return f.toolPlanDecision, nil
 }
 
 func (f desktopTestAI) ReviewAnswerCandidates(context.Context, string, []knowledge.Entry) ([]string, error) {

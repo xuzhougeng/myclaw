@@ -10,6 +10,7 @@ This repository is being refactored toward a conversation-first, interface-thin 
 - Keep conversation lifecycle decisions centralized. Reusing the current conversation, creating a new one, rebinding on `/new`, and recovering from missing bindings should be driven by shared runtime logic, not transport-specific branching.
 - Model `/new` as a conversation binding operation for the current interface slot, not as a generic business command with ad hoc side effects.
 - Commands and tool-like actions should have explicit policy metadata in the core runtime: whether they require conversation context, whether they persist history, whether they may create a conversation, whether they may activate desktop UI, and which interfaces can invoke them.
+- Prefer generic AI decision stages over tool-specific intent extractors. The default pattern is: identify need, match candidate tools, read tool contract, plan tool input, execute, and optionally iterate on prior results.
 - A thinner interface may expose fewer capabilities, but it must not redefine the fundamental conversation semantics.
 - When fixing bugs, prefer removing transport-specific special cases and moving logic into `internal/app` or a dedicated `internal/<domain>` package instead of adding more branchy behavior to `internal/weixin`, `internal/terminal`, or desktop UI glue.
 - If a change alters architecture assumptions, update `README.md` and this file in the same change.
@@ -26,7 +27,7 @@ Reusable tool-style modules must be designed as self-descriptive units, so they 
 When adding a new tool unit:
 - Put the executable logic in its own `internal/<tool>` package instead of burying it inside a transport layer such as WeChat, terminal, or desktop UI.
 - Expose a stable tool name, a short purpose statement, a machine-oriented input contract, a machine-oriented output contract, and a human-readable help/usage text.
-- Keep the phases separated: intent recognition decides whether the tool should run and prepares tool input; the tool package normalizes input and executes; the transport layer only renders results or delivers side effects.
+- Keep the phases separated: the generic AI decider identifies the need, chooses a tool, and prepares tool input; the tool package normalizes input and executes; the transport layer only renders results or delivers side effects.
 - Tool units should not decide conversation lifecycle. If a tool depends on special persistence or activation behavior, express that through shared runtime policy instead of transport-local logic.
 - If the tool also has a shortcut command such as `/find`, treat that command as a thin registration layer over the tool unit. Register the shortcut in the runtime that actually owns it, not globally by default, and route `help` back to the tool's own usage text from that runtime.
 - Update the registry below whenever a reusable tool is added, renamed, or removed.
@@ -38,7 +39,7 @@ When adding a new tool unit:
   Input contract: `query`, `keywords`, `drives`, `known_folders`, `paths`, `extensions`, `date_field`, `date_value`, `limit`.
   Output contract: executed query, effective limit, result count, ordered file items with `index`, `name`, and `path`.
   Shortcut registration: `/find` and `/find help`, handled by the shared app runtime; WeChat additionally supports `/send <序号>` through its interface adapter.
-  Current pipeline split: intent recognition in `internal/ai` and `internal/app`; search execution and selection state in `internal/filesearch`; WeChat file delivery in `internal/weixin/filesender.go`.
+  Current pipeline split: generic tool opportunity detection and tool planning in `internal/ai`; runtime orchestration in `internal/app`; search execution and selection state in `internal/filesearch`; WeChat file delivery in `internal/weixin/filesender.go`.
 
 ## Testing Guidelines
 Place tests beside the code they cover as `*_test.go`; this repo already follows that pattern in `internal/*` and `cmd/myclaw-desktop`. Prefer table-driven tests for routing, storage, and parser behavior. There is no stated coverage gate, but new logic should include focused tests and `make test` should pass before a PR is opened.

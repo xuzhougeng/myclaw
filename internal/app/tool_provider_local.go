@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"myclaw/internal/filesearch"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/reminder"
 )
@@ -28,6 +29,7 @@ func (p *localAgentToolProvider) ProviderKey() string {
 }
 
 func (p *localAgentToolProvider) ListAgentTools(context.Context, MessageContext) ([]AgentToolSpec, error) {
+	fileSearchSpec := filesearch.Definition()
 	return []AgentToolSpec{
 		{
 			Name:             "knowledge_search",
@@ -48,6 +50,11 @@ func (p *localAgentToolProvider) ListAgentTools(context.Context, MessageContext)
 			Name:             "forget_knowledge",
 			Description:      "Delete a knowledge entry by ID or prefix.",
 			InputJSONExample: `{"id":"6d2d7724"}`,
+		},
+		{
+			Name:             fileSearchSpec.Name,
+			Description:      fileSearchSpec.Description,
+			InputJSONExample: fileSearchSpec.InputJSONExample,
 		},
 		{
 			Name:             "reminder_list",
@@ -135,6 +142,19 @@ func (p *localAgentToolProvider) ExecuteAgentTool(ctx context.Context, mc Messag
 			return "", err
 		}
 		return p.service.forgetKnowledge(ctx, args.ID)
+	case filesearch.ToolName:
+		var args filesearch.ToolInput
+		if err := decodeAgentToolInput(rawInput, &args); err != nil {
+			return "", err
+		}
+		result, reply, err := p.service.performFileSearch(ctx, args)
+		if err != nil {
+			return "", err
+		}
+		if reply != "" {
+			return reply, nil
+		}
+		return filesearch.FormatSearchResult(result), nil
 	case "reminder_list":
 		var args map[string]any
 		if err := decodeAgentToolInput(rawInput, &args); err != nil {

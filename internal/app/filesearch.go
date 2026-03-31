@@ -2,12 +2,16 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"myclaw/internal/ai"
 	"myclaw/internal/filesearch"
 )
+
+const maxFileSearchPlanningRounds = 3
 
 func (s *Service) SetFileSearchEverythingPath(path string) {
 	s.settingsMu.Lock()
@@ -42,70 +46,192 @@ func (s *Service) fileSearchRuntime() (string, filesearch.SearchExecutor) {
 }
 
 func (s *Service) tryHandleFileSearch(ctx context.Context, mc MessageContext, input string) (string, bool, error) {
-	toolInput, immediateReply, handled, err := s.resolveFileSearchInput(ctx, mc, input)
+	result, immediateReply, handled, err := s.ResolveFileSearch(ctx, mc, input)
 	if err != nil || !handled {
 		return "", handled, err
 	}
 	if immediateReply != "" {
 		return immediateReply, true, nil
 	}
-	reply, err := s.executeFileSearch(ctx, toolInput)
-	return reply, true, err
+	return filesearch.FormatSearchResult(result), true, nil
 }
 
-func (s *Service) resolveFileSearchInput(ctx context.Context, mc MessageContext, input string) (filesearch.ToolInput, string, bool, error) {
+func (s *Service) ResolveFileSearch(ctx context.Context, mc MessageContext, input string) (filesearch.ToolResult, string, bool, error) {
 	text := strings.TrimSpace(input)
 	command := normalizeSlash(text)
 	if strings.HasPrefix(strings.ToLower(command), filesearch.ShortcutName) {
 		rawQuery := strings.TrimSpace(strings.TrimPrefix(command, filesearch.ShortcutName))
 		switch {
 		case rawQuery == "":
-			return filesearch.ToolInput{}, filesearch.ShortcutUsageText(), true, nil
+			return filesearch.ToolResult{}, filesearch.ShortcutUsageText(), true, nil
 		case strings.EqualFold(rawQuery, "help") || rawQuery == "帮助":
-			return filesearch.ToolInput{}, filesearch.CommandHelpText(), true, nil
+			return filesearch.ToolResult{}, filesearch.CommandHelpText(), true, nil
 		case !filesearch.LooksLikeExplicitQuery(rawQuery):
-			intent, ok, err := s.BuildFileSearchIntent(ctx, mc, rawQuery)
-			if err != nil {
-				return filesearch.ToolInput{}, "", true, err
-			}
-			if ok {
-				return normalizeFileSearchToolInput(intent), "", true, nil
+			result, reply, handled, err := s.planAndExecuteFileSearch(ctx, mc, rawQuery)
+			if err != nil || handled {
+				return result, reply, true, err
 			}
 		}
-		return filesearch.ToolInput{
+		result, reply, err := s.performFileSearch(ctx, filesearch.ToolInput{
 			Query: rawQuery,
 			Limit: filesearch.DefaultLimit,
-		}, "", true, nil
+		})
+		return result, reply, true, err
 	}
 
-	intent, ok, err := s.BuildFileSearchIntent(ctx, mc, text)
-	if err != nil || !ok {
-		return filesearch.ToolInput{}, "", ok, err
-	}
-	return normalizeFileSearchToolInput(intent), "", true, nil
+	return s.planAndExecuteFileSearch(ctx, mc, text)
 }
 
 func (s *Service) executeFileSearch(ctx context.Context, input filesearch.ToolInput) (string, error) {
-	everythingPath, exec := s.fileSearchRuntime()
-	result, err := exec(ctx, everythingPath, input)
-	if err != nil {
-		switch {
-		case errors.Is(err, filesearch.ErrUnsupported):
-			return err.Error(), nil
-		case errors.Is(err, filesearch.ErrUnconfigured):
-			return err.Error(), nil
-		default:
-			return "", err
-		}
+	result, reply, err := s.performFileSearch(ctx, input)
+	if reply != "" || err != nil {
+		return reply, err
 	}
 	return filesearch.FormatSearchResult(result), nil
 }
 
-func normalizeFileSearchToolInput(intent ai.FileSearchIntent) filesearch.ToolInput {
-	input := filesearch.NormalizeInput(intent.ToolInput)
-	if strings.TrimSpace(input.Query) == "" && strings.TrimSpace(intent.Query) != "" {
-		input.Query = strings.TrimSpace(intent.Query)
-	}
+func (s *Service) performFileSearch(ctx context.Context, input filesearch.ToolInput) (filesearch.ToolResult, string, error) {
+	everythingPath, exec := s.fileSearchRuntime()
+	input = filesearch.NormalizeInput(input)
 	input.Limit = filesearch.DefaultLimit
-	return input
+	result, err := exec(ctx, everythingPath, input)
+	if err != nil {
+		switch {
+		case errors.Is(err, filesearch.ErrUnsupported):
+			return filesearch.ToolResult{}, err.Error(), nil
+		case errors.Is(err, filesearch.ErrUnconfigured):
+			return filesearch.ToolResult{}, err.Error(), nil
+		default:
+			return filesearch.ToolResult{}, "", err
+		}
+	}
+	return result, "", nil
+}
+
+func (s *Service) planAndExecuteFileSearch(ctx context.Context, mc MessageContext, task string) (filesearch.ToolResult, string, bool, error) {
+	if s.aiService == nil {
+		return filesearch.ToolResult{}, "", false, nil
+	}
+
+	configured, err := s.aiService.IsConfigured(ctx)
+	if err != nil {
+		return filesearch.ToolResult{}, "", false, err
+	}
+	if !configured {
+		return filesearch.ToolResult{}, "", false, nil
+	}
+
+	tool := fileSearchToolCapability()
+	matches, err := s.aiService.DetectToolOpportunities(s.withSkillContext(ctx, mc), task, []ai.ToolCapability{tool})
+	if err != nil {
+		return filesearch.ToolResult{}, "", false, err
+	}
+	if !containsToolOpportunity(matches, tool.Name) {
+		return filesearch.ToolResult{}, "", false, nil
+	}
+
+	prior := make([]ai.ToolExecution, 0, maxFileSearchPlanningRounds)
+	seenQueries := make(map[string]struct{})
+	var lastResult filesearch.ToolResult
+
+	for round := 0; round < maxFileSearchPlanningRounds; round++ {
+		decision, err := s.aiService.PlanToolUse(s.withSkillContext(ctx, mc), task, tool, prior)
+		if err != nil {
+			return filesearch.ToolResult{}, "", true, err
+		}
+
+		switch decision.Action {
+		case "stop":
+			if strings.TrimSpace(decision.UserMessage) != "" {
+				return lastResult, decision.UserMessage, true, nil
+			}
+			if strings.TrimSpace(lastResult.Query) != "" || len(lastResult.Items) > 0 {
+				return lastResult, "", true, nil
+			}
+			return filesearch.ToolResult{}, "没有找到匹配文件，请补充更具体的文件名、目录、扩展名或时间范围。", true, nil
+		case "tool":
+			if name := strings.TrimSpace(decision.ToolName); name != "" && !strings.EqualFold(name, tool.Name) {
+				return filesearch.ToolResult{}, "", true, fmt.Errorf("tool planner selected unexpected tool %q", decision.ToolName)
+			}
+		default:
+			return filesearch.ToolResult{}, "", true, fmt.Errorf("unsupported file search tool action %q", decision.Action)
+		}
+
+		toolInput, err := decodeFileSearchToolInput(decision.ToolInput)
+		if err != nil {
+			return filesearch.ToolResult{}, "", true, err
+		}
+		queryKey := strings.ToLower(strings.TrimSpace(filesearch.CompileQuery(toolInput)))
+		if queryKey == "" {
+			return filesearch.ToolResult{}, "我还不能形成有效的文件检索条件，请直接说文件名、目录、扩展名或磁盘范围。", true, nil
+		}
+		if _, ok := seenQueries[queryKey]; ok {
+			if strings.TrimSpace(lastResult.Query) != "" || len(lastResult.Items) > 0 {
+				return lastResult, "", true, nil
+			}
+			return filesearch.ToolResult{}, "我已经尝试过等价的检索条件了，请补充更具体的文件名、目录、扩展名或时间范围。", true, nil
+		}
+		seenQueries[queryKey] = struct{}{}
+
+		result, reply, err := s.performFileSearch(ctx, toolInput)
+		if err != nil {
+			return filesearch.ToolResult{}, "", true, err
+		}
+		if reply != "" {
+			return filesearch.ToolResult{}, reply, true, nil
+		}
+		lastResult = result
+		if len(result.Items) > 0 {
+			return result, "", true, nil
+		}
+
+		prior = append(prior, ai.ToolExecution{
+			ToolName:   tool.Name,
+			ToolInput:  mustMarshalJSON(toolInput),
+			ToolOutput: mustMarshalJSON(result),
+		})
+	}
+
+	if strings.TrimSpace(lastResult.Query) != "" || len(lastResult.Items) > 0 {
+		return lastResult, "", true, nil
+	}
+	return filesearch.ToolResult{}, "没有找到匹配文件，请补充更具体的文件名、目录、扩展名或时间范围。", true, nil
+}
+
+func fileSearchToolCapability() ai.ToolCapability {
+	spec := filesearch.Definition()
+	return ai.ToolCapability{
+		Name:             spec.Name,
+		Description:      spec.Description,
+		Usage:            spec.Usage,
+		InputJSONExample: spec.InputJSONExample,
+	}
+}
+
+func containsToolOpportunity(matches []ai.ToolOpportunity, toolName string) bool {
+	toolName = strings.TrimSpace(toolName)
+	for _, match := range matches {
+		if strings.EqualFold(strings.TrimSpace(match.ToolName), toolName) {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeFileSearchToolInput(raw string) (filesearch.ToolInput, error) {
+	var input filesearch.ToolInput
+	if err := decodeAgentToolInput(raw, &input); err != nil {
+		return filesearch.ToolInput{}, fmt.Errorf("decode file search tool input: %w", err)
+	}
+	input = filesearch.NormalizeInput(input)
+	input.Limit = filesearch.DefaultLimit
+	return input, nil
+}
+
+func mustMarshalJSON(value any) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
 }

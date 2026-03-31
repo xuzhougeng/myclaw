@@ -122,27 +122,31 @@ func TestHandleMessageFileFindDoesNotCreateConversation(t *testing.T) {
 	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
 	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
 	service := appsvc.NewServiceWithRuntime(store, bridgeTestAI{
-		intent: aicore.FileSearchIntent{
-			Enabled: true,
-			Query:   "d: ext:pdf 单细胞",
+		toolOpportunities: []aicore.ToolOpportunity{{ToolName: filesearch.ToolName, Goal: "查找 D 盘 pdf 文件"}},
+		toolPlanDecision: aicore.ToolPlanDecision{
+			Action:    "tool",
+			ToolName:  filesearch.ToolName,
+			ToolInput: `{"query":"d: ext:pdf 单细胞"}`,
 		},
 	}, reminders, nil, sessionStore, nil)
-
-	var sent SendMessageRequest
-	bridge := NewBridge(newTestClient(t, &sent), service, reminders, BridgeConfig{
-		DataDir:        root,
-		EverythingPath: "es.exe",
-	})
-	bridge.fileSearch.SetSearchExecutor(func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
+	service.SetFileSearchEverythingPath("es.exe")
+	service.SetFileSearchExecutor(func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
+		query := filesearch.CompileQuery(input)
 		return filesearch.ToolResult{
 			Tool:  filesearch.ToolName,
-			Query: input.Query,
+			Query: query,
 			Limit: input.Limit,
 			Count: 1,
 			Items: []filesearch.ResultItem{
 				{Index: 1, Name: "单细胞报告.pdf", Path: `D:\docs\单细胞报告.pdf`},
 			},
 		}, nil
+	})
+
+	var sent SendMessageRequest
+	bridge := NewBridge(newTestClient(t, &sent), service, reminders, BridgeConfig{
+		DataDir:        root,
+		EverythingPath: "es.exe",
 	})
 	var sentFiles []string
 	bridge.fileSender.SetSendFunc(func(_ context.Context, _ string, _ string, filePath string) error {
@@ -181,8 +185,9 @@ func TestHandleMessageFileFindDoesNotCreateConversation(t *testing.T) {
 	if sent.Msg.ToUserID != "user-1" || sent.Msg.ContextToken != "ctx-1" {
 		t.Fatalf("unexpected send target: %#v", sent.Msg)
 	}
-	if !strings.Contains(extractText(sent.Msg), "找到 1 个文件") || !strings.Contains(extractText(sent.Msg), "检索式: d: ext:pdf 单细胞") {
-		t.Fatalf("unexpected search reply: %#v", sent.Msg)
+	replyText := extractText(sent.Msg)
+	if !strings.Contains(replyText, "找到 1 个文件") || !strings.Contains(replyText, "单细胞报告.pdf") {
+		t.Fatalf("unexpected search reply: %q", replyText)
 	}
 
 	msg.ItemList = []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "/send 1"}}}
@@ -468,9 +473,10 @@ func TestHandleMessageAfterDeletedConversationStartsNewSession(t *testing.T) {
 }
 
 type bridgeTestAI struct {
-	intent   aicore.FileSearchIntent
-	route    aicore.RouteDecision
-	chatFunc func(context.Context, string, []aicore.ConversationMessage) string
+	toolOpportunities []aicore.ToolOpportunity
+	toolPlanDecision  aicore.ToolPlanDecision
+	route             aicore.RouteDecision
+	chatFunc          func(context.Context, string, []aicore.ConversationMessage) string
 }
 
 func (f bridgeTestAI) IsConfigured(context.Context) (bool, error) {
@@ -485,8 +491,12 @@ func (f bridgeTestAI) BuildSearchPlan(context.Context, string) (aicore.SearchPla
 	return aicore.SearchPlan{}, nil
 }
 
-func (f bridgeTestAI) BuildFileSearchIntent(context.Context, string) (aicore.FileSearchIntent, error) {
-	return f.intent, nil
+func (f bridgeTestAI) DetectToolOpportunities(context.Context, string, []aicore.ToolCapability) ([]aicore.ToolOpportunity, error) {
+	return f.toolOpportunities, nil
+}
+
+func (f bridgeTestAI) PlanToolUse(context.Context, string, aicore.ToolCapability, []aicore.ToolExecution) (aicore.ToolPlanDecision, error) {
+	return f.toolPlanDecision, nil
 }
 
 func (f bridgeTestAI) ReviewAnswerCandidates(context.Context, string, []knowledge.Entry) ([]string, error) {

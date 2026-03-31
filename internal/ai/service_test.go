@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"myclaw/internal/filesearch"
 	"myclaw/internal/knowledge"
 	"myclaw/internal/modelconfig"
 )
@@ -623,7 +624,7 @@ func TestBuildSearchPlan(t *testing.T) {
 	}
 }
 
-func TestBuildFileSearchIntent(t *testing.T) {
+func TestDetectToolOpportunities(t *testing.T) {
 	store := newConfiguredStore(t, modelconfig.Config{
 		Provider: modelconfig.ProviderOpenAI,
 		APIType:  modelconfig.APITypeResponses,
@@ -638,22 +639,29 @@ func TestBuildFileSearchIntent(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.Text == nil || req.Text.Format.Name != "file_search_intent" {
+		if req.Text == nil || req.Text.Format.Name != "tool_opportunity_detection" {
 			t.Fatalf("unexpected schema request: %#v", req.Text)
 		}
-		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"enabled\":true,\"tool_name\":\"everything_file_search\",\"tool_input\":{\"query\":\"\",\"keywords\":[\"单细胞\",\"相关\"],\"drives\":[\"D盘\"],\"known_folders\":[],\"paths\":[],\"extensions\":[\"pdf\"],\"date_field\":\"\",\"date_value\":\"\",\"limit\":10}}"}]}]}`), nil
+		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"matches\":[{\"tool_name\":\"everything_file_search\",\"goal\":\"查找 D 盘上的 PDF 文件\"}]}"}]}]}`), nil
 	})
 
-	intent, err := service.BuildFileSearchIntent(context.Background(), "查找 D 盘单细胞相关的PDF文件")
+	matches, err := service.DetectToolOpportunities(context.Background(), "查找 D 盘单细胞相关的PDF文件", []ToolCapability{
+		{
+			Name:             filesearch.ToolName,
+			Description:      filesearch.Definition().Description,
+			Usage:            filesearch.UsageText(),
+			InputJSONExample: filesearch.Definition().InputJSONExample,
+		},
+	})
 	if err != nil {
-		t.Fatalf("build file search intent: %v", err)
+		t.Fatalf("detect tool opportunities: %v", err)
 	}
-	if !intent.Enabled || intent.Query != "file: d: *.pdf 单细胞" {
-		t.Fatalf("unexpected intent: %#v", intent)
+	if len(matches) != 1 || matches[0].ToolName != filesearch.ToolName {
+		t.Fatalf("unexpected matches: %#v", matches)
 	}
 }
 
-func TestBuildFileSearchIntentNormalizesFolderAndRecentDateFilters(t *testing.T) {
+func TestPlanToolUse(t *testing.T) {
 	store := newConfiguredStore(t, modelconfig.Config{
 		Provider: modelconfig.ProviderOpenAI,
 		APIType:  modelconfig.APITypeResponses,
@@ -664,15 +672,30 @@ func TestBuildFileSearchIntentNormalizesFolderAndRecentDateFilters(t *testing.T)
 
 	service := NewService(store)
 	service.httpClient = newTestClient(t, func(r *http.Request) (*http.Response, error) {
-		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"enabled\":true,\"tool_name\":\"everything_file_search\",\"tool_input\":{\"query\":\"\",\"keywords\":[\"下载目录\"],\"drives\":[],\"known_folders\":[],\"paths\":[\"Downloads\"],\"extensions\":[],\"date_field\":\"created\",\"date_value\":\"last2days\",\"limit\":10}}"}]}]}`), nil
+		var req responsesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Text == nil || req.Text.Format.Name != "tool_use_plan" {
+			t.Fatalf("unexpected schema request: %#v", req.Text)
+		}
+		return jsonResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"action\":\"tool\",\"tool_name\":\"everything_file_search\",\"tool_input\":\"{\\\"paths\\\":[\\\"Downloads\\\"],\\\"extensions\\\":[\\\"pdf\\\"],\\\"date_field\\\":\\\"created\\\",\\\"date_value\\\":\\\"last2days\\\"}\",\"user_message\":\"\"}"}]}]}`), nil
 	})
 
-	intent, err := service.BuildFileSearchIntent(context.Background(), "查找下载目录下这两天下载的文件")
+	decision, err := service.PlanToolUse(context.Background(), "查找下载目录下这两天下载的文件", ToolCapability{
+		Name:             filesearch.ToolName,
+		Description:      filesearch.Definition().Description,
+		Usage:            filesearch.UsageText(),
+		InputJSONExample: filesearch.Definition().InputJSONExample,
+	}, nil)
 	if err != nil {
-		t.Fatalf("build file search intent: %v", err)
+		t.Fatalf("plan tool use: %v", err)
 	}
-	if !intent.Enabled || intent.Query != "file: shell:Downloads dc:last48hours" {
-		t.Fatalf("unexpected intent: %#v", intent)
+	if decision.Action != "tool" || decision.ToolName != filesearch.ToolName {
+		t.Fatalf("unexpected decision: %#v", decision)
+	}
+	if !strings.Contains(decision.ToolInput, `"paths":["Downloads"]`) {
+		t.Fatalf("unexpected tool input: %#v", decision)
 	}
 }
 

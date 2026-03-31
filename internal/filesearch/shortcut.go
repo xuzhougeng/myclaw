@@ -19,6 +19,8 @@ type SearchExecutor func(context.Context, string, ToolInput) (ToolResult, error)
 
 type IntentResolver func(context.Context, string) (ToolInput, bool, error)
 
+type SearchResolver func(context.Context, string) (ToolResult, string, bool, error)
+
 type FileSender func(context.Context, string) error
 
 type PendingSelection struct {
@@ -30,6 +32,7 @@ type PendingSelection struct {
 type ShortcutRequest struct {
 	SlotKey          string
 	Text             string
+	ResolveSearch    SearchResolver
 	ResolveIntent    IntentResolver
 	SendSelectedFile FileSender
 }
@@ -99,6 +102,17 @@ func (h *ShortcutHandler) Handle(ctx context.Context, req ShortcutRequest) (Shor
 		return ShortcutResponse{Reply: reply, Handled: handled || err != nil}, err
 	}
 
+	if req.ResolveSearch != nil {
+		result, reply, handled, err := req.ResolveSearch(ctx, req.Text)
+		if err != nil || !handled {
+			return ShortcutResponse{Reply: reply, Handled: handled}, err
+		}
+		if reply != "" {
+			return ShortcutResponse{Reply: reply, Handled: true}, nil
+		}
+		return h.handleSearchResult(strings.TrimSpace(req.SlotKey), result)
+	}
+
 	input, reply, handled, err := h.resolveInput(ctx, req.Text, req.ResolveIntent)
 	if err != nil || !handled {
 		return ShortcutResponse{Reply: reply, Handled: handled}, err
@@ -125,6 +139,13 @@ func (h *ShortcutHandler) Handle(ctx context.Context, req ShortcutRequest) (Shor
 		}
 	}
 
+	return h.handleSearchResult(slotKey, result)
+}
+
+func (h *ShortcutHandler) handleSearchResult(slotKey string, result ToolResult) (ShortcutResponse, error) {
+	if slotKey == "" {
+		return ShortcutResponse{}, fmt.Errorf("filesearch: missing slot key")
+	}
 	if len(result.Items) == 0 {
 		h.ClearPendingSelection(slotKey)
 		return ShortcutResponse{

@@ -381,8 +381,11 @@ func (b *Bridge) handleFileSearch(ctx context.Context, msg WeixinMessage, messag
 	response, err := b.fileSearch.Handle(ctx, filesearch.ShortcutRequest{
 		SlotKey: b.conversationSlotKey(msg),
 		Text:    text,
-		ResolveIntent: func(ctx context.Context, input string) (filesearch.ToolInput, bool, error) {
-			return b.resolveFileSearchToolInput(ctx, messageContext, input)
+		ResolveSearch: func(ctx context.Context, input string) (filesearch.ToolResult, string, bool, error) {
+			if b.service == nil {
+				return filesearch.ToolResult{}, "", false, nil
+			}
+			return b.service.ResolveFileSearch(ctx, messageContext, input)
 		},
 		SendSelectedFile: func(ctx context.Context, path string) error {
 			if b.fileSender == nil {
@@ -395,18 +398,6 @@ func (b *Bridge) handleFileSearch(ctx context.Context, msg WeixinMessage, messag
 		response.Reply = strings.Replace(response.Reply, "已发送文件", "已通过 ClawBot 发送文件", 1)
 	}
 	return response.Reply, response.Handled, err
-}
-
-func (b *Bridge) resolveFileSearchToolInput(ctx context.Context, messageContext app.MessageContext, input string) (filesearch.ToolInput, bool, error) {
-	if b.service == nil {
-		return filesearch.ToolInput{}, false, nil
-	}
-
-	intent, ok, err := b.service.BuildWeixinFileSearchIntent(ctx, messageContext, input)
-	if err != nil || !ok {
-		return filesearch.ToolInput{}, ok, err
-	}
-	return intent.ToolInput, true, nil
 }
 
 func (b *Bridge) finalizeLogin(status *QRCodeStatusResponse) (Account, error) {

@@ -8,6 +8,7 @@
 
 - 终端、桌面端、微信端都只是接口层。它们负责收发消息、展示结果、触发少量接口专属动作，不负责定义核心业务语义。
 - 核心流程是“先解析当前对话，再处理消息”。命令、普通提问、工具调用都应建立在统一的会话解析结果之上。
+- AI 不应只做单次问答分类。核心设计是一个通用 AI 决策器：先识别需求，再匹配工具，再根据工具契约生成调用方案，并在需要时基于已有结果继续迭代 2 到 3 轮。
 - `/new` 的语义不是“执行一个特殊命令”，而是“把当前接口槽位重新绑定到一个新的对话”。
 - 微信端默认绑定一个已有对话；如果当前槽位没有已绑定对话，才建立一个新的默认对话。
 - 命令和工具默认运行在当前对话上下文中；是否写入历史、是否允许创建新对话、是否触发桌面 UI 激活，应该由统一策略决定，而不是由某个接口临时硬编码。
@@ -30,7 +31,7 @@ flowchart TD
     session["Session Store"]
     kb["Knowledge Store"]
     reminders["Reminder Store"]
-    ai["AI Services\nrouting · extraction · answer"]
+    ai["AI Services\ncommand routing · tool opportunity detection · tool planning · answer"]
     tools["Tool Units\nfilesearch · ingest · reminder · ..."]
 
     terminal --> envelope
@@ -61,6 +62,7 @@ flowchart TD
 - 知识库存储在本地 JSON 文件里
 - 模型配置只从本地环境变量读取，不在终端或聊天界面里暴露
 - 配置模型后，会先做 AI 命令路由，再决定是“记住 / 遗忘 / 提醒 / 查看 / 回答”
+- 工具调用不再依赖某个工具专属的意图提取入口；当前文件检索已经走“识别需求 -> 匹配工具 -> 读取工具契约 -> 生成检索方案 -> 执行 -> 按结果迭代”的通用决策链，最多 3 轮
 - 普通问题默认走 direct 模式，直接调用 AI；切到 knowledge 模式后才会走“AI 检索计划 -> 本地候选检索 -> 模型复核 -> 回答”
 - 支持图片直接总结入库；PDF 走 `go-fitz` 提取全文后再总结
 - 支持单次提醒和每天重复提醒
@@ -73,7 +75,7 @@ flowchart TD
 cmd/myclaw            CLI / terminal 入口
 cmd/myclaw-desktop    Wails 桌面端与 HTTP dev 入口
 internal/app          统一对话运行时、会话逻辑、命令分发
-internal/ai           AI 路由、提取、回答
+internal/ai           AI 命令路由、通用工具决策、回答与摘要
 internal/filesearch   独立文件检索工具单元
 internal/knowledge    本地知识库存储
 internal/modelconfig  模型配置读取与存储
