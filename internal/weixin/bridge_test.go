@@ -114,21 +114,14 @@ func TestLoadAccountUsesSavedCredentials(t *testing.T) {
 	}
 }
 
-func TestHandleMessageFileFindDoesNotCreateConversation(t *testing.T) {
+func TestHandleMessageSlashFindDoesNotCreateConversation(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	store := knowledge.NewStore(filepath.Join(root, "app.db"))
 	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "app.db")))
 	sessionStore := sessionstate.NewStore(filepath.Join(root, "app.db"))
-	service := appsvc.NewServiceWithRuntime(store, bridgeTestAI{
-		toolOpportunities: []aicore.ToolOpportunity{{ToolName: filesearch.ToolName, Goal: "查找 D 盘 pdf 文件"}},
-		toolPlanDecision: aicore.ToolPlanDecision{
-			Action:    "tool",
-			ToolName:  filesearch.ToolName,
-			ToolInput: `{"query":"d: ext:pdf 单细胞"}`,
-		},
-	}, reminders, nil, sessionStore, nil)
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, nil)
 	service.SetFileSearchEverythingPath("es.exe")
 	service.SetFileSearchExecutor(func(_ context.Context, everythingPath string, input filesearch.ToolInput) (filesearch.ToolResult, error) {
 		query := filesearch.CompileQuery(input)
@@ -163,7 +156,7 @@ func TestHandleMessageFileFindDoesNotCreateConversation(t *testing.T) {
 		ContextToken: "ctx-1",
 		MessageType:  MessageTypeUser,
 		MessageState: MessageStateFinish,
-		ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "帮我找单细胞 pdf"}}},
+		ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "/find 单细胞 pdf"}}},
 		ClientID:     "client-1",
 		ToUserID:     "bot",
 	}
