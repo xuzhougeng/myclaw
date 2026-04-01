@@ -25,7 +25,7 @@
 - 保留现在的 `*_test.go` 做确定性测试。
 - 另做一套“评测数据集 + 独立 runner + 结果归档”。
 
-第一版即使还没有专门 runner，这份文档也能先把数据结构和评测口径定下来。
+第一版先把数据结构和评测口径定下来，runner 已在 `cmd/myclaw-eval` 实现。
 
 ## 当前仓库里最适合做阶段评测的入口
 
@@ -218,12 +218,14 @@ eval/
 使用 `cmd/myclaw-eval` 命令运行评测：
 
 ```bash
-go run ./cmd/myclaw-eval -dataset eval/testdata/route-command.jsonl
+go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl
+go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl -output eval/testdata/runs/result.json
 ```
 
-可选参数：
-- `-data-dir`: 数据目录（默认 `data`）
-- `-output`: 输出文件路径（默认自动生成到 `eval/testdata/runs/`）
+参数：
+- `-dataset`（必填）：数据集 `.jsonl` 文件路径
+- `-data-dir`：数据目录（默认 `data`）
+- `-output`：输出文件路径（默认自动生成到 `eval/testdata/runs/<timestamp>-<provider>-<model>-<dataset>.json`）
 
 ## runner 输出建议
 
@@ -324,9 +326,10 @@ go run ./cmd/myclaw-eval -dataset eval/testdata/route-command.jsonl
 
 1. 先按本文档把 `eval/testdata/*.jsonl` 数据集写出来
 2. 先只覆盖结构化阶段
-3. 再补一个独立 runner，直接调用 `internal/ai` 的公开方法
+3. 已完成：`cmd/myclaw-eval` 直接调用 `internal/ai` 的公开方法
 4. 把每次跑分结果落盘到 `eval/testdata/runs/`
-5. 再决定是否需要把开放式回答引入半自动评审
+5. 下一步：持续扩充测试用例，覆盖更多边界和负样本
+6. 再决定是否需要把开放式回答引入半自动评审
 
 ## 一个务实的起点
 
@@ -345,4 +348,4 @@ go run ./cmd/myclaw-eval -dataset eval/testdata/route-command.jsonl
 - 你的工具契约是否足够自解释
 - 模型切换后最先退化的是哪一层
 
-如果后面你决定要正式落代码，优先补的是 `cmd/myclaw-eval`，不是继续往 `docs/` 里堆说明文字。
+`cmd/myclaw-eval` 已实现，现在的优先级是扩充测试用例，而不是继续往 `docs/` 里堆说明文字。
