@@ -3,7 +3,6 @@ package dirlist
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -91,8 +90,19 @@ func TestExecuteHonorsLimitAndDefaultPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() failed: %v", err)
 	}
-	if !strings.HasPrefix(result.Path, root) {
-		t.Fatalf("expected result path under %q, got %q", root, result.Path)
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		t.Fatalf("Stat(root) failed: %v", err)
+	}
+	resultInfo, err := os.Stat(result.Path)
+	if err != nil {
+		t.Fatalf("Stat(result.Path) failed: %v", err)
+	}
+	if !filepath.IsAbs(result.Path) {
+		t.Fatalf("expected absolute result path, got %q", result.Path)
+	}
+	if !os.SameFile(rootInfo, resultInfo) {
+		t.Fatalf("expected result path to reference %q, got %q", root, result.Path)
 	}
 	if !result.Truncated || result.Count != 2 {
 		t.Fatalf("expected truncated result of 2 items, got %#v", result)
