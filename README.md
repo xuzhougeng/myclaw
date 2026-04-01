@@ -106,6 +106,12 @@ internal/projectstate 项目运行时状态跟踪
 internal/sqliteutil   SQLite 公共工具函数
 ```
 
+相关文档：
+
+- [docs/ai-stage-eval.md](./docs/ai-stage-eval.md)：AI 阶段评测说明
+- [docs/tool-units.md](./docs/tool-units.md)：可复用工具单元规范
+- [docs/development-issues.md](./docs/development-issues.md)：开发问题记录与排障经验
+
 ## 运行
 
 ### 0. 终端模式
