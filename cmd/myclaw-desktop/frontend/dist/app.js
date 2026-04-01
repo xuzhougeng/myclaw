@@ -1,3 +1,4 @@
+/* Source: js/core/navigation.js */
 const NAV_VIEW_ALIASES = {
   model: { view: 'settings', sectionId: 'settings-section-model' },
   weixin: { view: 'settings', sectionId: 'settings-section-weixin' },
@@ -72,6 +73,752 @@ function updateThemeIcon(theme) {
   }
 }
 
+/* Source: js/shared/state-models.js */
+function defaultChatSessionContextMenuState() {
+  return {
+    open: false,
+    sessionId: '',
+    x: 0,
+    y: 0,
+  };
+}
+
+function openChatSessionContextMenu(sessionId, x, y) {
+  const conversation = (state.chatState.conversations || []).find((item) => item.sessionId === String(sessionId || '').trim());
+  if (conversation?.readOnly) return;
+  state.chatSessionContextMenu = {
+    open: true,
+    sessionId: String(sessionId || '').trim(),
+    x: Number(x || 0),
+    y: Number(y || 0),
+  };
+  renderChatSessionContextMenu();
+  renderChatSessions();
+}
+
+function closeChatSessionContextMenu() {
+  if (!state.chatSessionContextMenu.open) return;
+  state.chatSessionContextMenu = defaultChatSessionContextMenuState();
+  renderChatSessionContextMenu();
+  renderChatSessions();
+}
+
+function renderChatSessionContextMenu() {
+  const menu = document.getElementById('chat-session-context-menu');
+  if (!menu) return;
+
+  if (!state.chatSessionContextMenu.open) {
+    menu.hidden = true;
+    menu.style.removeProperty('left');
+    menu.style.removeProperty('top');
+    return;
+  }
+
+  menu.hidden = false;
+  menu.style.left = `${state.chatSessionContextMenu.x}px`;
+  menu.style.top = `${state.chatSessionContextMenu.y}px`;
+
+  requestAnimationFrame(() => {
+    if (menu.hidden) return;
+    const padding = 12;
+    const maxLeft = Math.max(padding, window.innerWidth - menu.offsetWidth - padding);
+    const maxTop = Math.max(padding, window.innerHeight - menu.offsetHeight - padding);
+    menu.style.left = `${Math.min(Math.max(state.chatSessionContextMenu.x, padding), maxLeft)}px`;
+    menu.style.top = `${Math.min(Math.max(state.chatSessionContextMenu.y, padding), maxTop)}px`;
+  });
+}
+
+function currentChatConversation() {
+  const sessionId = state.chatState.sessionId || '';
+  return (state.chatState.conversations || []).find((item) => item.sessionId === sessionId) || null;
+}
+
+function defaultChatSessionDragState() {
+  return {
+    sessionId: '',
+    targetSessionId: '',
+    placeBefore: true,
+    suppressClickUntil: 0,
+  };
+}
+
+function clearChatSessionDropIndicators() {
+  document.querySelectorAll('.chat-session-row.dragging, .chat-session-row.drop-before, .chat-session-row.drop-after')
+    .forEach((row) => {
+      row.classList.remove('dragging', 'drop-before', 'drop-after');
+    });
+}
+
+function summarizeChatTitle(messages) {
+  const firstUser = (messages || []).find((item) => item.role === 'user' && (item.text || '').trim());
+  return truncateText(firstUser?.text || '新对话', 28);
+}
+
+function summarizeChatPreview(messages) {
+  for (let index = (messages || []).length - 1; index >= 0; index -= 1) {
+    const message = messages[index] || {};
+    const optionContent = extractChatOptionContent(message.text);
+    const text = (
+      optionContent?.beforeText
+      || optionContent?.payload?.question
+      || optionContent?.afterText
+      || message.text
+      || ''
+    ).trim();
+    if (text) return truncateText(text, 72);
+  }
+  return '还没有消息';
+}
+
+function truncateText(value, maxRunes) {
+  const text = (value || '').trim();
+  if (!text) return '';
+  const chars = Array.from(text);
+  if (chars.length <= maxRunes) return text;
+  return `${chars.slice(0, Math.max(1, maxRunes - 1)).join('')}…`;
+}
+
+function newChatStreamRequestID() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+  return `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+let bannerTimer = 0;
+
+function defaultProjectState() {
+  return {
+    activeProject: 'default',
+    projects: [
+      {
+        name: 'default',
+        knowledgeCount: 0,
+        latestRecordedAt: '',
+        latestRecordedAtUnix: 0,
+        active: true,
+      },
+    ],
+  };
+}
+
+function defaultChatState() {
+  return {
+    sessionId: '',
+    conversations: [],
+    messages: [],
+  };
+}
+
+function defaultChatSessionDialogState() {
+  return {
+    open: false,
+    mode: '',
+    sessionId: '',
+    itemId: '',
+    initialTitle: '',
+    selectedMode: 'agent',
+    restoreFocus: null,
+  };
+}
+
+function normalizeTokenUsage(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const inputTokens = Number(payload.inputTokens || 0);
+  const outputTokens = Number(payload.outputTokens || 0);
+  const cachedTokens = Number(payload.cachedTokens || 0);
+  const totalTokens = Number(payload.totalTokens || inputTokens + outputTokens);
+  if (inputTokens <= 0 && outputTokens <= 0 && cachedTokens <= 0 && totalTokens <= 0) {
+    return null;
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    cachedTokens,
+    totalTokens,
+  };
+}
+
+function formatTokenUsage(usage) {
+  const value = normalizeTokenUsage(usage);
+  if (!value) return '';
+  return `input ${value.inputTokens} · output ${value.outputTokens} · cached ${value.cachedTokens} · total ${value.totalTokens}`;
+}
+
+function normalizeChatProcess(payload) {
+  if (!Array.isArray(payload)) return [];
+  return payload
+    .map((item) => ({
+      title: String(item?.title || '').trim(),
+      detail: String(item?.detail || '').trim(),
+    }))
+    .filter((item) => item.title || item.detail);
+}
+
+function normalizeChatState(payload) {
+  const source = Array.isArray(payload) ? payload[0] : payload;
+  const next = {
+    ...defaultChatState(),
+    ...(source || {}),
+  };
+  next.conversations = Array.isArray(next.conversations)
+    ? next.conversations.map((item) => ({
+      sessionId: item?.sessionId || '',
+      title: item?.title || '',
+      customTitle: Boolean(item?.customTitle),
+      preview: item?.preview || '',
+      source: item?.source || '',
+      sourceLabel: item?.sourceLabel || '',
+      readOnly: Boolean(item?.readOnly),
+      updatedAt: item?.updatedAt || '',
+      updatedAtUnix: Number(item?.updatedAtUnix || 0),
+      messageCount: Number(item?.messageCount || 0),
+      hasMessages: Boolean(item?.hasMessages),
+      active: Boolean(item?.active),
+    }))
+    : [];
+  next.messages = Array.isArray(next.messages)
+    ? next.messages.map((item) => ({
+      role: item?.role || 'assistant',
+      text: item?.text || '',
+      time: item?.time || '',
+      usage: normalizeTokenUsage(item?.usage),
+      process: normalizeChatProcess(item?.process),
+    }))
+    : [];
+  return next;
+}
+
+function defaultChatPromptState() {
+  return {
+    promptId: '',
+    shortId: '',
+    title: '',
+  };
+}
+
+function normalizeChatPromptState(payload) {
+  const source = Array.isArray(payload) ? payload[0] : payload;
+  return {
+    ...defaultChatPromptState(),
+    ...(source || {}),
+  };
+}
+
+function defaultAutocompleteState() {
+  return {
+    open: false,
+    trigger: '',
+    query: '',
+    tokenStart: -1,
+    tokenEnd: -1,
+    selectedIndex: 0,
+    items: [],
+  };
+}
+
+function normalizeProjectState(payload) {
+  const source = Array.isArray(payload) ? payload[0] : payload;
+  const stateValue = {
+    ...defaultProjectState(),
+    ...(source || {}),
+  };
+  const projects = Array.isArray(stateValue.projects)
+    ? stateValue.projects.map((item) => ({
+        name: item.name || 'default',
+        knowledgeCount: Number(item.knowledgeCount || 0),
+        latestRecordedAt: item.latestRecordedAt || '',
+        latestRecordedAtUnix: Number(item.latestRecordedAtUnix || 0),
+        active: Boolean(item.active),
+      }))
+    : [];
+
+  if (projects.length === 0) {
+    return defaultProjectState();
+  }
+
+  return {
+    activeProject: stateValue.activeProject || projects.find((item) => item.active)?.name || 'default',
+    projects,
+  };
+}
+
+function normalizeReminders(payload) {
+  if (!Array.isArray(payload)) return [];
+  return payload.map((item) => ({
+    id: item.id || '',
+    shortId: item.shortId || (item.id || '').slice(0, 8),
+    message: item.message || '',
+    source: item.source || '',
+    sourceLabel: item.sourceLabel || '',
+    frequency: item.frequency || 'once',
+    frequencyLabel: item.frequencyLabel || (item.frequency === 'daily' ? '每天' : '单次'),
+    scheduleLabel: item.scheduleLabel || (item.frequency === 'daily' ? '每天' : '单次'),
+    nextRunAt: item.nextRunAt || '',
+    nextRunAtUnix: Number(item.nextRunAtUnix || 0),
+    createdAt: item.createdAt || '',
+    createdAtUnix: Number(item.createdAtUnix || 0),
+  }));
+}
+
+const MODEL_PROVIDER_DEFAULTS = {
+  openai: {
+    apiType: 'responses',
+    baseUrl: 'https://api.openai.com/v1',
+  },
+  anthropic: {
+    apiType: 'messages',
+    baseUrl: 'https://api.anthropic.com/v1',
+  },
+};
+
+const MODEL_API_TYPE_OPTIONS = {
+  openai: [
+    { value: 'responses', label: 'Responses (new)' },
+    { value: 'chat_completions', label: 'Chat Completions (legacy)' },
+  ],
+  anthropic: [
+    { value: 'messages', label: 'Messages' },
+  ],
+};
+
+const DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS = 90;
+
+function defaultModelState() {
+  return {
+    profiles: [],
+    activeProfileId: '',
+    configured: false,
+    missingFields: [],
+    effectiveProfileName: '—',
+    effectiveProvider: 'openai',
+    effectiveApiType: 'responses',
+    effectiveBaseUrl: 'https://api.openai.com/v1',
+    effectiveApiKeyMasked: '(empty)',
+    effectiveModel: '',
+    effectiveRequestTimeoutSeconds: null,
+    effectiveMaxOutputTokensText: null,
+    effectiveMaxOutputTokensJSON: null,
+    effectiveTemperature: null,
+    effectiveTopP: null,
+    effectiveFrequencyPenalty: null,
+    effectivePresencePenalty: null,
+    message: '尚未保存任何模型 profile。',
+  };
+}
+
+function normalizeModelSettings(payload) {
+  const source = Array.isArray(payload) ? payload[0] : payload;
+  const stateValue = {
+    ...defaultModelState(),
+    ...(source || {}),
+  };
+  stateValue.profiles = Array.isArray(stateValue.profiles)
+    ? stateValue.profiles.map((item) => {
+        const legacyMaxOutputTokens = normalizeOptionalNumber(item.maxOutputTokens);
+        return {
+          id: item.id || '',
+          name: item.name || '',
+          provider: item.provider || 'openai',
+          apiType: item.apiType || 'responses',
+          baseUrl: item.baseUrl || MODEL_PROVIDER_DEFAULTS[item.provider || 'openai']?.baseUrl || '',
+          model: item.model || '',
+          requestTimeoutSeconds: normalizeOptionalNumber(item.requestTimeoutSeconds),
+          hasApiKey: Boolean(item.hasApiKey),
+          apiKeyMasked: item.apiKeyMasked || (item.hasApiKey ? '********' : '(empty)'),
+          active: Boolean(item.active),
+          maxOutputTokensText: coalesceOptionalNumber(item.maxOutputTokensText, legacyMaxOutputTokens),
+          maxOutputTokensJSON: coalesceOptionalNumber(item.maxOutputTokensJSON, legacyMaxOutputTokens),
+          maxOutputTokens: legacyMaxOutputTokens,
+          temperature: normalizeOptionalNumber(item.temperature),
+          topP: normalizeOptionalNumber(item.topP),
+          frequencyPenalty: normalizeOptionalNumber(item.frequencyPenalty),
+          presencePenalty: normalizeOptionalNumber(item.presencePenalty),
+        };
+      })
+    : [];
+  stateValue.effectiveMaxOutputTokensText = coalesceOptionalNumber(stateValue.effectiveMaxOutputTokensText, stateValue.effectiveMaxOutputTokens);
+  stateValue.effectiveMaxOutputTokensJSON = coalesceOptionalNumber(stateValue.effectiveMaxOutputTokensJSON, stateValue.effectiveMaxOutputTokens);
+  stateValue.effectiveRequestTimeoutSeconds = normalizeOptionalNumber(stateValue.effectiveRequestTimeoutSeconds);
+  stateValue.effectiveTemperature = normalizeOptionalNumber(stateValue.effectiveTemperature);
+  stateValue.effectiveTopP = normalizeOptionalNumber(stateValue.effectiveTopP);
+  stateValue.effectiveFrequencyPenalty = normalizeOptionalNumber(stateValue.effectiveFrequencyPenalty);
+  stateValue.effectivePresencePenalty = normalizeOptionalNumber(stateValue.effectivePresencePenalty);
+  return stateValue;
+}
+
+function defaultSettingsState() {
+  return {
+    weixinHistoryMessages: 12,
+    weixinHistoryRunes: 360,
+    weixinEverythingPath: '',
+  };
+}
+
+function normalizeSettingsState(payload) {
+  const source = Array.isArray(payload) ? payload[0] : payload;
+  return {
+    ...defaultSettingsState(),
+    ...(source || {}),
+    weixinHistoryMessages: Number(source?.weixinHistoryMessages ?? 12),
+    weixinHistoryRunes: Number(source?.weixinHistoryRunes ?? 360),
+    weixinEverythingPath: String(source?.weixinEverythingPath ?? ''),
+  };
+}
+
+function defaultWeixinState() {
+  return {
+    connected: false,
+    loggingIn: false,
+    hasAccount: false,
+    accountId: '',
+    userId: '',
+    qrCode: '',
+    qrCodeDataUrl: '',
+    message: '未连接微信，可在桌面端直接生成二维码扫码登录。',
+  };
+}
+
+function normalizeWeixinStatus(payload) {
+  const source = Array.isArray(payload) ? payload[0] : payload;
+  return {
+    ...defaultWeixinState(),
+    ...(source || {}),
+  };
+}
+
+/* Source: js/shared/utils.js */
+function showBanner(message, isError) {
+  const banner = document.getElementById('banner');
+  if (!banner) return;
+
+  banner.hidden = false;
+  banner.textContent = message;
+  banner.style.borderColor = isError ? 'var(--danger)' : 'var(--accent-primary)';
+
+  window.clearTimeout(bannerTimer);
+  bannerTimer = window.setTimeout(() => {
+    banner.hidden = true;
+  }, 3200);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function nowLabel() {
+  return new Date().toLocaleString('zh-CN', { hour12: false });
+}
+
+function relativeTimeLabel(timestamp) {
+  const value = Number(timestamp || 0);
+  if (!value) return '未安排';
+
+  const diffSeconds = value - Math.floor(Date.now() / 1000);
+  const absSeconds = Math.abs(diffSeconds);
+  const future = diffSeconds >= 0;
+
+  if (absSeconds < 60) {
+    return future ? '1 分钟内' : '刚刚';
+  }
+
+  const units = [
+    { size: 24 * 60 * 60, label: '天' },
+    { size: 60 * 60, label: '小时' },
+    { size: 60, label: '分钟' },
+  ];
+
+  for (const unit of units) {
+    if (absSeconds >= unit.size) {
+      const amount = Math.floor(absSeconds / unit.size);
+      return future ? `${amount} ${unit.label}后` : `${amount} ${unit.label}前`;
+    }
+  }
+
+  return future ? '即将执行' : '已执行';
+}
+
+function asMessage(error) {
+  if (!error) return '发生未知错误。';
+  if (typeof error === 'string') return error;
+  if (error.message) return error.message;
+  return String(error);
+}
+
+async function openExternalLink(targetURL) {
+  try {
+    await state.backend.OpenExternalURL(targetURL);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+function renderMarkdown(source) {
+  const normalized = String(source ?? '').replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n');
+  const blocks = [];
+
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    const fence = line.match(/^```([\w+-]*)\s*$/);
+    if (fence) {
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !/^```/.test(lines[index])) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      const language = fence[1] ? ` class="language-${escapeAttribute(fence[1])}"` : '';
+      blocks.push(`<pre><code${language}>${escapeHTML(codeLines.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      const level = heading[1].length;
+      blocks.push(`<h${level}>${renderInlineMarkdown(heading[2].trim())}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (/^([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
+      blocks.push('<hr>');
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*>/.test(line)) {
+      const quoteLines = [];
+      while (index < lines.length && /^\s*>/.test(lines[index])) {
+        quoteLines.push(lines[index].replace(/^\s*>\s?/, ''));
+        index += 1;
+      }
+      blocks.push(`<blockquote>${renderMarkdown(quoteLines.join('\n'))}</blockquote>`);
+      continue;
+    }
+
+    const table = parseMarkdownTable(lines, index);
+    if (table) {
+      blocks.push(table.html);
+      index = table.nextIndex;
+      continue;
+    }
+
+    const list = parseMarkdownList(lines, index);
+    if (list) {
+      blocks.push(list.html);
+      index = list.nextIndex;
+      continue;
+    }
+
+    const paragraphLines = [];
+    while (index < lines.length) {
+      const current = lines[index];
+      if (!current.trim()) break;
+      if (
+        /^```/.test(current) ||
+        /^(#{1,6})\s+/.test(current) ||
+        /^([-*_])(?:\s*\1){2,}\s*$/.test(current) ||
+        /^\s*>/.test(current) ||
+        parseMarkdownTable(lines, index) ||
+        parseMarkdownList(lines, index)
+      ) {
+        break;
+      }
+      paragraphLines.push(current.trim());
+      index += 1;
+    }
+    blocks.push(`<p>${renderInlineMarkdown(paragraphLines.join('\n'))}</p>`);
+  }
+
+  return blocks.join('');
+}
+
+function parseMarkdownList(lines, startIndex) {
+  const firstLine = lines[startIndex];
+  const firstMatch = firstLine.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
+  if (!firstMatch) return null;
+
+  const ordered = /\d+\./.test(firstMatch[2]);
+  const itemPattern = ordered ? /^(\s*)\d+\.\s+(.*)$/ : /^(\s*)[-*+]\s+(.*)$/;
+  const items = [];
+  let index = startIndex;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) break;
+
+    const match = line.match(itemPattern);
+    if (!match) break;
+
+    const itemLines = [match[2]];
+    index += 1;
+
+    while (index < lines.length) {
+      const continuation = lines[index];
+      if (!continuation.trim()) break;
+      if (itemPattern.test(continuation)) break;
+      if (
+        /^```/.test(continuation) ||
+        /^(#{1,6})\s+/.test(continuation) ||
+        /^([-*_])(?:\s*\1){2,}\s*$/.test(continuation) ||
+        /^\s*>/.test(continuation)
+      ) {
+        break;
+      }
+      itemLines.push(continuation.trim());
+      index += 1;
+    }
+
+    items.push(`<li>${renderInlineMarkdown(itemLines.join('\n'))}</li>`);
+  }
+
+  if (items.length === 0) return null;
+  const tag = ordered ? 'ol' : 'ul';
+  return {
+    html: `<${tag}>${items.join('')}</${tag}>`,
+    nextIndex: index,
+  };
+}
+
+function parseMarkdownTable(lines, startIndex) {
+  const headerLine = lines[startIndex];
+  const dividerLine = lines[startIndex + 1];
+  if (!headerLine || !dividerLine) return null;
+  if (!/\|/.test(headerLine)) return null;
+  if (!/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(dividerLine)) return null;
+
+  const parseRow = (line) =>
+    line
+      .trim()
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split('|')
+      .map((cell) => cell.trim());
+
+  const headers = parseRow(headerLine);
+  if (headers.length === 0) return null;
+
+  const bodyRows = [];
+  let index = startIndex + 2;
+  while (index < lines.length && /\|/.test(lines[index]) && lines[index].trim()) {
+    bodyRows.push(parseRow(lines[index]));
+    index += 1;
+  }
+
+  const headHTML = `<tr>${headers.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join('')}</tr>`;
+  const bodyHTML = bodyRows
+    .map((row) => `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join('')}</tr>`)
+    .join('');
+
+  return {
+    html: `<table><thead>${headHTML}</thead><tbody>${bodyHTML}</tbody></table>`,
+    nextIndex: index,
+  };
+}
+
+function renderInlineMarkdown(source) {
+  const tokens = [];
+  const stash = (html) => {
+    const key = `%%MDTOKEN${tokens.length}%%`;
+    tokens.push(html);
+    return key;
+  };
+
+  let text = String(source ?? '');
+  text = text.replace(/`([^`\n]+)`/g, (_, code) => stash(`<code>${escapeHTML(code)}</code>`));
+  text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
+    const safeURL = sanitizeURL(url);
+    if (!safeURL) return match;
+    return stash(
+      `<a href="${escapeAttribute(safeURL)}" target="_blank" rel="noreferrer noopener">${escapeHTML(label)}</a>`,
+    );
+  });
+
+  let html = escapeHTML(text);
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
+  html = html.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+  html = html.replace(/_([^_\n]+)_/g, '<em>$1</em>');
+  html = html.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+  html = html.replace(/\n/g, '<br>');
+
+  return html.replace(/%%MDTOKEN(\d+)%%/g, (_, tokenIndex) => tokens[Number(tokenIndex)] || '');
+}
+
+function sanitizeURL(value) {
+  const url = String(value ?? '').trim();
+  if (!url) return '';
+
+  try {
+    const parsed = new URL(url, window.location.href);
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
+      return parsed.href;
+    }
+  } catch (error) {
+    return '';
+  }
+
+  return '';
+}
+
+function sanitizeHTTPURL(value) {
+  const url = String(value ?? '').trim();
+  if (!url) return '';
+
+  try {
+    const parsed = new URL(url, window.location.href);
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol === 'http:' || protocol === 'https:') {
+      return parsed.href;
+    }
+  } catch (error) {
+    return '';
+  }
+
+  return '';
+}
+
+function preview(value, maxLength) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(maxLength - 1, 1))}…`;
+}
+
+function stripFrontmatter(source) {
+  const text = String(source ?? '').replace(/\r\n?/g, '\n').trim();
+  if (!text.startsWith('---\n')) return text;
+
+  const boundary = text.indexOf('\n---\n', 4);
+  if (boundary === -1) return text;
+  return text.slice(boundary + 5).trim();
+}
+
+function escapeHTML(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function escapeAttribute(value) {
+  return escapeHTML(value).replaceAll('`', '&#96;');
+}
+
+/* Source: js/core/state.js */
 const state = {
   backend: null,
   backendMode: "",
@@ -144,2524 +891,668 @@ const CHAT_SLASH_COMMANDS = [
   { label: '/cron', insert: '/cron ', description: '与 /notice 等价' },
 ];
 
-document.addEventListener("DOMContentLoaded", () => {
-  void init();
-});
-
-async function init() {
-  initTheme();
-  bindStaticEvents();
-  bindNavigation();
-  bindQuickAddModal();
-  bindChatSessionUI();
-  renderChatShortcuts();
-  renderChatContext();
-  renderChatAutocomplete();
-  renderProjectState();
-  renderChatSessions();
-  renderChat();
-  renderKnowledge();
-  renderReminders();
-  renderPrompts();
-  renderSkills();
-  renderTools();
-  renderModel();
-  renderWeixin();
-  renderSettings();
-
-  try {
-    state.backend = await waitForBackend();
-    state.backendMode = state.backend.mode || 'wails';
-    bindRuntimeEvents();
-    startBackendPolling();
-    await refreshAll();
-    await refreshChatState();
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-function bindNavigation() {
-  document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', (e) => {
-      e.preventDefault();
-      const viewName = item.dataset.view;
-      if (viewName) {
-        window.navigateTo(viewName);
-      }
-    });
-  });
-}
-
-function bindQuickAddModal() {
-  const modal = document.getElementById('quick-add-modal');
-  const openButtons = document.querySelectorAll('[data-open-quick-memory]');
-  const cancelBtn = document.getElementById('quick-add-cancel');
-  const confirmBtn = document.getElementById('quick-add-confirm');
-  const input = document.getElementById('quick-memory-input');
-
-  openButtons.forEach((button) => {
-    button.addEventListener('click', () => {
-      modal.style.display = 'flex';
-      input.focus();
-    });
-  });
-
-  const closeModal = () => {
-    modal.style.display = 'none';
-    input.value = '';
-  };
-
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', closeModal);
-  }
-
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) closeModal();
-  });
-
-  if (confirmBtn) {
-    confirmBtn.addEventListener('click', async () => {
-      const text = input.value.trim();
-      if (!text) {
-        showBanner('请输入记忆内容', true);
-        return;
-      }
-      try {
-        const result = await state.backend.CreateKnowledge(text);
-        input.value = '';
-        closeModal();
-        await refreshAll();
-        showBanner(result.message, false);
-      } catch (error) {
-        showBanner(asMessage(error), true);
-      }
-    });
-  }
-}
-
-function bindChatSessionUI() {
-  state.chatSidebarCollapsed = localStorage.getItem('myclaw-chat-sidebar-collapsed') === '1';
-  applyChatSidebarState();
-
-  const toggle = document.getElementById('chat-sidebar-toggle');
-  if (toggle) {
-    toggle.addEventListener('click', () => {
-      setChatSidebarCollapsed(!state.chatSidebarCollapsed);
-    });
-  }
-
-  const dialog = document.getElementById('chat-session-dialog');
-  if (dialog) {
-    dialog.addEventListener('click', (event) => {
-      if (event.target === dialog) {
-        closeChatSessionDialog();
-      }
-    });
-  }
-
-  const cancel = document.getElementById('chat-session-dialog-cancel');
-  if (cancel) {
-    cancel.addEventListener('click', closeChatSessionDialog);
-  }
-
-  const confirm = document.getElementById('chat-session-dialog-confirm');
-  if (confirm) {
-    confirm.addEventListener('click', () => void submitChatSessionDialog());
-  }
-
-  const modeOptions = document.getElementById('chat-session-dialog-mode-options');
-  if (modeOptions) {
-    modeOptions.addEventListener('click', (event) => {
-      const target = event.target instanceof Element
-        ? event.target.closest('[data-chat-session-mode-option]')
-        : null;
-      if (!target) return;
-      setChatSessionDialogMode(target.dataset.chatSessionModeOption || '');
-    });
-  }
-
-  const contextMenu = document.getElementById('chat-session-context-menu');
-  if (contextMenu) {
-    contextMenu.addEventListener('click', (event) => {
-      const target = event.target instanceof Element
-        ? event.target.closest('[data-chat-session-menu-action]')
-        : null;
-      if (!target) return;
-
-      const action = target.dataset.chatSessionMenuAction || '';
-      const sessionId = state.chatSessionContextMenu.sessionId || '';
-      closeChatSessionContextMenu();
-      if (!sessionId) return;
-      if (action === 'rename') {
-        void renameChatSession(sessionId);
-      } else if (action === 'delete') {
-        void deleteChatSession(sessionId);
-      }
-    });
-  }
-
-  const sessionList = document.getElementById('chat-session-list');
-  if (sessionList) {
-    sessionList.addEventListener('contextmenu', (event) => {
-      const target = event.target instanceof Element
-        ? event.target.closest('[data-chat-session]')
-        : null;
-      if (!target) return;
-
-      const sessionId = target.dataset.chatSession || '';
-      if (!sessionId) return;
-
-      event.preventDefault();
-      openChatSessionContextMenu(sessionId, event.clientX, event.clientY);
-    });
-
-    sessionList.addEventListener('dragstart', (event) => {
-      const row = event.target instanceof Element
-        ? event.target.closest('[data-chat-session-row]')
-        : null;
-      if (!row) return;
-
-      const sessionId = row.dataset.chatSessionRow || '';
-      if (!sessionId) {
-        event.preventDefault();
-        return;
-      }
-
-      closeChatSessionContextMenu();
-      clearChatSessionDropIndicators();
-      row.classList.add('dragging');
-      state.chatSessionDrag = {
-        ...state.chatSessionDrag,
-        sessionId,
-        targetSessionId: '',
-        placeBefore: true,
-      };
-
-      if (event.dataTransfer) {
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', sessionId);
-      }
-    });
-
-    sessionList.addEventListener('dragover', (event) => {
-      const draggingSessionId = state.chatSessionDrag.sessionId || '';
-      const row = event.target instanceof Element
-        ? event.target.closest('[data-chat-session-row]')
-        : null;
-      const targetSessionId = row?.dataset.chatSessionRow || '';
-      if (!draggingSessionId || !row || !targetSessionId || draggingSessionId === targetSessionId) return;
-
-      event.preventDefault();
-      const rect = row.getBoundingClientRect();
-      const placeBefore = event.clientY < rect.top + rect.height / 2;
-      clearChatSessionDropIndicators();
-      row.classList.add(placeBefore ? 'drop-before' : 'drop-after');
-      state.chatSessionDrag = {
-        ...state.chatSessionDrag,
-        targetSessionId,
-        placeBefore,
-      };
-      if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = 'move';
-      }
-    });
-
-    sessionList.addEventListener('drop', (event) => {
-      const draggingSessionId = state.chatSessionDrag.sessionId || '';
-      const row = event.target instanceof Element
-        ? event.target.closest('[data-chat-session-row]')
-        : null;
-      const targetSessionId = row?.dataset.chatSessionRow || state.chatSessionDrag.targetSessionId || '';
-      if (!draggingSessionId || !targetSessionId || draggingSessionId === targetSessionId) {
-        clearChatSessionDropIndicators();
-        state.chatSessionDrag = {
-          ...defaultChatSessionDragState(),
-          suppressClickUntil: Date.now() + 200,
-        };
-        return;
-      }
-
-      event.preventDefault();
-      reorderChatSessions(draggingSessionId, targetSessionId, state.chatSessionDrag.placeBefore);
-      clearChatSessionDropIndicators();
-      state.chatSessionDrag = {
-        ...defaultChatSessionDragState(),
-        suppressClickUntil: Date.now() + 200,
-      };
-    });
-
-    sessionList.addEventListener('dragend', () => {
-      clearChatSessionDropIndicators();
-      state.chatSessionDrag = {
-        ...defaultChatSessionDragState(),
-        suppressClickUntil: state.chatSessionDrag.suppressClickUntil || 0,
-      };
-    });
-  }
-
-  const input = document.getElementById('chat-session-dialog-input');
-  if (input) {
-    input.addEventListener('keydown', (event) => {
-      if (event.isComposing) return;
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        void submitChatSessionDialog();
-        return;
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeChatSessionDialog();
-      }
-    });
-  }
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape') return;
-    if (state.chatSessionDialog.open) {
-      event.preventDefault();
-      closeChatSessionDialog();
-      return;
-    }
-    if (state.chatSessionContextMenu.open) {
-      event.preventDefault();
-      closeChatSessionContextMenu();
-    }
-  });
-
-  window.addEventListener('blur', closeChatSessionContextMenu);
-}
-
-function setChatSidebarCollapsed(collapsed) {
-  state.chatSidebarCollapsed = Boolean(collapsed);
-  localStorage.setItem('myclaw-chat-sidebar-collapsed', state.chatSidebarCollapsed ? '1' : '0');
-  applyChatSidebarState();
-}
-
-function applyChatSidebarState() {
-  const container = document.getElementById('chat-container');
-  const toggle = document.getElementById('chat-sidebar-toggle');
-  const icon = document.getElementById('chat-sidebar-toggle-icon');
-  if (container) {
-    container.classList.toggle('chat-sidebar-collapsed', state.chatSidebarCollapsed);
-  }
-  if (toggle) {
-    const label = state.chatSidebarCollapsed ? '展开对话列表' : '收起对话列表';
-    toggle.setAttribute('aria-expanded', String(!state.chatSidebarCollapsed));
-    toggle.setAttribute('aria-label', label);
-    toggle.title = label;
-  }
-  if (icon) {
-    icon.textContent = state.chatSidebarCollapsed ? '>' : '<';
-  }
-}
-
-function setChatSessionDialogMode(mode) {
-  const nextMode = String(mode || '').trim().toLowerCase() === 'ask' ? 'ask' : 'agent';
-  state.chatSessionDialog = {
-    ...state.chatSessionDialog,
-    selectedMode: nextMode,
-  };
-
-  document.querySelectorAll('[data-chat-session-mode-option]').forEach((option) => {
-    option.classList.toggle('active', option.dataset.chatSessionModeOption === nextMode);
-  });
-
-  const modeHint = document.getElementById('chat-session-dialog-mode-hint');
-  if (modeHint) {
-    modeHint.textContent = nextMode === 'ask'
-      ? 'Ask 只走传统一问一答；需要时可在单条消息前加 @kb 临时附加知识库。'
-      : 'Agent 会自主判断是否调用知识库、提醒和本地只读工具。';
-  }
-}
-
-function openChatSessionDialog(mode, conversation) {
-  const dialog = document.getElementById('chat-session-dialog');
-  const card = dialog?.querySelector('.dialog-card');
-  const eyebrow = document.getElementById('chat-session-dialog-eyebrow');
-  const title = document.getElementById('chat-session-dialog-title');
-  const description = document.getElementById('chat-session-dialog-desc');
-  const targetLabel = document.getElementById('chat-session-dialog-target-label');
-  const targetValue = document.getElementById('chat-session-dialog-target-value');
-  const field = document.getElementById('chat-session-dialog-field');
-  const input = document.getElementById('chat-session-dialog-input');
-  const modeGroup = document.getElementById('chat-session-dialog-mode-group');
-  const modeHint = document.getElementById('chat-session-dialog-mode-hint');
-  const confirm = document.getElementById('chat-session-dialog-confirm');
-  if (!dialog || !card || !eyebrow || !title || !description || !targetLabel || !targetValue || !field || !input || !modeGroup || !modeHint || !confirm) {
-    return;
-  }
-
-  state.chatSessionDialog = {
-    ...defaultChatSessionDialogState(),
-    open: true,
-    mode,
-    sessionId: conversation?.sessionId || '',
-    itemId: conversation?.id || '',
-    restoreFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null,
-    selectedMode: conversation?.mode === 'ask' ? 'ask' : 'agent',
-  };
-
-  if (mode === 'knowledge-delete') {
-    const shortId = (conversation?.shortId || String(conversation?.id || '').slice(0, 8)).trim();
-    const previewText = truncateText(String(conversation?.preview || conversation?.text || '').replace(/\s+/g, ' ').trim(), 48);
-    const displayTitle = previewText ? `#${shortId} · ${previewText}` : `#${shortId}`;
-    state.chatSessionDialog.initialTitle = displayTitle;
-    targetLabel.textContent = '目标记忆';
-    targetValue.textContent = displayTitle;
-    eyebrow.textContent = '危险操作';
-    title.textContent = '删除记忆';
-    description.textContent = '删除后这条记忆会立即从当前记忆库移除，这个动作不能撤销。';
-    field.hidden = true;
-    input.value = displayTitle;
-    input.placeholder = '';
-    confirm.textContent = '删除';
-    confirm.classList.remove('btn-primary');
-    confirm.classList.add('btn-danger');
-    card.classList.add('danger');
-    modeGroup.hidden = true;
-  } else if (mode === 'prompt-delete') {
-    const shortId = (conversation?.shortId || String(conversation?.id || '').slice(0, 8)).trim();
-    const promptTitle = String(conversation?.title || '').trim();
-    const previewText = truncateText(String(conversation?.content || '').replace(/\s+/g, ' ').trim(), 48);
-    const displayTitle = promptTitle ? `#${shortId} · ${promptTitle}` : `#${shortId}`;
-    state.chatSessionDialog.initialTitle = displayTitle;
-    targetLabel.textContent = '目标 Prompt';
-    targetValue.textContent = displayTitle;
-    eyebrow.textContent = '危险操作';
-    title.textContent = '删除 Prompt';
-    description.textContent = previewText
-      ? `删除后这个 Prompt 会立即从 Prompt 库移除，这个动作不能撤销。\n\n内容预览：${previewText}`
-      : '删除后这个 Prompt 会立即从 Prompt 库移除，这个动作不能撤销。';
-    field.hidden = true;
-    input.value = displayTitle;
-    input.placeholder = '';
-    confirm.textContent = '删除';
-    confirm.classList.remove('btn-primary');
-    confirm.classList.add('btn-danger');
-    card.classList.add('danger');
-    modeGroup.hidden = true;
-  } else if (mode === 'refresh') {
-    const previewText = truncateText(String(conversation?.preview || '').replace(/\s+/g, ' ').trim(), 48);
-    const displayTitle = previewText || '当前回复';
-    state.chatSessionDialog.initialTitle = displayTitle;
-    targetLabel.textContent = '当前回复';
-    targetValue.textContent = displayTitle;
-    eyebrow.textContent = '确认操作';
-    title.textContent = '刷新当前回复';
-    description.textContent = '是不是一定要刷新？刷新后会丢弃当前这条 AI 回复，并重新生成。';
-    field.hidden = true;
-    input.value = displayTitle;
-    input.placeholder = '';
-    confirm.textContent = '刷新';
-    confirm.classList.remove('btn-danger');
-    confirm.classList.add('btn-primary');
-    card.classList.remove('danger');
-    modeGroup.hidden = true;
-  } else if (mode === 'new') {
-    targetLabel.textContent = '新对话';
-    targetValue.textContent = '创建后会固定当前会话模式';
-    eyebrow.textContent = '对话模式';
-    title.textContent = '新建对话';
-    description.textContent = '默认推荐 agent。ask 适合传统一问一答；agent 会自主判断是否调用知识库、提醒和本地只读工具。';
-    field.hidden = true;
-    modeGroup.hidden = false;
-    input.value = '';
-    input.placeholder = '';
-    confirm.textContent = '创建';
-    confirm.classList.remove('btn-danger');
-    confirm.classList.add('btn-primary');
-    card.classList.remove('danger');
-    setChatSessionDialogMode(state.chatSessionDialog.selectedMode);
-  } else {
-    const displayTitle = (conversation?.title || '新对话').trim() || '新对话';
-    state.chatSessionDialog.initialTitle = displayTitle;
-    targetLabel.textContent = '当前对话';
-    targetValue.textContent = displayTitle;
-
-    if (mode === 'delete') {
-      eyebrow.textContent = '危险操作';
-      title.textContent = '删除对话';
-      description.textContent = '删除后当前会话消息会一并移除，这个动作不能撤销。';
-      field.hidden = true;
-      input.value = displayTitle;
-      input.placeholder = '';
-      confirm.textContent = '删除';
-      confirm.classList.remove('btn-primary');
-      confirm.classList.add('btn-danger');
-      card.classList.add('danger');
-      modeGroup.hidden = true;
-    } else {
-      eyebrow.textContent = '对话标题';
-      title.textContent = '重命名对话';
-      description.textContent = '只修改列表显示，不影响当前上下文和消息内容。';
-      field.hidden = false;
-      modeGroup.hidden = true;
-      input.value = displayTitle;
-      input.placeholder = '输入对话标题';
-      confirm.textContent = '保存';
-      confirm.classList.remove('btn-danger');
-      confirm.classList.add('btn-primary');
-      card.classList.remove('danger');
-    }
-  }
-
-  dialog.hidden = false;
-  requestAnimationFrame(() => {
-    if (mode === 'delete' || mode === 'knowledge-delete' || mode === 'prompt-delete' || mode === 'refresh') {
-      confirm.focus();
-    } else if (mode === 'new') {
-      const activeMode = document.querySelector('.dialog-choice-option.active');
-      if (activeMode instanceof HTMLElement) {
-        activeMode.focus();
-      } else {
-        confirm.focus();
-      }
-    } else {
-      input.focus();
-      input.select();
-    }
-  });
-}
-
-function closeChatSessionDialog() {
-  const dialog = document.getElementById('chat-session-dialog');
-  const card = dialog?.querySelector('.dialog-card');
-  const targetLabel = document.getElementById('chat-session-dialog-target-label');
-  const targetValue = document.getElementById('chat-session-dialog-target-value');
-  const field = document.getElementById('chat-session-dialog-field');
-  const input = document.getElementById('chat-session-dialog-input');
-  const modeGroup = document.getElementById('chat-session-dialog-mode-group');
-  const modeHint = document.getElementById('chat-session-dialog-mode-hint');
-  const confirm = document.getElementById('chat-session-dialog-confirm');
-  const restoreFocus = state.chatSessionDialog.restoreFocus;
-
-  state.chatSessionDialog = defaultChatSessionDialogState();
-
-  if (dialog) {
-    dialog.hidden = true;
-  }
-  if (card) {
-    card.classList.remove('danger');
-  }
-  if (targetLabel) {
-    targetLabel.textContent = '当前对话';
-  }
-  if (targetValue) {
-    targetValue.textContent = '新对话';
-  }
-  if (field) {
-    field.hidden = false;
-  }
-  if (input) {
-    input.value = '';
-    input.placeholder = '输入对话标题';
-  }
-  if (modeGroup) {
-    modeGroup.hidden = true;
-  }
-  if (modeHint) {
-    modeHint.textContent = 'Agent 会自主判断是否调用知识库、提醒和本地只读工具。';
-  }
-  document.querySelectorAll('[data-chat-session-mode-option]').forEach((option) => {
-    option.classList.remove('active');
-  });
-  if (confirm) {
-    confirm.disabled = false;
-    confirm.textContent = '保存';
-    confirm.classList.remove('btn-danger');
-    confirm.classList.add('btn-primary');
-  }
-  if (restoreFocus && typeof restoreFocus.focus === 'function') {
-    restoreFocus.focus();
-  }
-}
-
-async function submitChatSessionDialog() {
-  if (!state.chatSessionDialog.open) return;
-
-  const { mode, sessionId, itemId, initialTitle } = state.chatSessionDialog;
-  const input = document.getElementById('chat-session-dialog-input');
-  const confirm = document.getElementById('chat-session-dialog-confirm');
-  if (!confirm) return;
-  if ((mode === 'rename' || mode === 'delete') && !sessionId) return;
-  if ((mode === 'knowledge-delete' || mode === 'prompt-delete') && !itemId) return;
-
-  if (mode === 'rename') {
-    const nextTitle = (input?.value || '').trim();
-    if (!nextTitle) {
-      showBanner('对话标题不能为空。', true);
-      if (input) input.focus();
-      return;
-    }
-    if (nextTitle === (initialTitle || '').trim()) {
-      closeChatSessionDialog();
-      return;
-    }
-  }
-
-  confirm.disabled = true;
-
-  try {
-    if (mode === 'refresh') {
-      closeChatSessionDialog();
-      await refreshCurrentChatResponse();
-      return;
-    }
-
-    if (mode === 'new') {
-      const selectedMode = state.chatSessionDialog.selectedMode === 'ask' ? 'ask' : 'agent';
-      applyChatState(normalizeChatState(await state.backend.NewChatSession(selectedMode)));
-      closeChatSessionDialog();
-      await Promise.all([refreshSkills(), refreshChatPrompt(), refreshProjectState()]);
-      const chatInput = document.getElementById('chat-input');
-      if (chatInput) chatInput.focus();
-      showBanner(`已开启 ${selectedMode} 对话。`, false);
-      return;
-    }
-
-    if (mode === 'delete') {
-      applyChatState(normalizeChatState(await state.backend.DeleteChatSession(sessionId)));
-      closeChatSessionDialog();
-      await Promise.all([refreshSkills(), refreshChatPrompt()]);
-      showBanner('对话已删除。', false);
-      return;
-    }
-
-    if (mode === 'knowledge-delete') {
-      const result = await state.backend.DeleteKnowledge(itemId);
-      closeChatSessionDialog();
-      await refreshAll();
-      showBanner(result.message, false);
-      return;
-    }
-
-    if (mode === 'prompt-delete') {
-      const result = await state.backend.DeletePrompt(itemId);
-      closeChatSessionDialog();
-      await refreshAll();
-      showBanner(result.message, false);
-      return;
-    }
-
-    applyChatState(normalizeChatState(await state.backend.RenameChatSession(sessionId, (input?.value || '').trim())));
-    closeChatSessionDialog();
-    showBanner('对话已重命名。', false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  } finally {
-    if (state.chatSessionDialog.open) {
-      confirm.disabled = false;
-    }
-  }
-}
-
-function bindStaticEvents() {
-  document.addEventListener('click', (event) => {
-    const anchor = event.target.closest('a[href]');
-    if (!anchor) return;
-
-    const targetURL = sanitizeHTTPURL(anchor.getAttribute('href') || anchor.href || '');
-    if (!targetURL) return;
-    if (state.backendMode !== 'wails' || !state.backend || typeof state.backend.OpenExternalURL !== 'function') {
-      return;
-    }
-
-    event.preventDefault();
-    void openExternalLink(targetURL);
-  });
-
-  // Theme toggle
-  const themeToggle = document.getElementById('theme-toggle');
-  if (themeToggle) {
-    themeToggle.addEventListener('click', toggleTheme);
-  }
-
-  const versionCheck = document.getElementById('version-check');
-  if (versionCheck) {
-    versionCheck.addEventListener('click', () => void checkLatestVersion());
-  }
-
-  const projectSwitch = document.getElementById('project-switch');
-  if (projectSwitch) {
-    projectSwitch.addEventListener('click', () => void setActiveProject());
-  }
-
-  const projectNameInput = document.getElementById('project-name-input');
-  if (projectNameInput) {
-    projectNameInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        void setActiveProject();
-      }
-    });
-  }
-
-  const projectList = document.getElementById('project-list');
-  if (projectList) {
-    projectList.addEventListener('click', (event) => {
-      const target = event.target.closest('[data-project]');
-      if (!target) return;
-
-      const project = target.dataset.project || '';
-      void setActiveProject(project);
-    });
-  }
-
-  // File import events
-  const dropZone = document.getElementById('drop-zone');
-  if (dropZone) {
-    dropZone.addEventListener('click', () => void browseFile());
-
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropZone.classList.add('dragover');
-    });
-
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.classList.remove('dragover');
-    });
-
-    dropZone.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
-      const file = e.dataTransfer.files[0];
-      if (file) {
-        handleFileDrop(file);
-      }
-    });
-  }
-
-  const importConfirm = document.getElementById('import-confirm');
-  if (importConfirm) {
-    importConfirm.addEventListener('click', () => void importFile());
-  }
-
-  const fileInput = document.getElementById('http-file-input');
-  if (fileInput) {
-    fileInput.addEventListener('change', (event) => {
-      const file = event.target.files && event.target.files[0];
-      if (file) {
-        handleFileDrop(file);
-      }
-    });
-  }
-
-  // Memory filter
-  const memoryFilter = document.getElementById('memory-filter');
-  if (memoryFilter) {
-    memoryFilter.addEventListener('input', (event) => {
-      state.filter = event.target.value.trim().toLowerCase();
-      renderKnowledge();
-    });
-  }
-
-  // Clear memory
-  const clearMemory = document.getElementById('clear-memory');
-  if (clearMemory) {
-    clearMemory.addEventListener('click', () => void clearKnowledge());
-  }
-
-  const reminderRefresh = document.getElementById('reminder-refresh');
-  if (reminderRefresh) {
-    reminderRefresh.addEventListener('click', () => void refreshReminders());
-  }
-
-  const promptFilter = document.getElementById('prompt-filter');
-  if (promptFilter) {
-    promptFilter.addEventListener('input', (event) => {
-      state.promptFilter = event.target.value.trim().toLowerCase();
-      renderPrompts();
-    });
-  }
-
-  const savePrompt = document.getElementById('save-prompt');
-  if (savePrompt) {
-    savePrompt.addEventListener('click', () => void createPrompt());
-  }
-
-  const clearPrompts = document.getElementById('clear-prompts');
-  if (clearPrompts) {
-    clearPrompts.addEventListener('click', () => void clearPromptsLibrary());
-  }
-
-  const settingsSave = document.getElementById('settings-save');
-  if (settingsSave) {
-    settingsSave.addEventListener('click', () => void saveSettings());
-  }
-
-  const skillImportTrigger = document.getElementById('skill-import-trigger');
-  if (skillImportTrigger) {
-    skillImportTrigger.addEventListener('click', () => void browseSkillArchive());
-  }
-
-  const skillZipInput = document.getElementById('http-skill-zip-input');
-  if (skillZipInput) {
-    skillZipInput.addEventListener('change', (event) => {
-      const file = event.target.files && event.target.files[0];
-      if (file) {
-        void importSkillArchiveFromFile(file);
-      }
-    });
-  }
-
-  const skillList = document.getElementById('skill-list');
-  if (skillList) {
-    skillList.addEventListener('click', (event) => {
-      const actionTarget = event.target.closest('[data-skill-action]');
-      if (actionTarget) {
-        const name = actionTarget.dataset.skillName || '';
-        if (actionTarget.dataset.skillAction === 'load') {
-          void loadSkill(name);
-        } else if (actionTarget.dataset.skillAction === 'unload') {
-          void unloadSkill(name);
-        }
-        return;
-      }
-
-      const card = event.target.closest('[data-skill-name]');
-      if (!card) return;
-      state.selectedSkillName = card.dataset.skillName || '';
-      renderSkills();
-    });
-  }
-
-  const skillDetailActions = document.getElementById('skill-detail-actions');
-  if (skillDetailActions) {
-    skillDetailActions.addEventListener('click', (event) => {
-      const target = event.target.closest('[data-skill-action]');
-      if (!target) return;
-
-      const name = target.dataset.skillName || '';
-      if (target.dataset.skillAction === 'load') {
-        void loadSkill(name);
-      } else if (target.dataset.skillAction === 'unload') {
-        void unloadSkill(name);
-      }
-    });
-  }
-
-  const toolList = document.getElementById('tool-list');
-  if (toolList) {
-    toolList.addEventListener('click', (event) => {
-      const actionTarget = event.target.closest('[data-tool-action]');
-      if (!actionTarget) return;
-
-      if (actionTarget.dataset.toolAction === 'save-everything-path') {
-        void saveSettings();
-      }
-    });
-  }
-
-  // Chat events
-  const chatSend = document.getElementById('chat-send');
-  if (chatSend) {
-    chatSend.addEventListener('click', () => void sendMessage());
-  }
-
-  const chatNewSession = document.getElementById('chat-new-session');
-  if (chatNewSession) {
-    chatNewSession.addEventListener('click', () => void startNewConversation());
-  }
-
-  const chatExportMarkdown = document.getElementById('chat-export-markdown');
-  if (chatExportMarkdown) {
-    chatExportMarkdown.addEventListener('click', () => void exportChatMarkdown());
-  }
-
-  const chatSessionList = document.getElementById('chat-session-list');
-  if (chatSessionList) {
-    chatSessionList.addEventListener('click', (event) => {
-      if (Date.now() < (state.chatSessionDrag.suppressClickUntil || 0)) return;
-      closeChatSessionContextMenu();
-      const target = event.target.closest('[data-chat-session]');
-      if (!target) return;
-      const sessionId = target.dataset.chatSession || '';
-      if (!sessionId) return;
-      void switchChatSession(sessionId);
-    });
-  }
-
-  const chatList = document.getElementById('chat-list');
-  if (chatList) {
-    chatList.addEventListener('click', (event) => {
-      const refreshButton = event.target.closest('[data-chat-refresh-index]');
-      if (refreshButton) {
-        const messageIndex = Number(refreshButton.dataset.chatRefreshIndex || '-1');
-        if (!Number.isInteger(messageIndex) || messageIndex < 0) return;
-        void confirmRefreshChatMessage(messageIndex);
-        return;
-      }
-
-      const copyButton = event.target.closest('[data-chat-copy-index]');
-      if (copyButton) {
-        const messageIndex = Number(copyButton.dataset.chatCopyIndex || '-1');
-        if (!Number.isInteger(messageIndex) || messageIndex < 0) return;
-        void copyChatMessage(messageIndex);
-        return;
-      }
-
-      const target = event.target.closest('[data-chat-option]');
-      if (!target) return;
-      const value = target.dataset.chatOptionValue || target.dataset.chatOption || '';
-      const label = target.dataset.chatOptionLabel || value;
-      const question = target.dataset.chatOptionQuestion || '';
-      if (!value || !question) return;
-      void sendChatOption(question, value, label);
-    });
-  }
-
-  const chatInput = document.getElementById('chat-input');
-  if (chatInput) {
-    autoResizeChatInput();
-    chatInput.addEventListener('keydown', (e) => {
-      if (state.autocomplete.open) {
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          moveAutocompleteSelection(1);
-          return;
-        }
-        if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          moveAutocompleteSelection(-1);
-          return;
-        }
-        if (e.key === 'Enter' || e.key === 'Tab') {
-          const selected = (state.autocomplete.items || [])[state.autocomplete.selectedIndex];
-          if (selected && !selected.disabled) {
-            e.preventDefault();
-            void applySelectedAutocompleteItem();
-            return;
-          }
-          if (e.key === 'Tab') {
-            e.preventDefault();
-            closeChatAutocomplete();
-            return;
-          }
-        }
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          closeChatAutocomplete();
-          return;
-        }
-      }
-
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        void sendMessage();
-      }
-    });
-
-    chatInput.addEventListener('input', () => {
-      autoResizeChatInput();
-      updateChatAutocomplete();
-    });
-    chatInput.addEventListener('click', updateChatAutocomplete);
-    chatInput.addEventListener('focus', updateChatAutocomplete);
-  }
-
-  const chatContextBar = document.getElementById('chat-context-bar');
-  if (chatContextBar) {
-    chatContextBar.addEventListener('click', (event) => {
-      const target = event.target.closest('[data-chat-context-action]');
-      if (!target) return;
-
-      const action = target.dataset.chatContextAction || '';
-      const value = target.dataset.value || '';
-      if (action === 'clear-prompt') {
-        void clearChatPromptSelection();
-      } else if (action === 'unload-skill') {
-        void unloadSkill(value);
-      }
-    });
-  }
-
-  const chatAutocomplete = document.getElementById('chat-autocomplete');
-  if (chatAutocomplete) {
-    chatAutocomplete.addEventListener('mousedown', (event) => {
-      event.preventDefault();
-    });
-    chatAutocomplete.addEventListener('click', (event) => {
-      const target = event.target.closest('[data-autocomplete-index]');
-      if (!target) return;
-      const index = Number(target.dataset.autocompleteIndex || '-1');
-      if (Number.isNaN(index) || index < 0) return;
-      state.autocomplete.selectedIndex = index;
-      renderChatAutocomplete();
-      void applySelectedAutocompleteItem();
-    });
-  }
-
-  const weixinStart = document.getElementById('weixin-start-login');
-  if (weixinStart) {
-    weixinStart.addEventListener('click', () => void startWeixinLogin());
-  }
-
-  const weixinStop = document.getElementById('weixin-stop-login');
-  if (weixinStop) {
-    weixinStop.addEventListener('click', () => void cancelWeixinLogin());
-  }
-
-  const weixinLogout = document.getElementById('weixin-logout');
-  if (weixinLogout) {
-    weixinLogout.addEventListener('click', () => void logoutWeixin());
-  }
-
-  const modelSave = document.getElementById('model-save');
-  if (modelSave) {
-    modelSave.addEventListener('click', () => void saveModelConfig());
-  }
-
-  const modelNew = document.getElementById('model-new');
-  if (modelNew) {
-    modelNew.addEventListener('click', () => createNewModelProfileDraft());
-  }
-
-  const modelSetActive = document.getElementById('model-set-active');
-  if (modelSetActive) {
-    modelSetActive.addEventListener('click', () => void setActiveModelProfile());
-  }
-
-  const modelTest = document.getElementById('model-test');
-  if (modelTest) {
-    modelTest.addEventListener('click', () => void testModelConnection());
-  }
-
-  const modelDelete = document.getElementById('model-delete');
-  if (modelDelete) {
-    modelDelete.addEventListener('click', () => void deleteModelProfile());
-  }
-
-  const modelProfileSelect = document.getElementById('model-profile-select');
-  if (modelProfileSelect) {
-    modelProfileSelect.addEventListener('change', () => syncModelFormFromSelection(true));
-  }
-
-  const modelProvider = document.getElementById('model-provider');
-  if (modelProvider) {
-    modelProvider.addEventListener('change', () => syncModelProviderFields(true));
-  }
-
-  // Memory list events
-  const memoryList = document.getElementById('memory-list');
-  if (memoryList) {
-    memoryList.addEventListener('click', (event) => {
-      const target = event.target.closest('[data-action]');
-      if (!target) return;
-
-      const id = target.dataset.id || '';
-      switch (target.dataset.action) {
-        case 'toggle-expand':
-          toggleMemoryExpand(id);
-          break;
-        case 'toggle-append':
-          state.openAppendId = state.openAppendId === id ? '' : id;
-          renderKnowledge();
-          break;
-        case 'delete':
-          void deleteKnowledge(id);
-          break;
-        case 'save-append':
-          void appendKnowledge(id);
-          break;
-      }
-    });
-
-    memoryList.addEventListener('input', (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLTextAreaElement) || !target.dataset.id) return;
-      state.appendDrafts[target.dataset.id] = target.value;
-    });
-  }
-
-  const promptList = document.getElementById('prompt-list');
-  if (promptList) {
-    promptList.addEventListener('click', (event) => {
-      const target = event.target.closest('[data-action]');
-      if (!target) return;
-
-      const id = target.dataset.id || '';
-      switch (target.dataset.action) {
-        case 'toggle-expand-prompt':
-          togglePromptExpand(id);
-          break;
-        case 'insert-prompt':
-          insertPromptToChat(id);
-          break;
-        case 'delete-prompt':
-          void deletePrompt(id);
-          break;
-      }
-    });
-  }
-
-  document.addEventListener('click', (event) => {
-    if (!event.target.closest('#chat-session-context-menu')) {
-      closeChatSessionContextMenu();
-    }
-    if (event.target.closest('.chat-input-area')) return;
-    closeChatAutocomplete();
-  });
-}
-
-function bindRuntimeEvents() {
-  if (!window.runtime || typeof window.runtime.EventsOn !== 'function') return;
-
-  window.runtime.EventsOn('reminder:due', (payload) => {
-    const reminder = Array.isArray(payload) ? payload[0] : payload;
-    if (!reminder) return;
-
-    const shortId = reminder.shortId || reminder.id || 'notice';
-    const message = reminder.message || '提醒触发';
-    state.chat.push({
-      role: 'system',
-      text: `[提醒 #${shortId}] ${message}`,
-      time: nowLabel(),
-    });
-    syncCurrentChatConversationFromMessages();
-    renderChat();
-    showBanner(`提醒 #${shortId}: ${message}`, false);
-    void refreshReminders().catch(() => {});
-  });
-
-  window.runtime.EventsOn('weixin:status', (payload) => {
-    const next = normalizeWeixinStatus(payload);
-    applyWeixinStatus(next, true);
-  });
-
-  window.runtime.EventsOn('chat:changed', () => {
-    if (state.chatStreaming) return;
-    void refreshChatState().catch(() => {});
-  });
-
-  window.runtime.EventsOn('chat:stream', (payload) => {
-    const event = Array.isArray(payload) ? payload[0] : payload;
-    dispatchChatStreamEvent(event);
-  });
-}
-
-function dispatchChatStreamEvent(event) {
-  if (!event || !event.requestId) return;
-  const handler = state.chatStreamHandlers[event.requestId];
-  if (typeof handler === 'function') {
-    handler(event);
-  }
-}
-
-function renderChatShortcuts() {
-  document.querySelectorAll('.shortcut-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      const input = document.getElementById('chat-input');
-      if (input) {
-        input.value = chip.dataset.cmd || '';
-        const cursor = input.value.length;
-        input.setSelectionRange(cursor, cursor);
-        autoResizeChatInput();
-        updateChatAutocomplete();
-        input.focus();
-      }
-    });
-  });
-}
-
-async function handleFileDrop(file) {
-  state.fileObject = file;
-  const path = file.path || file.name;
-  state.filePath = path;
-  updateFilePreview(file);
-}
-
-function updateFilePreview(file) {
-  const preview = document.getElementById('file-preview');
-  const fileName = document.getElementById('file-name');
-  const fileSize = document.getElementById('file-size');
-  const fileIcon = document.getElementById('file-icon');
-
-  if (preview) preview.classList.add('has-file');
-  if (fileName) fileName.textContent = file.name;
-
-  const sizeValue = Number(file.size || 0);
-  const sizeMB = (sizeValue / (1024 * 1024)).toFixed(2);
-  if (fileSize) fileSize.textContent = sizeValue > 0 ? `${sizeMB} MB` : '本地文件';
-
-  if (fileIcon) {
-    if ((file.type || '').includes('image')) {
-      fileIcon.textContent = '🖼';
-    } else if ((file.type || '').includes('pdf') || /\.pdf$/i.test(file.name || '')) {
-      fileIcon.textContent = '📕';
-    } else {
-      fileIcon.textContent = '📄';
-    }
-  }
-}
-
-async function waitForBackend() {
-  for (let index = 0; index < 80; index += 1) {
-    const backend = window.go && window.go.main && window.go.main.DesktopApp;
-    if (backend) return createWailsBackend(backend);
-    await delay(50);
-  }
-  if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
-    return createHTTPBackend();
-  }
-  throw new Error('Wails 后端尚未就绪。');
-}
-
-function createWailsBackend(backend) {
-  return {
-    mode: 'wails',
-    GetOverview: () => backend.GetOverview(),
-    GetProjectState: () => backend.GetProjectState(),
-    SetActiveProject: (name) => backend.SetActiveProject(name),
-    ListReminders: () => backend.ListReminders(),
-    ListKnowledge: () => backend.ListKnowledge(),
-    CreateKnowledge: (text) => backend.CreateKnowledge(text),
-    AppendKnowledge: (idOrPrefix, addition) => backend.AppendKnowledge(idOrPrefix, addition),
-    DeleteKnowledge: (idOrPrefix) => backend.DeleteKnowledge(idOrPrefix),
-    ClearKnowledge: () => backend.ClearKnowledge(),
-    ListPrompts: () => backend.ListPrompts(),
-    CreatePrompt: (title, content) => backend.CreatePrompt(title, content),
-    DeletePrompt: (idOrPrefix) => backend.DeletePrompt(idOrPrefix),
-    ClearPrompts: () => backend.ClearPrompts(),
-    ListSkills: () => backend.ListSkills(),
-    ListTools: () => backend.ListTools(),
-    LoadSkill: (name) => backend.LoadSkill(name),
-    UnloadSkill: (name) => backend.UnloadSkill(name),
-    OpenSkillImportDialog: () => backend.OpenSkillImportDialog(),
-    ImportSkillArchive: (path) => backend.ImportSkillArchive(path),
-    UploadSkillArchive: () => Promise.reject(new Error('Wails 模式不使用浏览器上传。')),
-    ConfirmAction: (title, message) => backend.ConfirmAction(title, message),
-    OpenImportDialog: () => backend.OpenImportDialog(),
-    ImportFile: (path) => backend.ImportFile(path),
-    UploadImportFile: () => Promise.reject(new Error('Wails 模式不使用浏览器上传。')),
-    SendMessage: (input) => backend.SendMessage(input),
-    SendMessageStream: async (input, handlers = {}) => {
-      if (typeof backend.SendMessageStream !== 'function' || !window.runtime || typeof window.runtime.EventsOn !== 'function') {
-        const result = await backend.SendMessage(input);
-        if (typeof handlers.onDelta === 'function' && result?.reply) {
-          handlers.onDelta(result.reply);
-        }
-        return result;
-      }
-
-      const requestId = newChatStreamRequestID();
-      state.chatStreamHandlers[requestId] = (event) => {
-        if ((event?.delta || '') && typeof handlers.onDelta === 'function') {
-          handlers.onDelta(event.delta);
-        }
-      };
-      try {
-        return await backend.SendMessageStream(requestId, input);
-      } finally {
-        delete state.chatStreamHandlers[requestId];
-      }
-    },
-    GetChatState: () => backend.GetChatState(),
-    GetVersionInfo: () => backend.GetVersionInfo(),
-    OpenExternalURL: (url) => backend.OpenExternalURL(url),
-    RefreshChatResponse: () => backend.RefreshChatResponse(),
-    ExportChatMarkdown: () => backend.ExportChatMarkdown(),
-    NewChatSession: (mode = 'agent') => backend.NewChatSession(mode),
-    SwitchChatSession: (sessionId) => backend.SwitchChatSession(sessionId),
-    RenameChatSession: (sessionId, title) => backend.RenameChatSession(sessionId, title),
-    DeleteChatSession: (sessionId) => backend.DeleteChatSession(sessionId),
-    GetChatPrompt: () => backend.GetChatPrompt(),
-    SetChatPrompt: (idOrPrefix) => backend.SetChatPrompt(idOrPrefix),
-    ClearChatPrompt: () => backend.ClearChatPrompt(),
-    GetModelSettings: () => backend.GetModelSettings(),
-    SaveModelConfig: (payload) => backend.SaveModelConfig(payload),
-    TestModelConnection: (id) => backend.TestModelConnection(id),
-    DeleteModelConfig: (id) => backend.DeleteModelConfig(id),
-    SetActiveModel: (id) => backend.SetActiveModel(id),
-    GetWeixinStatus: () => backend.GetWeixinStatus(),
-    StartWeixinLogin: () => backend.StartWeixinLogin(),
-    CancelWeixinLogin: () => backend.CancelWeixinLogin(),
-    LogoutWeixin: () => backend.LogoutWeixin(),
-    GetSettings: () => backend.GetSettings(),
-    SaveSettings: (payload) => backend.SaveSettings(payload),
-  };
-}
-
-function createHTTPBackend() {
-  return {
-    mode: 'http',
-    GetOverview: () => requestJSON('GET', '/api/overview'),
-    GetProjectState: () => requestJSON('GET', '/api/projects'),
-    SetActiveProject: (name) => requestJSON('POST', '/api/projects/active', { name }),
-    ListReminders: () => requestJSON('GET', '/api/reminders'),
-    ListKnowledge: () => requestJSON('GET', '/api/knowledge'),
-    CreateKnowledge: (text) => requestJSON('POST', '/api/knowledge', { text }),
-    AppendKnowledge: (idOrPrefix, addition) => requestJSON('POST', '/api/knowledge/append', { idOrPrefix, addition }),
-    DeleteKnowledge: (idOrPrefix) => requestJSON('POST', '/api/knowledge/delete', { idOrPrefix }),
-    ClearKnowledge: () => requestJSON('POST', '/api/knowledge/clear'),
-    ListPrompts: () => requestJSON('GET', '/api/prompts'),
-    CreatePrompt: (title, content) => requestJSON('POST', '/api/prompts', { title, content }),
-    DeletePrompt: (idOrPrefix) => requestJSON('POST', '/api/prompts/delete', { idOrPrefix }),
-    ClearPrompts: () => requestJSON('POST', '/api/prompts/clear'),
-    ListSkills: () => requestJSON('GET', '/api/skills'),
-    ListTools: () => requestJSON('GET', '/api/tools'),
-    LoadSkill: (name) => requestJSON('POST', '/api/skills/load', { name }),
-    UnloadSkill: (name) => requestJSON('POST', '/api/skills/unload', { name }),
-    OpenSkillImportDialog: async () => '',
-    ImportSkillArchive: async () => {
-      throw new Error('HTTP 模式请直接选择 zip 文件上传。');
-    },
-    UploadSkillArchive: (file) => uploadFile('/api/skills/upload', file),
-    ConfirmAction: async (title, message) => window.confirm(`${title}\n\n${message}`),
-    OpenImportDialog: async () => '',
-    ImportFile: async () => {
-      throw new Error('HTTP 模式请直接选择本地文件上传。');
-    },
-    UploadImportFile: (file) => uploadFile('/api/import/upload', file),
-    SendMessage: (input) => requestJSON('POST', '/api/chat', { input }),
-    SendMessageStream: (input, handlers = {}) => streamJSON('POST', '/api/chat/stream', { input }, handlers),
-    GetChatState: () => requestJSON('GET', '/api/chat/state'),
-    GetVersionInfo: () => requestJSON('GET', '/api/version'),
-    OpenExternalURL: (url) => requestJSON('POST', '/api/open-external', { url }),
-    RefreshChatResponse: () => requestJSON('POST', '/api/chat/refresh'),
-    ExportChatMarkdown: async () => {
-      const payload = await requestJSON('GET', '/api/chat/export-markdown');
-      downloadTextFile(payload.filename || 'myclaw-chat.md', payload.markdown || '', 'text/markdown;charset=utf-8');
-      return { message: `已导出 Markdown：${payload.filename || 'myclaw-chat.md'}` };
-    },
-    NewChatSession: (mode = 'agent') => requestJSON('POST', '/api/chat/session/new', { mode }),
-    SwitchChatSession: (sessionId) => requestJSON('POST', '/api/chat/session/switch', { sessionId }),
-    RenameChatSession: (sessionId, title) => requestJSON('POST', '/api/chat/session/rename', { sessionId, title }),
-    DeleteChatSession: (sessionId) => requestJSON('POST', '/api/chat/session/delete', { sessionId }),
-    GetChatPrompt: () => requestJSON('GET', '/api/chat/prompt'),
-    SetChatPrompt: (idOrPrefix) => requestJSON('POST', '/api/chat/prompt', { idOrPrefix }),
-    ClearChatPrompt: () => requestJSON('DELETE', '/api/chat/prompt'),
-    GetModelSettings: () => requestJSON('GET', '/api/model'),
-    SaveModelConfig: (payload) => requestJSON('POST', '/api/model/save', payload),
-    TestModelConnection: (id) => requestJSON('POST', '/api/model/test', { id }),
-    DeleteModelConfig: (id) => requestJSON('POST', '/api/model/delete', { id }),
-    SetActiveModel: (id) => requestJSON('POST', '/api/model/active', { id }),
-    GetWeixinStatus: () => requestJSON('GET', '/api/weixin/status'),
-    StartWeixinLogin: () => requestJSON('POST', '/api/weixin/login'),
-    CancelWeixinLogin: () => requestJSON('POST', '/api/weixin/cancel'),
-    LogoutWeixin: () => requestJSON('POST', '/api/weixin/logout'),
-    GetSettings: () => requestJSON('GET', '/api/settings'),
-    SaveSettings: (payload) => requestJSON('POST', '/api/settings', payload),
-  };
-}
-
-async function requestJSON(method, url, body) {
-  const options = { method, headers: {} };
-  if (body !== undefined) {
-    options.headers['Content-Type'] = 'application/json';
-    options.body = JSON.stringify(body);
-  }
-
-  const response = await fetch(url, options);
-  const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
-  if (!response.ok) {
-    throw new Error((payload && payload.error) || `HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-async function streamJSON(method, url, body, handlers = {}) {
-  const options = { method, headers: {} };
-  if (body !== undefined) {
-    options.headers['Content-Type'] = 'application/json';
-    options.body = JSON.stringify(body);
-  }
-
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    const text = await response.text();
-    const payload = text ? JSON.parse(text) : null;
-    throw new Error((payload && payload.error) || `HTTP ${response.status}`);
-  }
-  if (!response.body) {
-    throw new Error('浏览器不支持流式响应。');
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let result = null;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-
-    let newlineIndex = buffer.indexOf('\n');
-    while (newlineIndex >= 0) {
-      const line = buffer.slice(0, newlineIndex).trim();
-      buffer = buffer.slice(newlineIndex + 1);
-      if (line) {
-        const event = JSON.parse(line);
-        if (event.type === 'delta') {
-          if (typeof handlers.onDelta === 'function' && event.delta) {
-            handlers.onDelta(event.delta);
-          }
-        } else if (event.type === 'done') {
-          result = event;
-        } else if (event.type === 'error') {
-          throw new Error(event.message || '流式请求失败');
-        }
-      }
-      newlineIndex = buffer.indexOf('\n');
-    }
-
-    if (done) break;
-  }
-
-  const tail = buffer.trim();
-  if (tail) {
-    const event = JSON.parse(tail);
-    if (event.type === 'done') {
-      result = event;
-    } else if (event.type === 'error') {
-      throw new Error(event.message || '流式请求失败');
-    } else if (event.type === 'delta' && typeof handlers.onDelta === 'function' && event.delta) {
-      handlers.onDelta(event.delta);
-    }
-  }
-
-  if (!result) {
-    throw new Error('流式响应提前结束。');
-  }
-  return result;
-}
-
-async function uploadFile(url, file) {
-  const formData = new FormData();
-  formData.set('file', file, file.name || 'upload.bin');
-
-  const response = await fetch(url, {
-    method: 'POST',
-    body: formData,
-  });
-  const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
-  if (!response.ok) {
-    throw new Error((payload && payload.error) || `HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-function downloadTextFile(filename, content, type = 'text/plain;charset=utf-8') {
-  const blob = new Blob([String(content ?? '')], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = String(filename || 'download.txt').trim() || 'download.txt';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function startBackendPolling() {
-  window.clearInterval(devPollTimer);
-  if (state.backendMode !== 'http') return;
-
-  devPollTimer = window.setInterval(() => {
-    void Promise.all([refreshProjectState(), refreshOverview(), refreshReminders(), refreshModel(), refreshWeixin()]).catch(() => {});
-  }, 2000);
-}
-
-async function refreshAll() {
-  await Promise.all([refreshProjectState(), refreshOverview(), refreshReminders(), refreshKnowledge(), refreshPrompts(), refreshSkills(), refreshTools(), refreshChatPrompt(), refreshModel(), refreshWeixin(), refreshSettings()]);
-}
-
-async function refreshProjectState() {
-  state.projectState = normalizeProjectState(await state.backend.GetProjectState());
-  renderProjectState();
-}
-
-async function refreshChatState() {
-  applyChatState(normalizeChatState(await state.backend.GetChatState()));
-}
-
-async function refreshOverview() {
-  state.overview = await state.backend.GetOverview();
-
-  // Update dashboard stats
-  const dataDirStat = document.getElementById('data-dir-stat');
-  const dataDirPath = document.getElementById('data-dir-path');
-  const memoryCountStat = document.getElementById('memory-count-stat');
-  const promptCountStat = document.getElementById('prompt-count-stat');
-  const aiStatusStat = document.getElementById('ai-status-stat');
-  const aiMessageStat = document.getElementById('ai-message-stat');
-  const weixinStatusStat = document.getElementById('weixin-status-stat');
-  const weixinMessageStat = document.getElementById('weixin-message-stat');
-
-  if (dataDirStat) dataDirStat.textContent = '已配置';
-  if (dataDirPath) dataDirPath.textContent = state.overview.dataDir;
-  if (memoryCountStat) memoryCountStat.textContent = String(state.overview.knowledgeCount);
-  if (promptCountStat) promptCountStat.textContent = String(state.overview.promptCount || 0);
-  if (aiStatusStat) aiStatusStat.textContent = state.overview.aiAvailable ? '已配置' : '未配置';
-  if (aiMessageStat) aiMessageStat.textContent = state.overview.aiMessage;
-  if (weixinStatusStat) weixinStatusStat.textContent = state.overview.weixinConnected ? '已连接' : '未连接';
-  if (weixinMessageStat) weixinMessageStat.textContent = state.overview.weixinMessage || '未连接微信';
-
-  // Update sidebar compact stats
-  const aiStatusCompact = document.getElementById('ai-status-compact');
-  const memoryCountCompact = document.getElementById('memory-count-compact');
-  const promptCountCompact = document.getElementById('prompt-count-compact');
-  const versionCompact = document.getElementById('version-compact');
-  const versionCheck = document.getElementById('version-check');
-
-  if (aiStatusCompact) aiStatusCompact.textContent = state.overview.aiAvailable ? 'OK' : '—';
-  if (memoryCountCompact) memoryCountCompact.textContent = String(state.overview.knowledgeCount);
-  if (promptCountCompact) promptCountCompact.textContent = String(state.overview.promptCount || 0);
-  if (versionCompact) versionCompact.textContent = state.overview.currentVersion || 'dev';
-  if (versionCheck) {
-    versionCheck.title = `当前版本 ${state.overview.currentVersion || 'dev'}，点击查看最新版本`;
-  }
-}
-
-async function checkLatestVersion() {
-  const trigger = document.getElementById('version-check');
-  if (trigger) {
-    trigger.disabled = true;
-  }
-
-  try {
-    const info = await state.backend.GetVersionInfo();
-    if (state.overview && info?.currentVersion) {
-      state.overview.currentVersion = info.currentVersion;
-      const versionCompact = document.getElementById('version-compact');
-      if (versionCompact) {
-        versionCompact.textContent = info.currentVersion;
-      }
-    }
-    if (info?.hasUpdate && info?.releaseUrl) {
-      const ok = await state.backend.ConfirmAction(
-        '发现新版本',
-        `${info.message}\n\n是否打开发布页？`,
-      );
-      if (ok) {
-        await state.backend.OpenExternalURL(info.releaseUrl);
-        showBanner(`已打开发布页：${info.latestVersion || info.releaseUrl}`, false);
-        return;
-      }
-    }
-    showBanner(info?.message || '暂时无法获取版本信息。', false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  } finally {
-    if (trigger) {
-      trigger.disabled = false;
-    }
-  }
-}
-
-async function refreshReminders() {
-  state.reminders = normalizeReminders(await state.backend.ListReminders());
-  renderReminders();
-}
-
-async function refreshKnowledge() {
-  state.knowledge = await state.backend.ListKnowledge();
-  renderKnowledge();
-}
-
-async function refreshPrompts() {
-  state.prompts = await state.backend.ListPrompts();
-  renderPrompts();
-  updateChatAutocomplete();
-}
-
-async function refreshSkills() {
-  state.skills = normalizeSkills(await state.backend.ListSkills());
-  ensureSelectedSkill();
-  renderSkills();
-  renderChatContext();
-  updateChatAutocomplete();
-}
-
-async function refreshTools() {
-  state.tools = normalizeTools(await state.backend.ListTools());
-  renderTools();
-}
-
-async function refreshChatPrompt() {
-  state.chatPrompt = normalizeChatPromptState(await state.backend.GetChatPrompt());
-  renderChatContext();
-  updateChatAutocomplete();
-}
-
-async function refreshModel() {
-  state.model = normalizeModelSettings(await state.backend.GetModelSettings());
-  renderModel();
-}
-
-async function refreshWeixin() {
-  const next = await state.backend.GetWeixinStatus();
-  applyWeixinStatus(next, false);
-}
-
-async function refreshSettings() {
-  state.settings = normalizeSettingsState(await state.backend.GetSettings());
-  renderSettings();
-}
-
-async function browseFile() {
-  if (state.backendMode === 'http') {
-    const fileInput = document.getElementById('http-file-input');
-    if (fileInput) {
-      fileInput.value = '';
-      fileInput.click();
-    }
-    return;
-  }
-
-  try {
-    const selected = await state.backend.OpenImportDialog();
-    if (!selected) return;
-
-    state.fileObject = null;
-    state.filePath = selected;
-
-    // Simulate file preview
-    const preview = document.getElementById('file-preview');
-    const fileName = document.getElementById('file-name');
-
-    if (preview) preview.classList.add('has-file');
-    if (fileName) fileName.textContent = selected.split(/[/\\]/).pop() || selected;
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function importFile() {
-  if (!state.filePath.trim() && !state.fileObject) {
-    showBanner('请先选择文件。', true);
-    return;
-  }
-
-  try {
-    const result = state.backendMode === 'http'
-      ? await state.backend.UploadImportFile(state.fileObject)
-      : await state.backend.ImportFile(state.filePath);
-
-    // Reset file preview
-    const preview = document.getElementById('file-preview');
-    if (preview) preview.classList.remove('has-file');
-    state.filePath = '';
-    state.fileObject = null;
-    const fileInput = document.getElementById('http-file-input');
-    if (fileInput) fileInput.value = '';
-
-    await refreshAll();
-    showBanner(result.message, false);
-
-    state.chat.push({
-      role: 'system',
-      text: `${result.message}\n${result.item.preview}`,
-      time: nowLabel(),
-    });
-    syncCurrentChatConversationFromMessages();
-    renderChat();
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function browseSkillArchive() {
-  if (state.backendMode === 'http') {
-    const input = document.getElementById('http-skill-zip-input');
-    if (input) {
-      input.value = '';
-      input.click();
-    }
-    return;
-  }
-
-  try {
-    const selected = await state.backend.OpenSkillImportDialog();
-    if (!selected) return;
-    await importSkillArchiveFromPath(selected);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function importSkillArchiveFromPath(path) {
-  if (!path) return;
-
-  try {
-    const result = await state.backend.ImportSkillArchive(path);
-    if (result && result.item && result.item.name) {
-      state.selectedSkillName = result.item.name;
-    }
-    await refreshSkills();
-    showBanner(result.message || 'skill 已导入。', false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function importSkillArchiveFromFile(file) {
-  if (!file) return;
-
-  try {
-    const result = await state.backend.UploadSkillArchive(file);
-    if (result && result.item && result.item.name) {
-      state.selectedSkillName = result.item.name;
-    }
-    const input = document.getElementById('http-skill-zip-input');
-    if (input) input.value = '';
-    await refreshSkills();
-    showBanner(result.message || 'skill 已导入。', false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function createKnowledge() {
-  const input = document.getElementById('memory-input');
-  const text = input?.value.trim();
-  if (!text) {
-    showBanner('请输入要保存的记忆内容。', true);
-    return;
-  }
-
-  try {
-    const result = await state.backend.CreateKnowledge(text);
-    if (input) input.value = '';
-    await refreshAll();
-    showBanner(result.message, false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-function toggleMemoryExpand(id) {
-  const content = document.querySelector(`[data-content-id="${id}"]`);
-  const btn = document.querySelector(`[data-action="toggle-expand"][data-id="${id}"]`);
-  if (content && btn) {
-    content.classList.toggle('expanded');
-    btn.textContent = content.classList.contains('expanded') ? '收起' : '展开';
-  }
-}
-
-async function appendKnowledge(id) {
-  const draft = (state.appendDrafts[id] || '').trim();
-  if (!draft) {
-    showBanner('请输入补充内容。', true);
-    return;
-  }
-
-  try {
-    const result = await state.backend.AppendKnowledge(id, draft);
-    state.appendDrafts[id] = '';
-    state.openAppendId = '';
-    await refreshAll();
-    showBanner(result.message, false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function deleteKnowledge(id) {
-  const targetId = String(id || '').trim();
-  if (!targetId) return;
-  const knowledge = state.knowledge.find((item) => item.id === targetId);
-  if (!knowledge) {
-    showBanner('没有找到要删除的记忆。', true);
-    return;
-  }
-  openChatSessionDialog('knowledge-delete', knowledge);
-}
-
-async function clearKnowledge() {
-  try {
-    const ok = await state.backend.ConfirmAction('清空知识库', '确认清空全部记忆吗？这个动作不可撤销。');
-    if (!ok) return;
-
-    const result = await state.backend.ClearKnowledge();
-    await refreshAll();
-    showBanner(result.message, false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function setActiveProject(nextProject) {
-  const input = document.getElementById('project-name-input');
-  const project = (nextProject ?? input?.value ?? '').trim() || 'default';
-
-  try {
-    const previousProject = state.projectState.activeProject || 'default';
-    state.projectState = normalizeProjectState(await state.backend.SetActiveProject(project));
-    renderProjectState();
-    await refreshAll();
-    await refreshChatState();
-    if (state.projectState.activeProject !== previousProject) {
-      state.chat.push({
-        role: 'system',
-        text: `已切换记忆库项目 [${state.projectState.activeProject}]，后续导入和新增记忆会写入这里，对话也会优先检索这个项目。`,
-        time: nowLabel(),
-      });
-      syncCurrentChatConversationFromMessages();
-      renderChat();
-    }
-    showBanner(`已切换记忆库项目 ${state.projectState.activeProject}。`, false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function createPrompt() {
-  const titleInput = document.getElementById('prompt-title-input');
-  const contentInput = document.getElementById('prompt-content-input');
-  const title = titleInput?.value.trim() || '';
-  const content = contentInput?.value.trim() || '';
-
-  if (!title) {
-    showBanner('请输入 Prompt 标题。', true);
-    return;
-  }
-  if (!content) {
-    showBanner('请输入 Prompt 内容。', true);
-    return;
-  }
-
-  try {
-    const result = await state.backend.CreatePrompt(title, content);
-    if (titleInput) titleInput.value = '';
-    if (contentInput) contentInput.value = '';
-    await refreshAll();
-    showBanner(result.message, false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-function togglePromptExpand(id) {
-  const content = document.querySelector(`[data-prompt-content-id="${id}"]`);
-  const btn = document.querySelector(`[data-action="toggle-expand-prompt"][data-id="${id}"]`);
-  if (content && btn) {
-    content.classList.toggle('expanded');
-    content.classList.toggle('collapsed');
-    btn.textContent = content.classList.contains('expanded') ? '收起' : '展开';
-  }
-}
-
-function insertPromptToChat(id) {
-  const prompt = state.prompts.find((item) => item.id === id);
-  if (!prompt) {
-    showBanner('没有找到对应的 Prompt。', true);
-    return;
-  }
-
-  const input = document.getElementById('chat-input');
-  if (input) {
-    input.value = prompt.content || '';
-    const cursor = input.value.length;
-    input.setSelectionRange(cursor, cursor);
-    autoResizeChatInput();
-    updateChatAutocomplete();
-    input.focus();
-  }
-
-  window.navigateTo('chat');
-  showBanner(`已将 Prompt #${prompt.shortId} 放入对话输入框。`, false);
-}
-
-async function deletePrompt(id) {
-  const targetId = String(id || '').trim();
-  if (!targetId) return;
-  const prompt = state.prompts.find((item) => item.id === targetId);
-  if (!prompt) {
-    showBanner('没有找到要删除的 Prompt。', true);
-    return;
-  }
-  openChatSessionDialog('prompt-delete', prompt);
-}
-
-async function clearPromptsLibrary() {
-  try {
-    const ok = await state.backend.ConfirmAction('清空 Prompt 库', '确认清空全部 Prompt 吗？这个动作不可撤销。');
-    if (!ok) return;
-
-    const result = await state.backend.ClearPrompts();
-    await refreshAll();
-    showBanner(result.message, false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function sendMessage(rawText = null, displayText = null) {
-  if (state.chatStreaming) return;
-
-  const conversation = currentChatConversation();
-  if (conversation?.readOnly) {
-    showBanner('当前为微信会话，只支持查看历史；请新建本地对话后继续。', true);
-    return;
-  }
-
-  const input = document.getElementById('chat-input');
-  const text = String(rawText ?? input?.value ?? '').trim();
-  if (!text) return;
-  const visibleText = String(displayText ?? text).trim() || text;
-  if (text === '/new') {
-    closeChatAutocomplete();
-    if (input && rawText == null) {
-      input.value = '';
-      autoResizeChatInput();
-    }
-    await startNewConversation();
-    return;
-  }
-
-  state.chat.push({ role: 'user', text: visibleText, time: nowLabel() });
-  syncCurrentChatConversationFromMessages();
-  renderChat();
-  closeChatAutocomplete();
-  if (input && rawText == null) {
-    input.value = '';
-    autoResizeChatInput();
-  }
-
-  const placeholder = {
-    role: 'assistant',
-    text: '',
-    time: '',
-    streaming: true,
-  };
-  state.chat.push(placeholder);
-  renderChat();
-
-  state.chatStreaming = true;
-  try {
-    const send = typeof state.backend.SendMessageStream === 'function'
-      ? state.backend.SendMessageStream(text, {
-          onDelta: (delta) => {
-            if (!delta) return;
-            placeholder.text += delta;
-            syncCurrentChatConversationFromMessages();
-            renderChat();
-          },
-        })
-      : state.backend.SendMessage(text);
-    const result = await send;
-    if (result.sessionChanged) {
-      state.chat.pop();
-      await refreshChatState();
-      await Promise.all([refreshSkills(), refreshChatPrompt()]);
-      showBanner(result.reply || '已开启新对话。', false);
-      return;
-    }
-    placeholder.text = result.reply || placeholder.text;
-    placeholder.time = result.timestamp || nowLabel();
-    placeholder.usage = normalizeTokenUsage(result.usage);
-    placeholder.process = normalizeChatProcess(result.process);
-    placeholder.streaming = false;
-    syncCurrentChatConversationFromMessages();
-    renderChat();
-    await Promise.all([refreshAll(), refreshChatState()]);
-  } catch (error) {
-    if ((placeholder.text || '').trim()) {
-      placeholder.time = nowLabel();
-      placeholder.streaming = false;
-      state.chat.push({
-        role: 'system',
-        text: asMessage(error),
-        time: nowLabel(),
-      });
-    } else {
-      placeholder.role = 'system';
-      placeholder.text = asMessage(error);
-      placeholder.time = nowLabel();
-      placeholder.streaming = false;
-    }
-    syncCurrentChatConversationFromMessages();
-    renderChat();
-    showBanner(asMessage(error), true);
-  } finally {
-    state.chatStreaming = false;
+/* Source: js/views/chat.js */
+function renderChat() {
+  const container = document.getElementById('chat-list');
+  if (!container) {
     renderChatContentActions();
     renderChatComposerState();
-  }
-}
-
-async function startNewConversation() {
-  if (state.chatStreaming) {
-    showBanner('当前回复尚未完成。', true);
-    return;
-  }
-  openChatSessionDialog('new', { mode: 'agent' });
-}
-
-async function exportChatMarkdown() {
-  if (state.chatStreaming) {
-    showBanner('当前回复尚未完成。', true);
-    return;
-  }
-  try {
-    const result = await state.backend.ExportChatMarkdown();
-    if (result?.message) {
-      showBanner(result.message, false);
-    }
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function copyChatMessage(messageIndex) {
-  const message = state.chat[messageIndex];
-  if (!message) {
-    showBanner('没有找到要复制的对话内容。', true);
     return;
   }
 
-  const text = buildChatCopyText(message);
-  if (!text) {
-    showBanner('当前这条对话没有可复制的内容。', true);
-    return;
-  }
-
-  try {
-    await copyTextToClipboard(text);
-    showBanner('已复制当前对话。', false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-function findRefreshableChatMessageIndex() {
-  if (state.chatStreaming || state.chat.length === 0) return -1;
-  const messageIndex = state.chat.length - 1;
-  const message = state.chat[messageIndex];
-  if (!message || message.role !== 'assistant' || message.streaming) {
-    return -1;
-  }
-  return String(message.text || '').trim() ? messageIndex : -1;
-}
-
-async function confirmRefreshChatMessage(messageIndex) {
-  if (state.chatStreaming) {
-    showBanner('当前回复尚未完成。', true);
-    return;
-  }
-
-  const refreshableIndex = findRefreshableChatMessageIndex();
-  if (messageIndex !== refreshableIndex) {
-    showBanner('目前只能刷新当前最后一条回复。', true);
-    return;
-  }
-
-  const message = state.chat[messageIndex];
-  if (!message) {
-    showBanner('没有找到要刷新的回复。', true);
-    return;
-  }
-
-  openChatSessionDialog('refresh', {
-    sessionId: state.chatState.sessionId,
-    preview: buildChatCopyText(message),
-  });
-}
-
-async function refreshCurrentChatResponse() {
-  if (state.chatStreaming) {
-    showBanner('当前回复尚未完成。', true);
-    return;
-  }
-
-  const messageIndex = findRefreshableChatMessageIndex();
-  if (messageIndex < 0) {
-    showBanner('当前没有可刷新的回复。', true);
-    return;
-  }
-
-  const previousMessage = state.chat[messageIndex];
-  const placeholder = {
-    role: 'assistant',
-    text: '',
-    time: '',
-    streaming: true,
-  };
-
-  state.chat = [...state.chat.slice(0, messageIndex), placeholder];
-  syncCurrentChatConversationFromMessages();
-  renderChat();
-
-  state.chatStreaming = true;
-  try {
-    const result = await state.backend.RefreshChatResponse();
-    placeholder.text = result.reply || placeholder.text;
-    placeholder.time = result.timestamp || nowLabel();
-    placeholder.usage = normalizeTokenUsage(result.usage);
-    placeholder.process = normalizeChatProcess(result.process);
-    placeholder.streaming = false;
-    syncCurrentChatConversationFromMessages();
-    renderChat();
-    await refreshAll();
-    showBanner('已刷新当前回复。', false);
-  } catch (error) {
-    state.chat = [...state.chat.slice(0, messageIndex), previousMessage];
-    syncCurrentChatConversationFromMessages();
-    renderChat();
-    await refreshChatState().catch(() => {});
-    showBanner(asMessage(error), true);
-  } finally {
-    state.chatStreaming = false;
+  if (state.chat.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">○</div>
+        <h3>开始新对话</h3>
+        <p>输入问题或使用命令如 /kb remember、/notice、/skill list</p>
+      </div>
+    `;
     renderChatContentActions();
     renderChatComposerState();
-  }
-}
-
-async function copyTextToClipboard(text) {
-  const value = String(text ?? '');
-  if (!value) {
-    throw new Error('当前没有可复制的内容。');
-  }
-
-  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-    try {
-      await navigator.clipboard.writeText(value);
-      return;
-    } catch (_error) {
-      // Fall back to execCommand for desktop shells that do not expose clipboard permissions.
-    }
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = value;
-  textarea.setAttribute('readonly', 'readonly');
-  textarea.style.position = 'fixed';
-  textarea.style.opacity = '0';
-  textarea.style.pointerEvents = 'none';
-  textarea.style.left = '-9999px';
-  document.body.append(textarea);
-  textarea.focus();
-  textarea.select();
-  textarea.setSelectionRange(0, textarea.value.length);
-
-  const copied = typeof document.execCommand === 'function' && document.execCommand('copy');
-  textarea.remove();
-
-  if (!copied) {
-    throw new Error('复制失败，请手动选择内容后复制。');
-  }
-}
-
-async function sendChatOption(question, value, label = value) {
-  if (state.chatStreaming) {
-    showBanner('当前回复尚未完成。', true);
     return;
   }
-  await sendMessage(buildChatOptionSubmission(question, value, label), label);
-}
 
-async function switchChatSession(sessionId) {
-  if (state.chatStreaming) {
-    showBanner('当前回复尚未完成。', true);
-    return;
-  }
-  const nextSessionId = (sessionId || '').trim();
-  if (!nextSessionId || nextSessionId === state.chatState.sessionId) return;
-
-  try {
-    applyChatState(normalizeChatState(await state.backend.SwitchChatSession(nextSessionId)));
-    await Promise.all([refreshSkills(), refreshChatPrompt()]);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-async function renameChatSession(sessionId) {
-  if (state.chatStreaming) {
-    showBanner('当前回复尚未完成。', true);
-    return;
-  }
-  const conversation = (state.chatState.conversations || []).find((item) => item.sessionId === sessionId);
-  if (!conversation) return;
-  openChatSessionDialog('rename', conversation);
-}
-
-async function deleteChatSession(sessionId) {
-  if (state.chatStreaming) {
-    showBanner('当前回复尚未完成。', true);
-    return;
-  }
-  const conversation = (state.chatState.conversations || []).find((item) => item.sessionId === sessionId);
-  if (!conversation) return;
-  openChatSessionDialog('delete', conversation);
-}
-
-function renderChatContext() {
-  const container = document.getElementById('chat-context-bar');
-  if (!container) return;
-
-  const chips = [];
-  const conversation = currentChatConversation();
-  if (conversation?.sourceLabel) {
-    chips.push(`
-      <span class="chat-context-chip ${conversation.readOnly ? 'skill' : 'prompt'}">
-        <span>来源</span>
-        <strong>${escapeHTML(conversation.sourceLabel)}</strong>
-        ${conversation.readOnly ? '<span>只读</span>' : ''}
-      </span>
-    `);
-  }
-  if (state.chatPrompt.promptId) {
-    chips.push(`
-      <span class="chat-context-chip prompt">
-        <span>Prompt</span>
-        <strong>${escapeHTML(state.chatPrompt.title || `#${state.chatPrompt.shortId}`)}</strong>
-        <button type="button" data-chat-context-action="clear-prompt" title="清除当前 Prompt">×</button>
-      </span>
-    `);
-  }
-
-  const loadedSkills = [...state.skills]
-    .filter((item) => item.loaded)
-    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
-  for (const skill of loadedSkills) {
-    chips.push(`
-      <span class="chat-context-chip skill">
-        <span>Skill</span>
-        <strong>${escapeHTML(skill.name)}</strong>
-        <button type="button" data-chat-context-action="unload-skill" data-value="${escapeAttribute(skill.name)}" title="卸载技能">×</button>
-      </span>
-    `);
-  }
-
-  container.innerHTML = chips.join('');
+  container.innerHTML = state.chat
+    .map(
+      (message, index) => `
+        <div class="chat-message ${escapeAttribute(message.role)}">
+          <div class="chat-avatar">${message.role === 'user' ? '◐' : message.role === 'system' ? '◇' : '○'}</div>
+          <div class="chat-bubble">
+            ${renderChatMessageContent(message)}
+            ${renderChatProcess(message)}
+            ${renderChatMessageFooter(message, index)}
+          </div>
+        </div>
+      `,
+    )
+    .join('');
+  container.scrollTop = container.scrollHeight;
+  renderChatContentActions();
   renderChatComposerState();
 }
 
-function renderChatComposerState() {
-  const input = document.getElementById('chat-input');
-  const sendButton = document.getElementById('chat-send');
-  const conversation = currentChatConversation();
-  const readOnly = Boolean(conversation?.readOnly);
-
-  if (input instanceof HTMLTextAreaElement) {
-    input.disabled = readOnly || state.chatStreaming;
-    input.placeholder = readOnly
-      ? '当前为微信会话，只读查看；如需继续对话，请新建本地对话。'
-      : '输入消息，或使用 / 命令、$ 技能、@ Prompt...';
-  }
-  if (sendButton instanceof HTMLButtonElement) {
-    sendButton.disabled = readOnly || state.chatStreaming;
-    sendButton.title = readOnly ? '微信会话只支持查看历史' : '发送消息';
-  }
+function renderChatProcess(message) {
+  const steps = normalizeChatProcess(message?.process);
+  if (message?.role !== 'assistant' || steps.length === 0) return '';
+  return `
+    <details class="chat-process">
+      <summary>调试过程</summary>
+      <ol class="chat-process-list">
+        ${steps.map((step) => `
+          <li class="chat-process-step">
+            ${step.title ? `<div class="chat-process-title">${escapeHTML(step.title)}</div>` : ''}
+            ${step.detail ? `<pre class="chat-process-detail">${escapeHTML(step.detail)}</pre>` : ''}
+          </li>
+        `).join('')}
+      </ol>
+    </details>
+  `;
 }
 
-async function clearChatPromptSelection() {
-  try {
-    await state.backend.ClearChatPrompt();
-    state.chatPrompt = defaultChatPromptState();
-    renderChatContext();
-    updateChatAutocomplete();
-    showBanner('已清除当前对话 Prompt。', false);
-  } catch (error) {
-    showBanner(asMessage(error), true);
-  }
-}
-
-function autoResizeChatInput() {
-  const input = document.getElementById('chat-input');
-  if (!(input instanceof HTMLTextAreaElement)) return;
-  input.style.height = 'auto';
-  input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
-}
-
-function updateChatAutocomplete() {
-  const input = document.getElementById('chat-input');
-  if (!(input instanceof HTMLTextAreaElement)) {
-    closeChatAutocomplete();
-    return;
+function renderChatContentActions() {
+  const exportButton = document.getElementById('chat-export-markdown');
+  if (exportButton) {
+    const disabled = state.chatStreaming || state.chat.length === 0;
+    exportButton.disabled = disabled;
+    exportButton.title = state.chatStreaming
+      ? '当前回复尚未完成。'
+      : state.chat.length === 0
+        ? '当前对话还没有消息可导出。'
+        : '导出当前对话';
   }
 
-  const active = getActiveChatTrigger(input);
-  if (!active) {
-    closeChatAutocomplete();
-    return;
-  }
-
-  const items = buildAutocompleteItems(active.trigger, active.query);
-  state.autocomplete = {
-    open: true,
-    trigger: active.trigger,
-    query: active.query,
-    tokenStart: active.start,
-    tokenEnd: active.end,
-    selectedIndex: firstSelectableAutocompleteIndex(items),
-    items,
-  };
-  renderChatAutocomplete();
-}
-
-function getActiveChatTrigger(input) {
-  const value = input.value || '';
-  const caret = input.selectionStart ?? value.length;
-  let start = caret;
-  while (start > 0 && !/\s/.test(value[start - 1])) {
-    start -= 1;
-  }
-
-  if (start >= value.length) return null;
-  const trigger = value[start];
-  if (!['/', '$', '@'].includes(trigger)) return null;
-
-  let end = caret;
-  while (end < value.length && !/\s/.test(value[end])) {
-    end += 1;
-  }
-
-  return {
-    trigger,
-    query: value.slice(start + 1, caret),
-    start,
-    end,
-  };
-}
-
-function buildAutocompleteItems(trigger, query) {
-  switch (trigger) {
-    case '/':
-      return buildCommandAutocompleteItems(query);
-    case '$':
-      return buildSkillAutocompleteItems(query);
-    case '@':
-      return buildPromptAutocompleteItems(query);
-    default:
-      return [];
+  const newButton = document.getElementById('chat-new-session');
+  if (newButton) {
+    newButton.disabled = Boolean(state.chatStreaming);
+    newButton.title = state.chatStreaming ? '当前回复尚未完成。' : '开启新对话';
   }
 }
 
-function buildCommandAutocompleteItems(query) {
-  const filtered = CHAT_SLASH_COMMANDS.filter((item) =>
-    autocompleteMatches(query, [item.label, item.insert, item.description]),
-  );
-  const items = filtered.map((item) => ({
-    kind: 'command',
-    title: item.label,
-    description: item.description,
-    meta: 'slash',
-    insertText: item.insert,
-    disabled: false,
-  }));
-  if (items.length > 0) return items;
-  return [
-    {
-      kind: 'empty',
-      title: '没有匹配的 slash command',
-      description: '继续输入，或直接发送普通消息。',
-      meta: '',
-      disabled: true,
-    },
-  ];
-}
-
-function buildSkillAutocompleteItems(query) {
-  const sorted = [...state.skills].sort((left, right) => {
-    if (left.loaded !== right.loaded) return left.loaded ? -1 : 1;
-    return left.name.localeCompare(right.name, 'zh-CN');
-  });
-  const filtered = sorted.filter((item) =>
-    autocompleteMatches(query, [item.name, item.description, item.dir]),
-  );
-  if (filtered.length === 0) {
-    return [
-      {
-        kind: 'empty',
-        title: state.skills.length === 0 ? '当前没有可用 skill' : '没有匹配的 skill',
-        description: state.skills.length === 0 ? '先在 Skill 库导入或添加本地技能。' : '尝试按技能名或描述搜索。',
-        meta: '',
-        disabled: true,
-      },
-    ];
+function renderChatMeta(message) {
+  const parts = [];
+  if (message.time) {
+    parts.push(`<span class="chat-time">${escapeHTML(message.time)}</span>`);
   }
-
-  return filtered.map((item) => ({
-    kind: 'skill',
-    title: `$${item.name}`,
-    description: item.description || '加载到当前对话会话',
-    meta: item.loaded ? '已加载' : '可加载',
-    name: item.name,
-    disabled: false,
-  }));
-}
-
-function buildPromptAutocompleteItems(query) {
-  const filtered = state.prompts.filter((item) =>
-    autocompleteMatches(query, [item.title, item.shortId, item.content]),
-  );
-  const items = filtered.map((item) => ({
-    kind: 'prompt',
-    title: `@${item.title}`,
-    description: preview(item.content, 80),
-    meta: state.chatPrompt.promptId === item.id ? `当前 · #${item.shortId}` : `Prompt · #${item.shortId}`,
-    promptId: item.id,
-    shortId: item.shortId,
-    disabled: false,
-  }));
-
-  if (state.chatPrompt.promptId) {
-    items.unshift({
-      kind: 'prompt-clear',
-      title: '@清除当前 Prompt',
-      description: `当前使用：${state.chatPrompt.title || `#${state.chatPrompt.shortId}`}`,
-      meta: 'Prompt',
-      disabled: false,
-    });
-  }
-
-  if (items.length > 0) return items;
-  return [
-    {
-      kind: 'empty',
-      title: state.prompts.length === 0 ? '当前没有可用 Prompt' : '没有匹配的 Prompt',
-      description: state.prompts.length === 0 ? '先在 Prompt 库保存常用模板。' : '尝试按标题、ID 或内容搜索。',
-      meta: '',
-      disabled: true,
-    },
-  ];
-}
-
-function autocompleteMatches(query, values) {
-  const normalized = String(query || '').trim().toLowerCase();
-  if (!normalized) return true;
-  return values.some((value) => String(value || '').toLowerCase().includes(normalized));
-}
-
-function firstSelectableAutocompleteIndex(items) {
-  const index = items.findIndex((item) => !item.disabled);
-  return index >= 0 ? index : 0;
-}
-
-function moveAutocompleteSelection(direction) {
-  const items = state.autocomplete.items || [];
-  if (!state.autocomplete.open || items.length === 0) return;
-
-  let nextIndex = state.autocomplete.selectedIndex;
-  for (let step = 0; step < items.length; step += 1) {
-    nextIndex = (nextIndex + direction + items.length) % items.length;
-    if (!items[nextIndex]?.disabled) {
-      state.autocomplete.selectedIndex = nextIndex;
-      renderChatAutocomplete();
-      return;
+  if (message.role === 'assistant') {
+    const usageText = formatTokenUsage(message.usage);
+    if (usageText) {
+      parts.push(`<span class="chat-usage">${escapeHTML(usageText)}</span>`);
     }
   }
+  if (parts.length === 0) return '';
+  return `<div class="chat-meta">${parts.join('')}</div>`;
 }
 
-function renderChatAutocomplete() {
-  const container = document.getElementById('chat-autocomplete');
-  if (!container) return;
-
-  if (!state.autocomplete.open || (state.autocomplete.items || []).length === 0) {
-    container.hidden = true;
-    container.innerHTML = '';
-    return;
-  }
-
-  container.hidden = false;
-  container.innerHTML = `
-    <div class="chat-autocomplete-list">
-      ${(state.autocomplete.items || [])
-        .map((item, index) => `
-          <button
-            type="button"
-            class="chat-autocomplete-item ${index === state.autocomplete.selectedIndex ? 'active' : ''} ${item.disabled ? 'disabled' : ''}"
-            data-autocomplete-index="${index}"
-            ${item.disabled ? 'disabled' : ''}
-          >
-            <div class="chat-autocomplete-head">
-              <span class="chat-autocomplete-title">${escapeHTML(item.title || '')}</span>
-              ${item.meta ? `<span class="chat-autocomplete-meta">${escapeHTML(item.meta)}</span>` : ''}
-            </div>
-            <div class="chat-autocomplete-desc">${escapeHTML(item.description || '')}</div>
-          </button>
-        `)
-        .join('')}
+function renderChatMessageFooter(message, index) {
+  const meta = renderChatMeta(message);
+  return `
+    <div class="chat-bubble-footer${meta ? '' : ' copy-only'}">
+      ${meta || ''}
+      ${renderChatMessageActions(message, index)}
     </div>
   `;
 }
 
-function closeChatAutocomplete() {
-  state.autocomplete = defaultAutocompleteState();
-  renderChatAutocomplete();
+function renderChatMessageActions(message, index) {
+  return `
+    <div class="chat-message-actions">
+      ${renderChatRefreshButton(message, index)}
+      ${renderChatCopyButton(index)}
+    </div>
+  `;
 }
 
-async function applySelectedAutocompleteItem() {
-  const items = state.autocomplete.items || [];
-  const item = items[state.autocomplete.selectedIndex];
-  if (!item || item.disabled) return;
-  await applyAutocompleteItem(item);
-}
-
-async function applyAutocompleteItem(item) {
-  switch (item.kind) {
-    case 'command':
-      replaceCurrentChatToken(item.insertText || '');
-      closeChatAutocomplete();
-      break;
-    case 'skill':
-      replaceCurrentChatToken('');
-      closeChatAutocomplete();
-      await loadSkill(item.name || '');
-      focusChatInput();
-      break;
-    case 'prompt':
-      replaceCurrentChatToken('');
-      closeChatAutocomplete();
-      try {
-        state.chatPrompt = normalizeChatPromptState(await state.backend.SetChatPrompt(item.promptId || ''));
-        renderChatContext();
-        showBanner(`已为当前对话启用 Prompt ${item.title.replace(/^@/, '')}。`, false);
-      } catch (error) {
-        showBanner(asMessage(error), true);
-      }
-      focusChatInput();
-      break;
-    case 'prompt-clear':
-      replaceCurrentChatToken('');
-      closeChatAutocomplete();
-      await clearChatPromptSelection();
-      focusChatInput();
-      break;
-    default:
-      break;
+function renderChatRefreshButton(message, index) {
+  if (currentChatConversation()?.readOnly || message.role !== 'assistant' || index !== findRefreshableChatMessageIndex()) {
+    return '';
   }
+
+  return `
+    <button
+      type="button"
+      class="chat-action-button"
+      data-chat-refresh-index="${escapeAttribute(index)}"
+      aria-label="刷新当前回复"
+      title="刷新当前回复"
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M8 2.5a5.5 5.5 0 1 0 5.19 7.32.5.5 0 0 1 .94.34A6.5 6.5 0 1 1 8 1.5V0l3 2.5-3 2.5z"></path>
+      </svg>
+    </button>
+  `;
 }
 
-function replaceCurrentChatToken(replacement) {
-  const input = document.getElementById('chat-input');
-  if (!(input instanceof HTMLTextAreaElement)) return;
+function renderChatCopyButton(index) {
+  return `
+    <button
+      type="button"
+      class="chat-action-button"
+      data-chat-copy-index="${escapeAttribute(index)}"
+      aria-label="复制此条对话"
+      title="复制此条对话"
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M5.5 2.25A1.25 1.25 0 0 0 4.25 3.5v7A1.25 1.25 0 0 0 5.5 11.75h6A1.25 1.25 0 0 0 12.75 10.5v-7A1.25 1.25 0 0 0 11.5 2.25z"></path>
+        <path d="M2.75 5.5A1.25 1.25 0 0 1 4 4.25h.75v1H4A.25.25 0 0 0 3.75 5.5v6A1.25 1.25 0 0 0 5 12.75h5.25a.25.25 0 0 0 .25-.25v-.75h1v.75A1.25 1.25 0 0 1 10.25 13.75H5A2.25 2.25 0 0 1 2.75 11.5z"></path>
+      </svg>
+    </button>
+  `;
+}
 
-  const value = input.value || '';
-  let start = state.autocomplete.tokenStart;
-  let end = state.autocomplete.tokenEnd;
-  if (start < 0 || end < start) return;
+function renderChatMessageContent(message) {
+  const optionContent = message.role === 'assistant' ? extractChatOptionContent(message.text) : null;
+  if (optionContent) {
+    return renderChatOptionMessage(optionContent);
+  }
+  return `<div class="chat-markdown">${renderMarkdown(message.text || (message.streaming ? '思考中…' : ''))}</div>`;
+}
 
-  if (!replacement) {
-    if (start === 0) {
-      while (end < value.length && /\s/.test(value[end])) {
-        end += 1;
-      }
-    } else if (/\s/.test(value[start - 1] || '') && /\s/.test(value[end] || '')) {
-      while (end < value.length && /\s/.test(value[end])) {
-        end += 1;
+function renderChatOptionMessage(content) {
+  const blocks = [];
+  if (content.beforeText) {
+    blocks.push(`<div class="chat-markdown">${renderMarkdown(content.beforeText)}</div>`);
+  }
+  blocks.push(renderChatOptions(content.payload));
+  if (content.afterText) {
+    blocks.push(`<div class="chat-markdown">${renderMarkdown(content.afterText)}</div>`);
+  }
+  return `<div class="chat-option-message">${blocks.join('')}</div>`;
+}
+
+function renderChatOptions(payload) {
+  return `
+    <div class="chat-option-card">
+      <div class="chat-option-question">${escapeHTML(payload.question)}</div>
+      <div class="chat-option-list">
+        ${payload.options
+          .map((option) => `
+            <button
+              type="button"
+              class="chat-option-button"
+              data-chat-option="${escapeAttribute(option.value)}"
+              data-chat-option-value="${escapeAttribute(option.value)}"
+              data-chat-option-label="${escapeAttribute(option.label)}"
+              data-chat-option-question="${escapeAttribute(payload.question)}"
+            >
+              ${escapeHTML(option.label)}
+            </button>
+          `)
+          .join('')}
+      </div>
+    </div>
+  `;
+}
+
+function parseChatOptionsPayload(source) {
+  const optionContent = extractChatOptionContent(source);
+  return optionContent ? optionContent.payload : null;
+}
+
+function extractChatOptionContent(source) {
+  const text = String(source ?? '').replace(/\r\n?/g, '\n');
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const directPayload = parseChatOptionsPayloadCandidate(trimmed);
+  if (directPayload) {
+    return { payload: directPayload, beforeText: '', afterText: '' };
+  }
+
+  const fencedPayload = extractChatOptionContentFromFencedBlocks(text);
+  if (fencedPayload) return fencedPayload;
+
+  return extractChatOptionContentFromEmbeddedObject(text);
+}
+
+function parseChatOptionsPayloadCandidate(text) {
+  const candidate = String(text ?? '').trim();
+  if (!candidate.startsWith('{') || !candidate.endsWith('}')) return null;
+
+  const jsonPayload = parseJSONChatOptionsPayload(candidate);
+  if (jsonPayload) return jsonPayload;
+
+  const ednPayload = parseEDNChatOptionsPayload(candidate);
+  if (ednPayload) return ednPayload;
+
+  return parseAskUserInputChatOptionsPayload(candidate);
+}
+
+function extractChatOptionContentFromFencedBlocks(text) {
+  const fencePattern = /```(?:[\w+-]+)?\s*\n([\s\S]*?)\n```/g;
+  for (const match of text.matchAll(fencePattern)) {
+    const candidate = parseChatOptionsPayloadCandidate(match[1]);
+    if (!candidate) continue;
+    return {
+      payload: candidate,
+      beforeText: normalizeChatOptionContextText(text.slice(0, match.index)),
+      afterText: normalizeChatOptionContextText(text.slice((match.index || 0) + match[0].length)),
+    };
+  }
+  return null;
+}
+
+function extractChatOptionContentFromEmbeddedObject(text) {
+  const segments = findBraceDelimitedSegments(text);
+  for (const segment of segments) {
+    const candidate = parseChatOptionsPayloadCandidate(segment.text);
+    if (!candidate) continue;
+    return {
+      payload: candidate,
+      beforeText: normalizeChatOptionContextText(text.slice(0, segment.start)),
+      afterText: normalizeChatOptionContextText(text.slice(segment.end)),
+    };
+  }
+  return null;
+}
+
+function normalizeChatOptionContextText(text) {
+  let normalized = String(text ?? '').replace(/\r\n?/g, '\n');
+  if (!normalized.trim()) return '';
+
+  normalized = normalized.replace(
+    /<details[^>]*>\s*<summary>([\s\S]*?)<\/summary>/gi,
+    (_match, summary) => `**${stripChatOptionHTML(summary).trim()}**\n\n`,
+  );
+  normalized = normalized.replace(/<\/details>/gi, '\n');
+  normalized = normalized.replace(/<br\s*\/?>/gi, '\n');
+  normalized = normalized.replace(/<\/(p|div|section|article|li|ul|ol)>/gi, '\n');
+  normalized = normalized.replace(/<(p|div|section|article|li|ul|ol)[^>]*>/gi, '');
+  normalized = stripChatOptionHTML(normalized);
+  normalized = normalized.replace(/[ \t]+\n/g, '\n');
+  normalized = normalized.replace(/\n{3,}/g, '\n\n');
+  return normalized.trim();
+}
+
+function stripChatOptionHTML(text) {
+  return String(text ?? '').replace(/<[^>]+>/g, '');
+}
+
+function findBraceDelimitedSegments(text) {
+  const segments = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escape = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (char === '\\') {
+      escape = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === '{') {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+    if (char === '}') {
+      if (depth === 0) continue;
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        segments.push({
+          start,
+          end: index + 1,
+          text: text.slice(start, index + 1),
+        });
+        start = -1;
       }
     }
   }
 
-  input.value = value.slice(0, start) + replacement + value.slice(end);
-  const cursor = start + replacement.length;
-  input.setSelectionRange(cursor, cursor);
-  autoResizeChatInput();
+  return segments;
 }
 
-function focusChatInput() {
-  const input = document.getElementById('chat-input');
-  if (!(input instanceof HTMLTextAreaElement)) return;
-  input.focus();
-  updateChatAutocomplete();
+function parseJSONChatOptionsPayload(text) {
+  try {
+    return normalizeChatOptionsPayload(JSON.parse(text));
+  } catch (_error) {
+    return null;
+  }
 }
 
+function parseEDNChatOptionsPayload(text) {
+  const questionMatch = text.match(/:question\s+"((?:\\.|[^"])*)"/s);
+  const optionsMatch = text.match(/:options\s+\[((?:.|\n)*)\]/s);
+  if (!questionMatch || !optionsMatch) return null;
+
+  const question = unescapeChatOptionText(questionMatch[1]).trim();
+  const options = Array.from(optionsMatch[1].matchAll(/"((?:\\.|[^"])*)"/g))
+    .map((item) => unescapeChatOptionText(item[1]).trim())
+    .filter(Boolean);
+  return normalizeChatOptionsPayload({ question, options });
+}
+
+function parseAskUserInputChatOptionsPayload(text) {
+  const inputTypeMatch = text.match(/\bask_user_input\s*:\s*([A-Za-z_][\w-]*)/i);
+  if (!inputTypeMatch) return null;
+
+  const inputType = normalizeChatOptionScalar(inputTypeMatch[1]).toLowerCase();
+  if (inputType && inputType !== 'single_select' && inputType !== 'singleselect') {
+    return null;
+  }
+
+  const questionMatch = text.match(/\bquestion\s*:\s*"((?:\\.|[^"])*)"/s);
+  const optionsMatch = text.match(/\boptions\s*:\s*\[((?:.|\n)*)\]/s);
+  if (!questionMatch || !optionsMatch) return null;
+
+  const question = unescapeChatOptionText(questionMatch[1]).trim();
+  const options = Array.from(optionsMatch[1].matchAll(/"((?:\\.|[^"])*)"/g))
+    .map((item) => unescapeChatOptionText(item[1]).trim())
+    .filter(Boolean);
+
+  return normalizeChatOptionsPayload({
+    question,
+    questiontype: 'singleselect',
+    options,
+  });
+}
+
+function normalizeChatOptionsPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+
+  const questionType = normalizeChatOptionScalar(payload.questiontype ?? payload.questionType).toLowerCase();
+  if (questionType && questionType !== 'singleselect') return null;
+
+  const question = normalizeChatOptionScalar(payload.question);
+  const options = normalizeChatOptionList(payload.options);
+  if (!question || options.length === 0) return null;
+
+  return { question, options };
+}
+
+function normalizeChatOptionList(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => normalizeChatOption(item))
+    .filter(Boolean);
+}
+
+function normalizeChatOption(option) {
+  if (typeof option === 'string' || typeof option === 'number' || typeof option === 'boolean') {
+    const text = normalizeChatOptionScalar(option);
+    return text ? { label: text, value: text } : null;
+  }
+  if (!option || typeof option !== 'object' || Array.isArray(option)) return null;
+
+  const value = normalizeChatOptionScalar(option.value);
+  const label = normalizeChatOptionScalar(option.label) || value;
+  const nextValue = value || label;
+  if (!label || !nextValue) return null;
+
+  return { label, value: nextValue };
+}
+
+function normalizeChatOptionScalar(value) {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value).trim();
+  return '';
+}
+
+function unescapeChatOptionText(value) {
+  try {
+    return JSON.parse(`"${value}"`);
+  } catch (_error) {
+    return value;
+  }
+}
+
+function buildChatOptionSubmission(question, optionValue, optionLabel = optionValue) {
+  const label = String(optionLabel ?? optionValue ?? '').trim();
+  const value = String(optionValue ?? optionLabel ?? '').trim();
+  const selection = label && value && label !== value
+    ? `我选择“${label}”（选项值：${value}）。`
+    : `我选择“${label || value}”。`;
+  return [
+    `对于你刚才给出的选项题“${question}”，${selection}`,
+    '请严格基于上一轮上下文执行这个选择，不要把它当成一个脱离上下文的新话题。',
+  ].join('\n');
+}
+
+function buildChatCopyText(message) {
+  const optionContent = message.role === 'assistant' ? extractChatOptionContent(message.text) : null;
+  if (!optionContent) {
+    return String(message.text || (message.streaming ? '思考中…' : '')).trim();
+  }
+
+  const parts = [];
+  if (optionContent.beforeText) {
+    parts.push(optionContent.beforeText.trim());
+  }
+  parts.push(optionContent.payload.question.trim());
+  parts.push(optionContent.payload.options.map((option) => `- ${option.label}`).join('\n'));
+  if (optionContent.afterText) {
+    parts.push(optionContent.afterText.trim());
+  }
+  return parts.filter(Boolean).join('\n\n').trim();
+}
+
+function renderChatSessions() {
+  const container = document.getElementById('chat-session-list');
+  if (!container) return;
+
+  const conversations = state.chatState.conversations || [];
+  if (conversations.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state compact">
+        <div class="empty-state-icon">◌</div>
+        <h3>还没有对话</h3>
+        <p>点击上方新建对话，或输入 <code>/new</code></p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = conversations
+    .map((conversation) => `
+      <div
+        class="chat-session-row ${conversation.active ? 'active' : ''} ${state.chatSessionContextMenu.open && state.chatSessionContextMenu.sessionId === conversation.sessionId ? 'context-open' : ''}"
+        data-chat-session-row="${escapeAttribute(conversation.sessionId)}"
+        draggable="true"
+      >
+        <button
+          type="button"
+          class="chat-session-item ${conversation.active ? 'active' : ''}"
+          data-chat-session="${escapeAttribute(conversation.sessionId)}"
+          title="${escapeAttribute([
+            conversation.sourceLabel || '',
+            conversation.preview || '',
+            conversation.readOnly ? '只读会话' : '可继续对话',
+          ].filter(Boolean).join('\n'))}"
+        >
+          <span class="chat-session-title">${conversation.sourceLabel ? `[${escapeHTML(conversation.sourceLabel)}] ` : ''}${escapeHTML(conversation.title || '新对话')}</span>
+        </button>
+      </div>
+    `)
+    .join('');
+}
+
+function applyChatState(nextState) {
+  state.chatState = normalizeChatState(nextState);
+  state.chatState = {
+    ...state.chatState,
+    conversations: reconcileChatSessionOrder(state.chatState.conversations),
+  };
+  if (
+    state.chatSessionContextMenu.open
+    && !state.chatState.conversations.some((item) => item.sessionId === state.chatSessionContextMenu.sessionId)
+  ) {
+    state.chatSessionContextMenu = defaultChatSessionContextMenuState();
+    renderChatSessionContextMenu();
+  }
+  state.chat = (state.chatState.messages || []).map((message) => ({
+    role: message.role,
+    text: message.text,
+    time: message.time || '',
+    usage: normalizeTokenUsage(message.usage),
+    process: normalizeChatProcess(message.process),
+  }));
+  renderChatSessions();
+  renderChat();
+}
+
+function syncCurrentChatConversationFromMessages() {
+  const sessionId = state.chatState.sessionId || '';
+  if (!sessionId) return;
+
+  const conversations = Array.isArray(state.chatState.conversations) ? [...state.chatState.conversations] : [];
+  const currentIndex = conversations.findIndex((item) => item.sessionId === sessionId);
+  const nextConversation = {
+    sessionId,
+    title: summarizeChatTitle(state.chat),
+    customTitle: Boolean(currentIndex >= 0 && conversations[currentIndex]?.customTitle),
+    preview: summarizeChatPreview(state.chat),
+    updatedAt: nowLabel(),
+    updatedAtUnix: Date.now(),
+    messageCount: state.chat.length,
+    hasMessages: state.chat.length > 0,
+    active: true,
+  };
+
+  const nextConversations = conversations.map((item, index) => ({
+    ...item,
+    active: index === currentIndex ? true : false,
+  }));
+  if (currentIndex >= 0) {
+    if (conversations[currentIndex]?.customTitle) {
+      nextConversation.title = conversations[currentIndex].title || nextConversation.title;
+    }
+    nextConversations[currentIndex] = nextConversation;
+  } else {
+    nextConversations.push(nextConversation);
+  }
+
+  state.chatState = {
+    ...state.chatState,
+    sessionId,
+    conversations: reconcileChatSessionOrder(nextConversations),
+    messages: state.chat.map((message) => ({
+      role: message.role,
+      text: message.text,
+      time: message.time || '',
+      usage: normalizeTokenUsage(message.usage),
+      process: normalizeChatProcess(message.process),
+    })),
+  };
+  renderChatSessions();
+}
+
+function normalizeProjectStorageKey(project) {
+  const value = String(project || 'default').trim().toLowerCase();
+  return value || 'default';
+}
+
+function chatSessionOrderStorageKey(project = state.projectState.activeProject) {
+  return `myclaw-chat-session-order:${normalizeProjectStorageKey(project)}`;
+}
+
+function loadChatSessionOrder(project = state.projectState.activeProject) {
+  try {
+    const raw = localStorage.getItem(chatSessionOrderStorageKey(project));
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed)
+      ? parsed.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function saveChatSessionOrder(sessionIds, project = state.projectState.activeProject) {
+  const next = [];
+  const seen = new Set();
+  for (const sessionId of sessionIds || []) {
+    const value = String(sessionId || '').trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    next.push(value);
+  }
+
+  try {
+    localStorage.setItem(chatSessionOrderStorageKey(project), JSON.stringify(next));
+  } catch (_error) {
+    // Ignore local persistence failures and keep the in-memory order.
+  }
+  return next;
+}
+
+function sameStringArray(left, right) {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function reconcileChatSessionOrder(conversations, project = state.projectState.activeProject) {
+  const list = Array.isArray(conversations)
+    ? conversations.filter((item) => item?.sessionId)
+    : [];
+  if (list.length === 0) {
+    saveChatSessionOrder([], project);
+    return [];
+  }
+
+  const stored = loadChatSessionOrder(project);
+  if (stored.length === 0) {
+    saveChatSessionOrder(list.map((item) => item.sessionId), project);
+    return list;
+  }
+
+  const byID = new Map(list.map((item) => [item.sessionId, item]));
+  const ordered = [];
+  for (const sessionId of stored) {
+    const item = byID.get(sessionId);
+    if (!item) continue;
+    ordered.push(item);
+    byID.delete(sessionId);
+  }
+  for (const item of list) {
+    if (!byID.has(item.sessionId)) continue;
+    ordered.push(item);
+    byID.delete(item.sessionId);
+  }
+
+  const mergedOrder = ordered.map((item) => item.sessionId);
+  if (!sameStringArray(stored, mergedOrder)) {
+    saveChatSessionOrder(mergedOrder, project);
+  }
+  return ordered;
+}
+
+function reorderChatSessions(sourceSessionId, targetSessionId, placeBefore) {
+  const conversations = Array.isArray(state.chatState.conversations) ? [...state.chatState.conversations] : [];
+  const sourceIndex = conversations.findIndex((item) => item.sessionId === sourceSessionId);
+  const targetIndex = conversations.findIndex((item) => item.sessionId === targetSessionId);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
+
+  const [source] = conversations.splice(sourceIndex, 1);
+  let insertIndex = conversations.findIndex((item) => item.sessionId === targetSessionId);
+  if (insertIndex < 0) {
+    conversations.push(source);
+  } else {
+    if (!placeBefore) insertIndex += 1;
+    conversations.splice(insertIndex, 0, source);
+  }
+
+  state.chatState = {
+    ...state.chatState,
+    conversations,
+  };
+  saveChatSessionOrder(conversations.map((item) => item.sessionId));
+  renderChatSessions();
+}
+
+/* Source: js/views/library.js */
 function renderKnowledge() {
   const container = document.getElementById('memory-list');
   if (!container) return;
@@ -3580,1405 +2471,2528 @@ function renderSettings() {
   }
 }
 
-function renderChat() {
-  const container = document.getElementById('chat-list');
-  if (!container) {
-    renderChatContentActions();
-    renderChatComposerState();
+/* Source: js/ui/chat-session-ui.js */
+function bindNavigation() {
+  document.querySelectorAll('.nav-item, [data-nav-view]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      const viewName = item.dataset.navView || item.dataset.view;
+      const sectionId = item.dataset.navSection || '';
+      if (viewName) {
+        window.navigateTo(viewName, sectionId);
+      }
+    });
+  });
+}
+
+function bindQuickAddModal() {
+  const modal = document.getElementById('quick-add-modal');
+  const openButtons = document.querySelectorAll('[data-open-quick-memory]');
+  const cancelBtn = document.getElementById('quick-add-cancel');
+  const confirmBtn = document.getElementById('quick-add-confirm');
+  const input = document.getElementById('quick-memory-input');
+
+  openButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      modal.style.display = 'flex';
+      input.focus();
+    });
+  });
+
+  const closeModal = () => {
+    modal.style.display = 'none';
+    input.value = '';
+  };
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', closeModal);
+  }
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', async () => {
+      const text = input.value.trim();
+      if (!text) {
+        showBanner('请输入记忆内容', true);
+        return;
+      }
+      try {
+        const result = await state.backend.CreateKnowledge(text);
+        input.value = '';
+        closeModal();
+        await refreshAll();
+        showBanner(result.message, false);
+      } catch (error) {
+        showBanner(asMessage(error), true);
+      }
+    });
+  }
+}
+
+function bindChatSessionUI() {
+  state.chatSidebarCollapsed = localStorage.getItem('myclaw-chat-sidebar-collapsed') === '1';
+  applyChatSidebarState();
+
+  const toggle = document.getElementById('chat-sidebar-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      setChatSidebarCollapsed(!state.chatSidebarCollapsed);
+    });
+  }
+
+  const dialog = document.getElementById('chat-session-dialog');
+  if (dialog) {
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) {
+        closeChatSessionDialog();
+      }
+    });
+  }
+
+  const cancel = document.getElementById('chat-session-dialog-cancel');
+  if (cancel) {
+    cancel.addEventListener('click', closeChatSessionDialog);
+  }
+
+  const confirm = document.getElementById('chat-session-dialog-confirm');
+  if (confirm) {
+    confirm.addEventListener('click', () => void submitChatSessionDialog());
+  }
+
+  const modeOptions = document.getElementById('chat-session-dialog-mode-options');
+  if (modeOptions) {
+    modeOptions.addEventListener('click', (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('[data-chat-session-mode-option]')
+        : null;
+      if (!target) return;
+      setChatSessionDialogMode(target.dataset.chatSessionModeOption || '');
+    });
+  }
+
+  const contextMenu = document.getElementById('chat-session-context-menu');
+  if (contextMenu) {
+    contextMenu.addEventListener('click', (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('[data-chat-session-menu-action]')
+        : null;
+      if (!target) return;
+
+      const action = target.dataset.chatSessionMenuAction || '';
+      const sessionId = state.chatSessionContextMenu.sessionId || '';
+      closeChatSessionContextMenu();
+      if (!sessionId) return;
+      if (action === 'rename') {
+        void renameChatSession(sessionId);
+      } else if (action === 'delete') {
+        void deleteChatSession(sessionId);
+      }
+    });
+  }
+
+  const sessionList = document.getElementById('chat-session-list');
+  if (sessionList) {
+    sessionList.addEventListener('contextmenu', (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('[data-chat-session]')
+        : null;
+      if (!target) return;
+
+      const sessionId = target.dataset.chatSession || '';
+      if (!sessionId) return;
+
+      event.preventDefault();
+      openChatSessionContextMenu(sessionId, event.clientX, event.clientY);
+    });
+
+    sessionList.addEventListener('dragstart', (event) => {
+      const row = event.target instanceof Element
+        ? event.target.closest('[data-chat-session-row]')
+        : null;
+      if (!row) return;
+
+      const sessionId = row.dataset.chatSessionRow || '';
+      if (!sessionId) {
+        event.preventDefault();
+        return;
+      }
+
+      closeChatSessionContextMenu();
+      clearChatSessionDropIndicators();
+      row.classList.add('dragging');
+      state.chatSessionDrag = {
+        ...state.chatSessionDrag,
+        sessionId,
+        targetSessionId: '',
+        placeBefore: true,
+      };
+
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', sessionId);
+      }
+    });
+
+    sessionList.addEventListener('dragover', (event) => {
+      const draggingSessionId = state.chatSessionDrag.sessionId || '';
+      const row = event.target instanceof Element
+        ? event.target.closest('[data-chat-session-row]')
+        : null;
+      const targetSessionId = row?.dataset.chatSessionRow || '';
+      if (!draggingSessionId || !row || !targetSessionId || draggingSessionId === targetSessionId) return;
+
+      event.preventDefault();
+      const rect = row.getBoundingClientRect();
+      const placeBefore = event.clientY < rect.top + rect.height / 2;
+      clearChatSessionDropIndicators();
+      row.classList.add(placeBefore ? 'drop-before' : 'drop-after');
+      state.chatSessionDrag = {
+        ...state.chatSessionDrag,
+        targetSessionId,
+        placeBefore,
+      };
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+    });
+
+    sessionList.addEventListener('drop', (event) => {
+      const draggingSessionId = state.chatSessionDrag.sessionId || '';
+      const row = event.target instanceof Element
+        ? event.target.closest('[data-chat-session-row]')
+        : null;
+      const targetSessionId = row?.dataset.chatSessionRow || state.chatSessionDrag.targetSessionId || '';
+      if (!draggingSessionId || !targetSessionId || draggingSessionId === targetSessionId) {
+        clearChatSessionDropIndicators();
+        state.chatSessionDrag = {
+          ...defaultChatSessionDragState(),
+          suppressClickUntil: Date.now() + 200,
+        };
+        return;
+      }
+
+      event.preventDefault();
+      reorderChatSessions(draggingSessionId, targetSessionId, state.chatSessionDrag.placeBefore);
+      clearChatSessionDropIndicators();
+      state.chatSessionDrag = {
+        ...defaultChatSessionDragState(),
+        suppressClickUntil: Date.now() + 200,
+      };
+    });
+
+    sessionList.addEventListener('dragend', () => {
+      clearChatSessionDropIndicators();
+      state.chatSessionDrag = {
+        ...defaultChatSessionDragState(),
+        suppressClickUntil: state.chatSessionDrag.suppressClickUntil || 0,
+      };
+    });
+  }
+
+  const input = document.getElementById('chat-session-dialog-input');
+  if (input) {
+    input.addEventListener('keydown', (event) => {
+      if (event.isComposing) return;
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void submitChatSessionDialog();
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeChatSessionDialog();
+      }
+    });
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (state.chatSessionDialog.open) {
+      event.preventDefault();
+      closeChatSessionDialog();
+      return;
+    }
+    if (state.chatSessionContextMenu.open) {
+      event.preventDefault();
+      closeChatSessionContextMenu();
+    }
+  });
+
+  window.addEventListener('blur', closeChatSessionContextMenu);
+}
+
+function setChatSidebarCollapsed(collapsed) {
+  state.chatSidebarCollapsed = Boolean(collapsed);
+  localStorage.setItem('myclaw-chat-sidebar-collapsed', state.chatSidebarCollapsed ? '1' : '0');
+  applyChatSidebarState();
+}
+
+function applyChatSidebarState() {
+  const container = document.getElementById('chat-container');
+  const toggle = document.getElementById('chat-sidebar-toggle');
+  const icon = document.getElementById('chat-sidebar-toggle-icon');
+  if (container) {
+    container.classList.toggle('chat-sidebar-collapsed', state.chatSidebarCollapsed);
+  }
+  if (toggle) {
+    const label = state.chatSidebarCollapsed ? '展开对话列表' : '收起对话列表';
+    toggle.setAttribute('aria-expanded', String(!state.chatSidebarCollapsed));
+    toggle.setAttribute('aria-label', label);
+    toggle.title = label;
+  }
+  if (icon) {
+    icon.textContent = state.chatSidebarCollapsed ? '>' : '<';
+  }
+}
+
+function setChatSessionDialogMode(mode) {
+  const nextMode = String(mode || '').trim().toLowerCase() === 'ask' ? 'ask' : 'agent';
+  state.chatSessionDialog = {
+    ...state.chatSessionDialog,
+    selectedMode: nextMode,
+  };
+
+  document.querySelectorAll('[data-chat-session-mode-option]').forEach((option) => {
+    option.classList.toggle('active', option.dataset.chatSessionModeOption === nextMode);
+  });
+
+  const modeHint = document.getElementById('chat-session-dialog-mode-hint');
+  if (modeHint) {
+    modeHint.textContent = nextMode === 'ask'
+      ? 'Ask 只走传统一问一答；需要时可在单条消息前加 @kb 临时附加知识库。'
+      : 'Agent 会自主判断是否调用知识库、提醒和本地只读工具。';
+  }
+}
+
+function openChatSessionDialog(mode, conversation) {
+  const dialog = document.getElementById('chat-session-dialog');
+  const card = dialog?.querySelector('.dialog-card');
+  const eyebrow = document.getElementById('chat-session-dialog-eyebrow');
+  const title = document.getElementById('chat-session-dialog-title');
+  const description = document.getElementById('chat-session-dialog-desc');
+  const targetLabel = document.getElementById('chat-session-dialog-target-label');
+  const targetValue = document.getElementById('chat-session-dialog-target-value');
+  const field = document.getElementById('chat-session-dialog-field');
+  const input = document.getElementById('chat-session-dialog-input');
+  const modeGroup = document.getElementById('chat-session-dialog-mode-group');
+  const modeHint = document.getElementById('chat-session-dialog-mode-hint');
+  const confirm = document.getElementById('chat-session-dialog-confirm');
+  if (!dialog || !card || !eyebrow || !title || !description || !targetLabel || !targetValue || !field || !input || !modeGroup || !modeHint || !confirm) {
     return;
   }
 
-  if (state.chat.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">○</div>
-        <h3>开始新对话</h3>
-        <p>输入问题或使用命令如 /kb remember、/notice、/skill list</p>
-      </div>
-    `;
-    renderChatContentActions();
-    renderChatComposerState();
-    return;
-  }
+  state.chatSessionDialog = {
+    ...defaultChatSessionDialogState(),
+    open: true,
+    mode,
+    sessionId: conversation?.sessionId || '',
+    itemId: conversation?.id || '',
+    restoreFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    selectedMode: conversation?.mode === 'ask' ? 'ask' : 'agent',
+  };
 
-  container.innerHTML = state.chat
-    .map(
-      (message, index) => `
-        <div class="chat-message ${escapeAttribute(message.role)}">
-          <div class="chat-avatar">${message.role === 'user' ? '◐' : message.role === 'system' ? '◇' : '○'}</div>
-          <div class="chat-bubble">
-            ${renderChatMessageContent(message)}
-            ${renderChatProcess(message)}
-            ${renderChatMessageFooter(message, index)}
-          </div>
-        </div>
-      `,
-    )
-    .join('');
-  container.scrollTop = container.scrollHeight;
-  renderChatContentActions();
-  renderChatComposerState();
-}
+  if (mode === 'knowledge-delete') {
+    const shortId = (conversation?.shortId || String(conversation?.id || '').slice(0, 8)).trim();
+    const previewText = truncateText(String(conversation?.preview || conversation?.text || '').replace(/\s+/g, ' ').trim(), 48);
+    const displayTitle = previewText ? `#${shortId} · ${previewText}` : `#${shortId}`;
+    state.chatSessionDialog.initialTitle = displayTitle;
+    targetLabel.textContent = '目标记忆';
+    targetValue.textContent = displayTitle;
+    eyebrow.textContent = '危险操作';
+    title.textContent = '删除记忆';
+    description.textContent = '删除后这条记忆会立即从当前记忆库移除，这个动作不能撤销。';
+    field.hidden = true;
+    input.value = displayTitle;
+    input.placeholder = '';
+    confirm.textContent = '删除';
+    confirm.classList.remove('btn-primary');
+    confirm.classList.add('btn-danger');
+    card.classList.add('danger');
+    modeGroup.hidden = true;
+  } else if (mode === 'prompt-delete') {
+    const shortId = (conversation?.shortId || String(conversation?.id || '').slice(0, 8)).trim();
+    const promptTitle = String(conversation?.title || '').trim();
+    const previewText = truncateText(String(conversation?.content || '').replace(/\s+/g, ' ').trim(), 48);
+    const displayTitle = promptTitle ? `#${shortId} · ${promptTitle}` : `#${shortId}`;
+    state.chatSessionDialog.initialTitle = displayTitle;
+    targetLabel.textContent = '目标 Prompt';
+    targetValue.textContent = displayTitle;
+    eyebrow.textContent = '危险操作';
+    title.textContent = '删除 Prompt';
+    description.textContent = previewText
+      ? `删除后这个 Prompt 会立即从 Prompt 库移除，这个动作不能撤销。\n\n内容预览：${previewText}`
+      : '删除后这个 Prompt 会立即从 Prompt 库移除，这个动作不能撤销。';
+    field.hidden = true;
+    input.value = displayTitle;
+    input.placeholder = '';
+    confirm.textContent = '删除';
+    confirm.classList.remove('btn-primary');
+    confirm.classList.add('btn-danger');
+    card.classList.add('danger');
+    modeGroup.hidden = true;
+  } else if (mode === 'refresh') {
+    const previewText = truncateText(String(conversation?.preview || '').replace(/\s+/g, ' ').trim(), 48);
+    const displayTitle = previewText || '当前回复';
+    state.chatSessionDialog.initialTitle = displayTitle;
+    targetLabel.textContent = '当前回复';
+    targetValue.textContent = displayTitle;
+    eyebrow.textContent = '确认操作';
+    title.textContent = '刷新当前回复';
+    description.textContent = '是不是一定要刷新？刷新后会丢弃当前这条 AI 回复，并重新生成。';
+    field.hidden = true;
+    input.value = displayTitle;
+    input.placeholder = '';
+    confirm.textContent = '刷新';
+    confirm.classList.remove('btn-danger');
+    confirm.classList.add('btn-primary');
+    card.classList.remove('danger');
+    modeGroup.hidden = true;
+  } else if (mode === 'new') {
+    targetLabel.textContent = '新对话';
+    targetValue.textContent = '创建后会固定当前会话模式';
+    eyebrow.textContent = '对话模式';
+    title.textContent = '新建对话';
+    description.textContent = '默认推荐 agent。ask 适合传统一问一答；agent 会自主判断是否调用知识库、提醒和本地只读工具。';
+    field.hidden = true;
+    modeGroup.hidden = false;
+    input.value = '';
+    input.placeholder = '';
+    confirm.textContent = '创建';
+    confirm.classList.remove('btn-danger');
+    confirm.classList.add('btn-primary');
+    card.classList.remove('danger');
+    setChatSessionDialogMode(state.chatSessionDialog.selectedMode);
+  } else {
+    const displayTitle = (conversation?.title || '新对话').trim() || '新对话';
+    state.chatSessionDialog.initialTitle = displayTitle;
+    targetLabel.textContent = '当前对话';
+    targetValue.textContent = displayTitle;
 
-function renderChatProcess(message) {
-  const steps = normalizeChatProcess(message?.process);
-  if (message?.role !== 'assistant' || steps.length === 0) return '';
-  return `
-    <details class="chat-process">
-      <summary>调试过程</summary>
-      <ol class="chat-process-list">
-        ${steps.map((step) => `
-          <li class="chat-process-step">
-            ${step.title ? `<div class="chat-process-title">${escapeHTML(step.title)}</div>` : ''}
-            ${step.detail ? `<pre class="chat-process-detail">${escapeHTML(step.detail)}</pre>` : ''}
-          </li>
-        `).join('')}
-      </ol>
-    </details>
-  `;
-}
-
-function renderChatContentActions() {
-  const exportButton = document.getElementById('chat-export-markdown');
-  if (exportButton) {
-    const disabled = state.chatStreaming || state.chat.length === 0;
-    exportButton.disabled = disabled;
-    exportButton.title = state.chatStreaming
-      ? '当前回复尚未完成。'
-      : state.chat.length === 0
-        ? '当前对话还没有消息可导出。'
-        : '导出当前对话';
-  }
-
-  const newButton = document.getElementById('chat-new-session');
-  if (newButton) {
-    newButton.disabled = Boolean(state.chatStreaming);
-    newButton.title = state.chatStreaming ? '当前回复尚未完成。' : '开启新对话';
-  }
-}
-
-function renderChatMeta(message) {
-  const parts = [];
-  if (message.time) {
-    parts.push(`<span class="chat-time">${escapeHTML(message.time)}</span>`);
-  }
-  if (message.role === 'assistant') {
-    const usageText = formatTokenUsage(message.usage);
-    if (usageText) {
-      parts.push(`<span class="chat-usage">${escapeHTML(usageText)}</span>`);
+    if (mode === 'delete') {
+      eyebrow.textContent = '危险操作';
+      title.textContent = '删除对话';
+      description.textContent = '删除后当前会话消息会一并移除，这个动作不能撤销。';
+      field.hidden = true;
+      input.value = displayTitle;
+      input.placeholder = '';
+      confirm.textContent = '删除';
+      confirm.classList.remove('btn-primary');
+      confirm.classList.add('btn-danger');
+      card.classList.add('danger');
+      modeGroup.hidden = true;
+    } else {
+      eyebrow.textContent = '对话标题';
+      title.textContent = '重命名对话';
+      description.textContent = '只修改列表显示，不影响当前上下文和消息内容。';
+      field.hidden = false;
+      modeGroup.hidden = true;
+      input.value = displayTitle;
+      input.placeholder = '输入对话标题';
+      confirm.textContent = '保存';
+      confirm.classList.remove('btn-danger');
+      confirm.classList.add('btn-primary');
+      card.classList.remove('danger');
     }
   }
-  if (parts.length === 0) return '';
-  return `<div class="chat-meta">${parts.join('')}</div>`;
-}
 
-function renderChatMessageFooter(message, index) {
-  const meta = renderChatMeta(message);
-  return `
-    <div class="chat-bubble-footer${meta ? '' : ' copy-only'}">
-      ${meta || ''}
-      ${renderChatMessageActions(message, index)}
-    </div>
-  `;
-}
-
-function renderChatMessageActions(message, index) {
-  return `
-    <div class="chat-message-actions">
-      ${renderChatRefreshButton(message, index)}
-      ${renderChatCopyButton(index)}
-    </div>
-  `;
-}
-
-function renderChatRefreshButton(message, index) {
-  if (currentChatConversation()?.readOnly || message.role !== 'assistant' || index !== findRefreshableChatMessageIndex()) {
-    return '';
-  }
-
-  return `
-    <button
-      type="button"
-      class="chat-action-button"
-      data-chat-refresh-index="${escapeAttribute(index)}"
-      aria-label="刷新当前回复"
-      title="刷新当前回复"
-    >
-      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path d="M8 2.5a5.5 5.5 0 1 0 5.19 7.32.5.5 0 0 1 .94.34A6.5 6.5 0 1 1 8 1.5V0l3 2.5-3 2.5z"></path>
-      </svg>
-    </button>
-  `;
-}
-
-function renderChatCopyButton(index) {
-  return `
-    <button
-      type="button"
-      class="chat-action-button"
-      data-chat-copy-index="${escapeAttribute(index)}"
-      aria-label="复制此条对话"
-      title="复制此条对话"
-    >
-      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path d="M5.5 2.25A1.25 1.25 0 0 0 4.25 3.5v7A1.25 1.25 0 0 0 5.5 11.75h6A1.25 1.25 0 0 0 12.75 10.5v-7A1.25 1.25 0 0 0 11.5 2.25z"></path>
-        <path d="M2.75 5.5A1.25 1.25 0 0 1 4 4.25h.75v1H4A.25.25 0 0 0 3.75 5.5v6A1.25 1.25 0 0 0 5 12.75h5.25a.25.25 0 0 0 .25-.25v-.75h1v.75A1.25 1.25 0 0 1 10.25 13.75H5A2.25 2.25 0 0 1 2.75 11.5z"></path>
-      </svg>
-    </button>
-  `;
-}
-
-function renderChatMessageContent(message) {
-  const optionContent = message.role === 'assistant' ? extractChatOptionContent(message.text) : null;
-  if (optionContent) {
-    return renderChatOptionMessage(optionContent);
-  }
-  return `<div class="chat-markdown">${renderMarkdown(message.text || (message.streaming ? '思考中…' : ''))}</div>`;
-}
-
-function renderChatOptionMessage(content) {
-  const blocks = [];
-  if (content.beforeText) {
-    blocks.push(`<div class="chat-markdown">${renderMarkdown(content.beforeText)}</div>`);
-  }
-  blocks.push(renderChatOptions(content.payload));
-  if (content.afterText) {
-    blocks.push(`<div class="chat-markdown">${renderMarkdown(content.afterText)}</div>`);
-  }
-  return `<div class="chat-option-message">${blocks.join('')}</div>`;
-}
-
-function renderChatOptions(payload) {
-  return `
-    <div class="chat-option-card">
-      <div class="chat-option-question">${escapeHTML(payload.question)}</div>
-      <div class="chat-option-list">
-        ${payload.options
-          .map((option) => `
-            <button
-              type="button"
-              class="chat-option-button"
-              data-chat-option="${escapeAttribute(option.value)}"
-              data-chat-option-value="${escapeAttribute(option.value)}"
-              data-chat-option-label="${escapeAttribute(option.label)}"
-              data-chat-option-question="${escapeAttribute(payload.question)}"
-            >
-              ${escapeHTML(option.label)}
-            </button>
-          `)
-          .join('')}
-      </div>
-    </div>
-  `;
-}
-
-function parseChatOptionsPayload(source) {
-  const optionContent = extractChatOptionContent(source);
-  return optionContent ? optionContent.payload : null;
-}
-
-function extractChatOptionContent(source) {
-  const text = String(source ?? '').replace(/\r\n?/g, '\n');
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-
-  const directPayload = parseChatOptionsPayloadCandidate(trimmed);
-  if (directPayload) {
-    return { payload: directPayload, beforeText: '', afterText: '' };
-  }
-
-  const fencedPayload = extractChatOptionContentFromFencedBlocks(text);
-  if (fencedPayload) return fencedPayload;
-
-  return extractChatOptionContentFromEmbeddedObject(text);
-}
-
-function parseChatOptionsPayloadCandidate(text) {
-  const candidate = String(text ?? '').trim();
-  if (!candidate.startsWith('{') || !candidate.endsWith('}')) return null;
-
-  const jsonPayload = parseJSONChatOptionsPayload(candidate);
-  if (jsonPayload) return jsonPayload;
-
-  const ednPayload = parseEDNChatOptionsPayload(candidate);
-  if (ednPayload) return ednPayload;
-
-  return parseAskUserInputChatOptionsPayload(candidate);
-}
-
-function extractChatOptionContentFromFencedBlocks(text) {
-  const fencePattern = /```(?:[\w+-]+)?\s*\n([\s\S]*?)\n```/g;
-  for (const match of text.matchAll(fencePattern)) {
-    const candidate = parseChatOptionsPayloadCandidate(match[1]);
-    if (!candidate) continue;
-    return {
-      payload: candidate,
-      beforeText: normalizeChatOptionContextText(text.slice(0, match.index)),
-      afterText: normalizeChatOptionContextText(text.slice((match.index || 0) + match[0].length)),
-    };
-  }
-  return null;
-}
-
-function extractChatOptionContentFromEmbeddedObject(text) {
-  const segments = findBraceDelimitedSegments(text);
-  for (const segment of segments) {
-    const candidate = parseChatOptionsPayloadCandidate(segment.text);
-    if (!candidate) continue;
-    return {
-      payload: candidate,
-      beforeText: normalizeChatOptionContextText(text.slice(0, segment.start)),
-      afterText: normalizeChatOptionContextText(text.slice(segment.end)),
-    };
-  }
-  return null;
-}
-
-function normalizeChatOptionContextText(text) {
-  let normalized = String(text ?? '').replace(/\r\n?/g, '\n');
-  if (!normalized.trim()) return '';
-
-  normalized = normalized.replace(
-    /<details[^>]*>\s*<summary>([\s\S]*?)<\/summary>/gi,
-    (_match, summary) => `**${stripChatOptionHTML(summary).trim()}**\n\n`,
-  );
-  normalized = normalized.replace(/<\/details>/gi, '\n');
-  normalized = normalized.replace(/<br\s*\/?>/gi, '\n');
-  normalized = normalized.replace(/<\/(p|div|section|article|li|ul|ol)>/gi, '\n');
-  normalized = normalized.replace(/<(p|div|section|article|li|ul|ol)[^>]*>/gi, '');
-  normalized = stripChatOptionHTML(normalized);
-  normalized = normalized.replace(/[ \t]+\n/g, '\n');
-  normalized = normalized.replace(/\n{3,}/g, '\n\n');
-  return normalized.trim();
-}
-
-function stripChatOptionHTML(text) {
-  return String(text ?? '').replace(/<[^>]+>/g, '');
-}
-
-function findBraceDelimitedSegments(text) {
-  const segments = [];
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escape = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    if (escape) {
-      escape = false;
-      continue;
+  dialog.hidden = false;
+  requestAnimationFrame(() => {
+    if (mode === 'delete' || mode === 'knowledge-delete' || mode === 'prompt-delete' || mode === 'refresh') {
+      confirm.focus();
+    } else if (mode === 'new') {
+      const activeMode = document.querySelector('.dialog-choice-option.active');
+      if (activeMode instanceof HTMLElement) {
+        activeMode.focus();
+      } else {
+        confirm.focus();
+      }
+    } else {
+      input.focus();
+      input.select();
     }
-    if (char === '\\') {
-      escape = true;
-      continue;
+  });
+}
+
+function closeChatSessionDialog() {
+  const dialog = document.getElementById('chat-session-dialog');
+  const card = dialog?.querySelector('.dialog-card');
+  const targetLabel = document.getElementById('chat-session-dialog-target-label');
+  const targetValue = document.getElementById('chat-session-dialog-target-value');
+  const field = document.getElementById('chat-session-dialog-field');
+  const input = document.getElementById('chat-session-dialog-input');
+  const modeGroup = document.getElementById('chat-session-dialog-mode-group');
+  const modeHint = document.getElementById('chat-session-dialog-mode-hint');
+  const confirm = document.getElementById('chat-session-dialog-confirm');
+  const restoreFocus = state.chatSessionDialog.restoreFocus;
+
+  state.chatSessionDialog = defaultChatSessionDialogState();
+
+  if (dialog) {
+    dialog.hidden = true;
+  }
+  if (card) {
+    card.classList.remove('danger');
+  }
+  if (targetLabel) {
+    targetLabel.textContent = '当前对话';
+  }
+  if (targetValue) {
+    targetValue.textContent = '新对话';
+  }
+  if (field) {
+    field.hidden = false;
+  }
+  if (input) {
+    input.value = '';
+    input.placeholder = '输入对话标题';
+  }
+  if (modeGroup) {
+    modeGroup.hidden = true;
+  }
+  if (modeHint) {
+    modeHint.textContent = 'Agent 会自主判断是否调用知识库、提醒和本地只读工具。';
+  }
+  document.querySelectorAll('[data-chat-session-mode-option]').forEach((option) => {
+    option.classList.remove('active');
+  });
+  if (confirm) {
+    confirm.disabled = false;
+    confirm.textContent = '保存';
+    confirm.classList.remove('btn-danger');
+    confirm.classList.add('btn-primary');
+  }
+  if (restoreFocus && typeof restoreFocus.focus === 'function') {
+    restoreFocus.focus();
+  }
+}
+
+async function submitChatSessionDialog() {
+  if (!state.chatSessionDialog.open) return;
+
+  const { mode, sessionId, itemId, initialTitle } = state.chatSessionDialog;
+  const input = document.getElementById('chat-session-dialog-input');
+  const confirm = document.getElementById('chat-session-dialog-confirm');
+  if (!confirm) return;
+  if ((mode === 'rename' || mode === 'delete') && !sessionId) return;
+  if ((mode === 'knowledge-delete' || mode === 'prompt-delete') && !itemId) return;
+
+  if (mode === 'rename') {
+    const nextTitle = (input?.value || '').trim();
+    if (!nextTitle) {
+      showBanner('对话标题不能为空。', true);
+      if (input) input.focus();
+      return;
     }
-    if (char === '"') {
-      inString = !inString;
-      continue;
+    if (nextTitle === (initialTitle || '').trim()) {
+      closeChatSessionDialog();
+      return;
     }
-    if (inString) continue;
-    if (char === '{') {
-      if (depth === 0) start = index;
-      depth += 1;
-      continue;
+  }
+
+  confirm.disabled = true;
+
+  try {
+    if (mode === 'refresh') {
+      closeChatSessionDialog();
+      await refreshCurrentChatResponse();
+      return;
     }
-    if (char === '}') {
-      if (depth === 0) continue;
-      depth -= 1;
-      if (depth === 0 && start >= 0) {
-        segments.push({
-          start,
-          end: index + 1,
-          text: text.slice(start, index + 1),
-        });
-        start = -1;
+
+    if (mode === 'new') {
+      const selectedMode = state.chatSessionDialog.selectedMode === 'ask' ? 'ask' : 'agent';
+      applyChatState(normalizeChatState(await state.backend.NewChatSession(selectedMode)));
+      closeChatSessionDialog();
+      await Promise.all([refreshSkills(), refreshChatPrompt(), refreshProjectState()]);
+      const chatInput = document.getElementById('chat-input');
+      if (chatInput) chatInput.focus();
+      showBanner(`已开启 ${selectedMode} 对话。`, false);
+      return;
+    }
+
+    if (mode === 'delete') {
+      applyChatState(normalizeChatState(await state.backend.DeleteChatSession(sessionId)));
+      closeChatSessionDialog();
+      await Promise.all([refreshSkills(), refreshChatPrompt()]);
+      showBanner('对话已删除。', false);
+      return;
+    }
+
+    if (mode === 'knowledge-delete') {
+      const result = await state.backend.DeleteKnowledge(itemId);
+      closeChatSessionDialog();
+      await refreshAll();
+      showBanner(result.message, false);
+      return;
+    }
+
+    if (mode === 'prompt-delete') {
+      const result = await state.backend.DeletePrompt(itemId);
+      closeChatSessionDialog();
+      await refreshAll();
+      showBanner(result.message, false);
+      return;
+    }
+
+    applyChatState(normalizeChatState(await state.backend.RenameChatSession(sessionId, (input?.value || '').trim())));
+    closeChatSessionDialog();
+    showBanner('对话已重命名。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  } finally {
+    if (state.chatSessionDialog.open) {
+      confirm.disabled = false;
+    }
+  }
+}
+
+/* Source: js/core/events.js */
+function bindStaticEvents() {
+  document.addEventListener('click', (event) => {
+    const anchor = event.target.closest('a[href]');
+    if (!anchor) return;
+
+    const targetURL = sanitizeHTTPURL(anchor.getAttribute('href') || anchor.href || '');
+    if (!targetURL) return;
+    if (state.backendMode !== 'wails' || !state.backend || typeof state.backend.OpenExternalURL !== 'function') {
+      return;
+    }
+
+    event.preventDefault();
+    void openExternalLink(targetURL);
+  });
+
+  // Theme toggle
+  const themeToggle = document.getElementById('theme-toggle');
+  if (themeToggle) {
+    themeToggle.addEventListener('click', toggleTheme);
+  }
+
+  const versionCheck = document.getElementById('version-check');
+  if (versionCheck) {
+    versionCheck.addEventListener('click', () => void checkLatestVersion());
+  }
+
+  const projectSwitch = document.getElementById('project-switch');
+  if (projectSwitch) {
+    projectSwitch.addEventListener('click', () => void setActiveProject());
+  }
+
+  const projectNameInput = document.getElementById('project-name-input');
+  if (projectNameInput) {
+    projectNameInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void setActiveProject();
+      }
+    });
+  }
+
+  const projectList = document.getElementById('project-list');
+  if (projectList) {
+    projectList.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-project]');
+      if (!target) return;
+
+      const project = target.dataset.project || '';
+      void setActiveProject(project);
+    });
+  }
+
+  // File import events
+  const dropZone = document.getElementById('drop-zone');
+  if (dropZone) {
+    dropZone.addEventListener('click', () => void browseFile());
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        handleFileDrop(file);
+      }
+    });
+  }
+
+  const importConfirm = document.getElementById('import-confirm');
+  if (importConfirm) {
+    importConfirm.addEventListener('click', () => void importFile());
+  }
+
+  const fileInput = document.getElementById('http-file-input');
+  if (fileInput) {
+    fileInput.addEventListener('change', (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (file) {
+        handleFileDrop(file);
+      }
+    });
+  }
+
+  // Memory filter
+  const memoryFilter = document.getElementById('memory-filter');
+  if (memoryFilter) {
+    memoryFilter.addEventListener('input', (event) => {
+      state.filter = event.target.value.trim().toLowerCase();
+      renderKnowledge();
+    });
+  }
+
+  // Clear memory
+  const clearMemory = document.getElementById('clear-memory');
+  if (clearMemory) {
+    clearMemory.addEventListener('click', () => void clearKnowledge());
+  }
+
+  const reminderRefresh = document.getElementById('reminder-refresh');
+  if (reminderRefresh) {
+    reminderRefresh.addEventListener('click', () => void refreshReminders());
+  }
+
+  const promptFilter = document.getElementById('prompt-filter');
+  if (promptFilter) {
+    promptFilter.addEventListener('input', (event) => {
+      state.promptFilter = event.target.value.trim().toLowerCase();
+      renderPrompts();
+    });
+  }
+
+  const savePrompt = document.getElementById('save-prompt');
+  if (savePrompt) {
+    savePrompt.addEventListener('click', () => void createPrompt());
+  }
+
+  const clearPrompts = document.getElementById('clear-prompts');
+  if (clearPrompts) {
+    clearPrompts.addEventListener('click', () => void clearPromptsLibrary());
+  }
+
+  const settingsSave = document.getElementById('settings-save');
+  if (settingsSave) {
+    settingsSave.addEventListener('click', () => void saveSettings());
+  }
+
+  const skillImportTrigger = document.getElementById('skill-import-trigger');
+  if (skillImportTrigger) {
+    skillImportTrigger.addEventListener('click', () => void browseSkillArchive());
+  }
+
+  const skillZipInput = document.getElementById('http-skill-zip-input');
+  if (skillZipInput) {
+    skillZipInput.addEventListener('change', (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (file) {
+        void importSkillArchiveFromFile(file);
+      }
+    });
+  }
+
+  const skillList = document.getElementById('skill-list');
+  if (skillList) {
+    skillList.addEventListener('click', (event) => {
+      const actionTarget = event.target.closest('[data-skill-action]');
+      if (actionTarget) {
+        const name = actionTarget.dataset.skillName || '';
+        if (actionTarget.dataset.skillAction === 'load') {
+          void loadSkill(name);
+        } else if (actionTarget.dataset.skillAction === 'unload') {
+          void unloadSkill(name);
+        }
+        return;
+      }
+
+      const card = event.target.closest('[data-skill-name]');
+      if (!card) return;
+      state.selectedSkillName = card.dataset.skillName || '';
+      renderSkills();
+    });
+  }
+
+  const skillDetailActions = document.getElementById('skill-detail-actions');
+  if (skillDetailActions) {
+    skillDetailActions.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-skill-action]');
+      if (!target) return;
+
+      const name = target.dataset.skillName || '';
+      if (target.dataset.skillAction === 'load') {
+        void loadSkill(name);
+      } else if (target.dataset.skillAction === 'unload') {
+        void unloadSkill(name);
+      }
+    });
+  }
+
+  const toolList = document.getElementById('tool-list');
+  if (toolList) {
+    toolList.addEventListener('click', (event) => {
+      const actionTarget = event.target.closest('[data-tool-action]');
+      if (!actionTarget) return;
+
+      if (actionTarget.dataset.toolAction === 'save-everything-path') {
+        void saveSettings();
+      }
+    });
+  }
+
+  // Chat events
+  const chatSend = document.getElementById('chat-send');
+  if (chatSend) {
+    chatSend.addEventListener('click', () => void sendMessage());
+  }
+
+  const chatNewSession = document.getElementById('chat-new-session');
+  if (chatNewSession) {
+    chatNewSession.addEventListener('click', () => void startNewConversation());
+  }
+
+  const chatExportMarkdown = document.getElementById('chat-export-markdown');
+  if (chatExportMarkdown) {
+    chatExportMarkdown.addEventListener('click', () => void exportChatMarkdown());
+  }
+
+  const chatSessionList = document.getElementById('chat-session-list');
+  if (chatSessionList) {
+    chatSessionList.addEventListener('click', (event) => {
+      if (Date.now() < (state.chatSessionDrag.suppressClickUntil || 0)) return;
+      closeChatSessionContextMenu();
+      const target = event.target.closest('[data-chat-session]');
+      if (!target) return;
+      const sessionId = target.dataset.chatSession || '';
+      if (!sessionId) return;
+      void switchChatSession(sessionId);
+    });
+  }
+
+  const chatList = document.getElementById('chat-list');
+  if (chatList) {
+    chatList.addEventListener('click', (event) => {
+      const refreshButton = event.target.closest('[data-chat-refresh-index]');
+      if (refreshButton) {
+        const messageIndex = Number(refreshButton.dataset.chatRefreshIndex || '-1');
+        if (!Number.isInteger(messageIndex) || messageIndex < 0) return;
+        void confirmRefreshChatMessage(messageIndex);
+        return;
+      }
+
+      const copyButton = event.target.closest('[data-chat-copy-index]');
+      if (copyButton) {
+        const messageIndex = Number(copyButton.dataset.chatCopyIndex || '-1');
+        if (!Number.isInteger(messageIndex) || messageIndex < 0) return;
+        void copyChatMessage(messageIndex);
+        return;
+      }
+
+      const target = event.target.closest('[data-chat-option]');
+      if (!target) return;
+      const value = target.dataset.chatOptionValue || target.dataset.chatOption || '';
+      const label = target.dataset.chatOptionLabel || value;
+      const question = target.dataset.chatOptionQuestion || '';
+      if (!value || !question) return;
+      void sendChatOption(question, value, label);
+    });
+  }
+
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) {
+    autoResizeChatInput();
+    chatInput.addEventListener('keydown', (e) => {
+      if (state.autocomplete.open) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          moveAutocompleteSelection(1);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          moveAutocompleteSelection(-1);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          const selected = (state.autocomplete.items || [])[state.autocomplete.selectedIndex];
+          if (selected && !selected.disabled) {
+            e.preventDefault();
+            void applySelectedAutocompleteItem();
+            return;
+          }
+          if (e.key === 'Tab') {
+            e.preventDefault();
+            closeChatAutocomplete();
+            return;
+          }
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          closeChatAutocomplete();
+          return;
+        }
+      }
+
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        void sendMessage();
+      }
+    });
+
+    chatInput.addEventListener('input', () => {
+      autoResizeChatInput();
+      updateChatAutocomplete();
+    });
+    chatInput.addEventListener('click', updateChatAutocomplete);
+    chatInput.addEventListener('focus', updateChatAutocomplete);
+  }
+
+  const chatContextBar = document.getElementById('chat-context-bar');
+  if (chatContextBar) {
+    chatContextBar.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-chat-context-action]');
+      if (!target) return;
+
+      const action = target.dataset.chatContextAction || '';
+      const value = target.dataset.value || '';
+      if (action === 'clear-prompt') {
+        void clearChatPromptSelection();
+      } else if (action === 'unload-skill') {
+        void unloadSkill(value);
+      }
+    });
+  }
+
+  const chatAutocomplete = document.getElementById('chat-autocomplete');
+  if (chatAutocomplete) {
+    chatAutocomplete.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+    });
+    chatAutocomplete.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-autocomplete-index]');
+      if (!target) return;
+      const index = Number(target.dataset.autocompleteIndex || '-1');
+      if (Number.isNaN(index) || index < 0) return;
+      state.autocomplete.selectedIndex = index;
+      renderChatAutocomplete();
+      void applySelectedAutocompleteItem();
+    });
+  }
+
+  const weixinStart = document.getElementById('weixin-start-login');
+  if (weixinStart) {
+    weixinStart.addEventListener('click', () => void startWeixinLogin());
+  }
+
+  const weixinStop = document.getElementById('weixin-stop-login');
+  if (weixinStop) {
+    weixinStop.addEventListener('click', () => void cancelWeixinLogin());
+  }
+
+  const weixinLogout = document.getElementById('weixin-logout');
+  if (weixinLogout) {
+    weixinLogout.addEventListener('click', () => void logoutWeixin());
+  }
+
+  const modelSave = document.getElementById('model-save');
+  if (modelSave) {
+    modelSave.addEventListener('click', () => void saveModelConfig());
+  }
+
+  const modelNew = document.getElementById('model-new');
+  if (modelNew) {
+    modelNew.addEventListener('click', () => createNewModelProfileDraft());
+  }
+
+  const modelSetActive = document.getElementById('model-set-active');
+  if (modelSetActive) {
+    modelSetActive.addEventListener('click', () => void setActiveModelProfile());
+  }
+
+  const modelTest = document.getElementById('model-test');
+  if (modelTest) {
+    modelTest.addEventListener('click', () => void testModelConnection());
+  }
+
+  const modelDelete = document.getElementById('model-delete');
+  if (modelDelete) {
+    modelDelete.addEventListener('click', () => void deleteModelProfile());
+  }
+
+  const modelProfileSelect = document.getElementById('model-profile-select');
+  if (modelProfileSelect) {
+    modelProfileSelect.addEventListener('change', () => syncModelFormFromSelection(true));
+  }
+
+  const modelProvider = document.getElementById('model-provider');
+  if (modelProvider) {
+    modelProvider.addEventListener('change', () => syncModelProviderFields(true));
+  }
+
+  // Memory list events
+  const memoryList = document.getElementById('memory-list');
+  if (memoryList) {
+    memoryList.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-action]');
+      if (!target) return;
+
+      const id = target.dataset.id || '';
+      switch (target.dataset.action) {
+        case 'toggle-expand':
+          toggleMemoryExpand(id);
+          break;
+        case 'toggle-append':
+          state.openAppendId = state.openAppendId === id ? '' : id;
+          renderKnowledge();
+          break;
+        case 'delete':
+          void deleteKnowledge(id);
+          break;
+        case 'save-append':
+          void appendKnowledge(id);
+          break;
+      }
+    });
+
+    memoryList.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLTextAreaElement) || !target.dataset.id) return;
+      state.appendDrafts[target.dataset.id] = target.value;
+    });
+  }
+
+  const promptList = document.getElementById('prompt-list');
+  if (promptList) {
+    promptList.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-action]');
+      if (!target) return;
+
+      const id = target.dataset.id || '';
+      switch (target.dataset.action) {
+        case 'toggle-expand-prompt':
+          togglePromptExpand(id);
+          break;
+        case 'insert-prompt':
+          insertPromptToChat(id);
+          break;
+        case 'delete-prompt':
+          void deletePrompt(id);
+          break;
+      }
+    });
+  }
+
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('#chat-session-context-menu')) {
+      closeChatSessionContextMenu();
+    }
+    if (event.target.closest('.chat-input-area')) return;
+    closeChatAutocomplete();
+  });
+}
+
+function bindRuntimeEvents() {
+  if (!window.runtime || typeof window.runtime.EventsOn !== 'function') return;
+
+  window.runtime.EventsOn('reminder:due', (payload) => {
+    const reminder = Array.isArray(payload) ? payload[0] : payload;
+    if (!reminder) return;
+
+    const shortId = reminder.shortId || reminder.id || 'notice';
+    const message = reminder.message || '提醒触发';
+    state.chat.push({
+      role: 'system',
+      text: `[提醒 #${shortId}] ${message}`,
+      time: nowLabel(),
+    });
+    syncCurrentChatConversationFromMessages();
+    renderChat();
+    showBanner(`提醒 #${shortId}: ${message}`, false);
+    void refreshReminders().catch(() => {});
+  });
+
+  window.runtime.EventsOn('weixin:status', (payload) => {
+    const next = normalizeWeixinStatus(payload);
+    applyWeixinStatus(next, true);
+  });
+
+  window.runtime.EventsOn('chat:changed', () => {
+    if (state.chatStreaming) return;
+    void refreshChatState().catch(() => {});
+  });
+
+  window.runtime.EventsOn('chat:stream', (payload) => {
+    const event = Array.isArray(payload) ? payload[0] : payload;
+    dispatchChatStreamEvent(event);
+  });
+}
+
+function dispatchChatStreamEvent(event) {
+  if (!event || !event.requestId) return;
+  const handler = state.chatStreamHandlers[event.requestId];
+  if (typeof handler === 'function') {
+    handler(event);
+  }
+}
+
+function renderChatShortcuts() {
+  document.querySelectorAll('.shortcut-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const input = document.getElementById('chat-input');
+      if (input) {
+        input.value = chip.dataset.cmd || '';
+        const cursor = input.value.length;
+        input.setSelectionRange(cursor, cursor);
+        autoResizeChatInput();
+        updateChatAutocomplete();
+        input.focus();
+      }
+    });
+  });
+}
+
+async function handleFileDrop(file) {
+  state.fileObject = file;
+  const path = file.path || file.name;
+  state.filePath = path;
+  updateFilePreview(file);
+}
+
+function updateFilePreview(file) {
+  const preview = document.getElementById('file-preview');
+  const fileName = document.getElementById('file-name');
+  const fileSize = document.getElementById('file-size');
+  const fileIcon = document.getElementById('file-icon');
+
+  if (preview) preview.classList.add('has-file');
+  if (fileName) fileName.textContent = file.name;
+
+  const sizeValue = Number(file.size || 0);
+  const sizeMB = (sizeValue / (1024 * 1024)).toFixed(2);
+  if (fileSize) fileSize.textContent = sizeValue > 0 ? `${sizeMB} MB` : '本地文件';
+
+  if (fileIcon) {
+    if ((file.type || '').includes('image')) {
+      fileIcon.textContent = '🖼';
+    } else if ((file.type || '').includes('pdf') || /\.pdf$/i.test(file.name || '')) {
+      fileIcon.textContent = '📕';
+    } else {
+      fileIcon.textContent = '📄';
+    }
+  }
+}
+
+/* Source: js/core/backend.js */
+async function waitForBackend() {
+  for (let index = 0; index < 80; index += 1) {
+    const backend = window.go && window.go.main && window.go.main.DesktopApp;
+    if (backend) return createWailsBackend(backend);
+    await delay(50);
+  }
+  if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+    return createHTTPBackend();
+  }
+  throw new Error('Wails 后端尚未就绪。');
+}
+
+function createWailsBackend(backend) {
+  return {
+    mode: 'wails',
+    GetOverview: () => backend.GetOverview(),
+    GetProjectState: () => backend.GetProjectState(),
+    SetActiveProject: (name) => backend.SetActiveProject(name),
+    ListReminders: () => backend.ListReminders(),
+    ListKnowledge: () => backend.ListKnowledge(),
+    CreateKnowledge: (text) => backend.CreateKnowledge(text),
+    AppendKnowledge: (idOrPrefix, addition) => backend.AppendKnowledge(idOrPrefix, addition),
+    DeleteKnowledge: (idOrPrefix) => backend.DeleteKnowledge(idOrPrefix),
+    ClearKnowledge: () => backend.ClearKnowledge(),
+    ListPrompts: () => backend.ListPrompts(),
+    CreatePrompt: (title, content) => backend.CreatePrompt(title, content),
+    DeletePrompt: (idOrPrefix) => backend.DeletePrompt(idOrPrefix),
+    ClearPrompts: () => backend.ClearPrompts(),
+    ListSkills: () => backend.ListSkills(),
+    ListTools: () => backend.ListTools(),
+    LoadSkill: (name) => backend.LoadSkill(name),
+    UnloadSkill: (name) => backend.UnloadSkill(name),
+    OpenSkillImportDialog: () => backend.OpenSkillImportDialog(),
+    ImportSkillArchive: (path) => backend.ImportSkillArchive(path),
+    UploadSkillArchive: () => Promise.reject(new Error('Wails 模式不使用浏览器上传。')),
+    ConfirmAction: (title, message) => backend.ConfirmAction(title, message),
+    OpenImportDialog: () => backend.OpenImportDialog(),
+    ImportFile: (path) => backend.ImportFile(path),
+    UploadImportFile: () => Promise.reject(new Error('Wails 模式不使用浏览器上传。')),
+    SendMessage: (input) => backend.SendMessage(input),
+    SendMessageStream: async (input, handlers = {}) => {
+      if (typeof backend.SendMessageStream !== 'function' || !window.runtime || typeof window.runtime.EventsOn !== 'function') {
+        const result = await backend.SendMessage(input);
+        if (typeof handlers.onDelta === 'function' && result?.reply) {
+          handlers.onDelta(result.reply);
+        }
+        return result;
+      }
+
+      const requestId = newChatStreamRequestID();
+      state.chatStreamHandlers[requestId] = (event) => {
+        if ((event?.delta || '') && typeof handlers.onDelta === 'function') {
+          handlers.onDelta(event.delta);
+        }
+      };
+      try {
+        return await backend.SendMessageStream(requestId, input);
+      } finally {
+        delete state.chatStreamHandlers[requestId];
+      }
+    },
+    GetChatState: () => backend.GetChatState(),
+    GetVersionInfo: () => backend.GetVersionInfo(),
+    OpenExternalURL: (url) => backend.OpenExternalURL(url),
+    RefreshChatResponse: () => backend.RefreshChatResponse(),
+    ExportChatMarkdown: () => backend.ExportChatMarkdown(),
+    NewChatSession: (mode = 'agent') => backend.NewChatSession(mode),
+    SwitchChatSession: (sessionId) => backend.SwitchChatSession(sessionId),
+    RenameChatSession: (sessionId, title) => backend.RenameChatSession(sessionId, title),
+    DeleteChatSession: (sessionId) => backend.DeleteChatSession(sessionId),
+    GetChatPrompt: () => backend.GetChatPrompt(),
+    SetChatPrompt: (idOrPrefix) => backend.SetChatPrompt(idOrPrefix),
+    ClearChatPrompt: () => backend.ClearChatPrompt(),
+    GetModelSettings: () => backend.GetModelSettings(),
+    SaveModelConfig: (payload) => backend.SaveModelConfig(payload),
+    TestModelConnection: (id) => backend.TestModelConnection(id),
+    DeleteModelConfig: (id) => backend.DeleteModelConfig(id),
+    SetActiveModel: (id) => backend.SetActiveModel(id),
+    GetWeixinStatus: () => backend.GetWeixinStatus(),
+    StartWeixinLogin: () => backend.StartWeixinLogin(),
+    CancelWeixinLogin: () => backend.CancelWeixinLogin(),
+    LogoutWeixin: () => backend.LogoutWeixin(),
+    GetSettings: () => backend.GetSettings(),
+    SaveSettings: (payload) => backend.SaveSettings(payload),
+  };
+}
+
+function createHTTPBackend() {
+  return {
+    mode: 'http',
+    GetOverview: () => requestJSON('GET', '/api/overview'),
+    GetProjectState: () => requestJSON('GET', '/api/projects'),
+    SetActiveProject: (name) => requestJSON('POST', '/api/projects/active', { name }),
+    ListReminders: () => requestJSON('GET', '/api/reminders'),
+    ListKnowledge: () => requestJSON('GET', '/api/knowledge'),
+    CreateKnowledge: (text) => requestJSON('POST', '/api/knowledge', { text }),
+    AppendKnowledge: (idOrPrefix, addition) => requestJSON('POST', '/api/knowledge/append', { idOrPrefix, addition }),
+    DeleteKnowledge: (idOrPrefix) => requestJSON('POST', '/api/knowledge/delete', { idOrPrefix }),
+    ClearKnowledge: () => requestJSON('POST', '/api/knowledge/clear'),
+    ListPrompts: () => requestJSON('GET', '/api/prompts'),
+    CreatePrompt: (title, content) => requestJSON('POST', '/api/prompts', { title, content }),
+    DeletePrompt: (idOrPrefix) => requestJSON('POST', '/api/prompts/delete', { idOrPrefix }),
+    ClearPrompts: () => requestJSON('POST', '/api/prompts/clear'),
+    ListSkills: () => requestJSON('GET', '/api/skills'),
+    ListTools: () => requestJSON('GET', '/api/tools'),
+    LoadSkill: (name) => requestJSON('POST', '/api/skills/load', { name }),
+    UnloadSkill: (name) => requestJSON('POST', '/api/skills/unload', { name }),
+    OpenSkillImportDialog: async () => '',
+    ImportSkillArchive: async () => {
+      throw new Error('HTTP 模式请直接选择 zip 文件上传。');
+    },
+    UploadSkillArchive: (file) => uploadFile('/api/skills/upload', file),
+    ConfirmAction: async (title, message) => window.confirm(`${title}\n\n${message}`),
+    OpenImportDialog: async () => '',
+    ImportFile: async () => {
+      throw new Error('HTTP 模式请直接选择本地文件上传。');
+    },
+    UploadImportFile: (file) => uploadFile('/api/import/upload', file),
+    SendMessage: (input) => requestJSON('POST', '/api/chat', { input }),
+    SendMessageStream: (input, handlers = {}) => streamJSON('POST', '/api/chat/stream', { input }, handlers),
+    GetChatState: () => requestJSON('GET', '/api/chat/state'),
+    GetVersionInfo: () => requestJSON('GET', '/api/version'),
+    OpenExternalURL: (url) => requestJSON('POST', '/api/open-external', { url }),
+    RefreshChatResponse: () => requestJSON('POST', '/api/chat/refresh'),
+    ExportChatMarkdown: async () => {
+      const payload = await requestJSON('GET', '/api/chat/export-markdown');
+      downloadTextFile(payload.filename || 'myclaw-chat.md', payload.markdown || '', 'text/markdown;charset=utf-8');
+      return { message: `已导出 Markdown：${payload.filename || 'myclaw-chat.md'}` };
+    },
+    NewChatSession: (mode = 'agent') => requestJSON('POST', '/api/chat/session/new', { mode }),
+    SwitchChatSession: (sessionId) => requestJSON('POST', '/api/chat/session/switch', { sessionId }),
+    RenameChatSession: (sessionId, title) => requestJSON('POST', '/api/chat/session/rename', { sessionId, title }),
+    DeleteChatSession: (sessionId) => requestJSON('POST', '/api/chat/session/delete', { sessionId }),
+    GetChatPrompt: () => requestJSON('GET', '/api/chat/prompt'),
+    SetChatPrompt: (idOrPrefix) => requestJSON('POST', '/api/chat/prompt', { idOrPrefix }),
+    ClearChatPrompt: () => requestJSON('DELETE', '/api/chat/prompt'),
+    GetModelSettings: () => requestJSON('GET', '/api/model'),
+    SaveModelConfig: (payload) => requestJSON('POST', '/api/model/save', payload),
+    TestModelConnection: (id) => requestJSON('POST', '/api/model/test', { id }),
+    DeleteModelConfig: (id) => requestJSON('POST', '/api/model/delete', { id }),
+    SetActiveModel: (id) => requestJSON('POST', '/api/model/active', { id }),
+    GetWeixinStatus: () => requestJSON('GET', '/api/weixin/status'),
+    StartWeixinLogin: () => requestJSON('POST', '/api/weixin/login'),
+    CancelWeixinLogin: () => requestJSON('POST', '/api/weixin/cancel'),
+    LogoutWeixin: () => requestJSON('POST', '/api/weixin/logout'),
+    GetSettings: () => requestJSON('GET', '/api/settings'),
+    SaveSettings: (payload) => requestJSON('POST', '/api/settings', payload),
+  };
+}
+
+async function requestJSON(method, url, body) {
+  const options = { method, headers: {} };
+  if (body !== undefined) {
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(url, options);
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error((payload && payload.error) || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+async function streamJSON(method, url, body, handlers = {}) {
+  const options = { method, headers: {} };
+  if (body !== undefined) {
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : null;
+    throw new Error((payload && payload.error) || `HTTP ${response.status}`);
+  }
+  if (!response.body) {
+    throw new Error('浏览器不支持流式响应。');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+    let newlineIndex = buffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line) {
+        const event = JSON.parse(line);
+        if (event.type === 'delta') {
+          if (typeof handlers.onDelta === 'function' && event.delta) {
+            handlers.onDelta(event.delta);
+          }
+        } else if (event.type === 'done') {
+          result = event;
+        } else if (event.type === 'error') {
+          throw new Error(event.message || '流式请求失败');
+        }
+      }
+      newlineIndex = buffer.indexOf('\n');
+    }
+
+    if (done) break;
+  }
+
+  const tail = buffer.trim();
+  if (tail) {
+    const event = JSON.parse(tail);
+    if (event.type === 'done') {
+      result = event;
+    } else if (event.type === 'error') {
+      throw new Error(event.message || '流式请求失败');
+    } else if (event.type === 'delta' && typeof handlers.onDelta === 'function' && event.delta) {
+      handlers.onDelta(event.delta);
+    }
+  }
+
+  if (!result) {
+    throw new Error('流式响应提前结束。');
+  }
+  return result;
+}
+
+async function uploadFile(url, file) {
+  const formData = new FormData();
+  formData.set('file', file, file.name || 'upload.bin');
+
+  const response = await fetch(url, {
+    method: 'POST',
+    body: formData,
+  });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error((payload && payload.error) || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+function downloadTextFile(filename, content, type = 'text/plain;charset=utf-8') {
+  const blob = new Blob([String(content ?? '')], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = String(filename || 'download.txt').trim() || 'download.txt';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function startBackendPolling() {
+  window.clearInterval(devPollTimer);
+  if (state.backendMode !== 'http') return;
+
+  devPollTimer = window.setInterval(() => {
+    void Promise.all([refreshProjectState(), refreshOverview(), refreshReminders(), refreshModel(), refreshWeixin()]).catch(() => {});
+  }, 2000);
+}
+
+async function refreshAll() {
+  await Promise.all([refreshProjectState(), refreshOverview(), refreshReminders(), refreshKnowledge(), refreshPrompts(), refreshSkills(), refreshTools(), refreshChatPrompt(), refreshModel(), refreshWeixin(), refreshSettings()]);
+}
+
+async function refreshProjectState() {
+  state.projectState = normalizeProjectState(await state.backend.GetProjectState());
+  renderProjectState();
+}
+
+async function refreshChatState() {
+  applyChatState(normalizeChatState(await state.backend.GetChatState()));
+}
+
+async function refreshOverview() {
+  state.overview = await state.backend.GetOverview();
+
+  // Update dashboard stats
+  const dataDirStat = document.getElementById('data-dir-stat');
+  const dataDirPath = document.getElementById('data-dir-path');
+  const memoryCountStat = document.getElementById('memory-count-stat');
+  const promptCountStat = document.getElementById('prompt-count-stat');
+  const aiStatusStat = document.getElementById('ai-status-stat');
+  const aiMessageStat = document.getElementById('ai-message-stat');
+  const weixinStatusStat = document.getElementById('weixin-status-stat');
+  const weixinMessageStat = document.getElementById('weixin-message-stat');
+
+  if (dataDirStat) dataDirStat.textContent = '已配置';
+  if (dataDirPath) dataDirPath.textContent = state.overview.dataDir;
+  if (memoryCountStat) memoryCountStat.textContent = String(state.overview.knowledgeCount);
+  if (promptCountStat) promptCountStat.textContent = String(state.overview.promptCount || 0);
+  if (aiStatusStat) aiStatusStat.textContent = state.overview.aiAvailable ? '已配置' : '未配置';
+  if (aiMessageStat) aiMessageStat.textContent = state.overview.aiMessage;
+  if (weixinStatusStat) weixinStatusStat.textContent = state.overview.weixinConnected ? '已连接' : '未连接';
+  if (weixinMessageStat) weixinMessageStat.textContent = state.overview.weixinMessage || '未连接微信';
+
+  // Update sidebar compact stats
+  const aiStatusCompact = document.getElementById('ai-status-compact');
+  const memoryCountCompact = document.getElementById('memory-count-compact');
+  const promptCountCompact = document.getElementById('prompt-count-compact');
+  const versionCompact = document.getElementById('version-compact');
+  const versionCheck = document.getElementById('version-check');
+
+  if (aiStatusCompact) aiStatusCompact.textContent = state.overview.aiAvailable ? 'OK' : '—';
+  if (memoryCountCompact) memoryCountCompact.textContent = String(state.overview.knowledgeCount);
+  if (promptCountCompact) promptCountCompact.textContent = String(state.overview.promptCount || 0);
+  if (versionCompact) versionCompact.textContent = state.overview.currentVersion || 'dev';
+  if (versionCheck) {
+    versionCheck.title = `当前版本 ${state.overview.currentVersion || 'dev'}，点击查看最新版本`;
+  }
+}
+
+async function checkLatestVersion() {
+  const trigger = document.getElementById('version-check');
+  if (trigger) {
+    trigger.disabled = true;
+  }
+
+  try {
+    const info = await state.backend.GetVersionInfo();
+    if (state.overview && info?.currentVersion) {
+      state.overview.currentVersion = info.currentVersion;
+      const versionCompact = document.getElementById('version-compact');
+      if (versionCompact) {
+        versionCompact.textContent = info.currentVersion;
       }
     }
-  }
-
-  return segments;
-}
-
-function parseJSONChatOptionsPayload(text) {
-  try {
-    return normalizeChatOptionsPayload(JSON.parse(text));
-  } catch (_error) {
-    return null;
-  }
-}
-
-function parseEDNChatOptionsPayload(text) {
-  const questionMatch = text.match(/:question\s+"((?:\\.|[^"])*)"/s);
-  const optionsMatch = text.match(/:options\s+\[((?:.|\n)*)\]/s);
-  if (!questionMatch || !optionsMatch) return null;
-
-  const question = unescapeChatOptionText(questionMatch[1]).trim();
-  const options = Array.from(optionsMatch[1].matchAll(/"((?:\\.|[^"])*)"/g))
-    .map((item) => unescapeChatOptionText(item[1]).trim())
-    .filter(Boolean);
-  return normalizeChatOptionsPayload({ question, options });
-}
-
-function parseAskUserInputChatOptionsPayload(text) {
-  const inputTypeMatch = text.match(/\bask_user_input\s*:\s*([A-Za-z_][\w-]*)/i);
-  if (!inputTypeMatch) return null;
-
-  const inputType = normalizeChatOptionScalar(inputTypeMatch[1]).toLowerCase();
-  if (inputType && inputType !== 'single_select' && inputType !== 'singleselect') {
-    return null;
-  }
-
-  const questionMatch = text.match(/\bquestion\s*:\s*"((?:\\.|[^"])*)"/s);
-  const optionsMatch = text.match(/\boptions\s*:\s*\[((?:.|\n)*)\]/s);
-  if (!questionMatch || !optionsMatch) return null;
-
-  const question = unescapeChatOptionText(questionMatch[1]).trim();
-  const options = Array.from(optionsMatch[1].matchAll(/"((?:\\.|[^"])*)"/g))
-    .map((item) => unescapeChatOptionText(item[1]).trim())
-    .filter(Boolean);
-
-  return normalizeChatOptionsPayload({
-    question,
-    questiontype: 'singleselect',
-    options,
-  });
-}
-
-function normalizeChatOptionsPayload(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-
-  const questionType = normalizeChatOptionScalar(payload.questiontype ?? payload.questionType).toLowerCase();
-  if (questionType && questionType !== 'singleselect') return null;
-
-  const question = normalizeChatOptionScalar(payload.question);
-  const options = normalizeChatOptionList(payload.options);
-  if (!question || options.length === 0) return null;
-
-  return { question, options };
-}
-
-function normalizeChatOptionList(value) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => normalizeChatOption(item))
-    .filter(Boolean);
-}
-
-function normalizeChatOption(option) {
-  if (typeof option === 'string' || typeof option === 'number' || typeof option === 'boolean') {
-    const text = normalizeChatOptionScalar(option);
-    return text ? { label: text, value: text } : null;
-  }
-  if (!option || typeof option !== 'object' || Array.isArray(option)) return null;
-
-  const value = normalizeChatOptionScalar(option.value);
-  const label = normalizeChatOptionScalar(option.label) || value;
-  const nextValue = value || label;
-  if (!label || !nextValue) return null;
-
-  return { label, value: nextValue };
-}
-
-function normalizeChatOptionScalar(value) {
-  if (typeof value === 'string') return value.trim();
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value).trim();
-  return '';
-}
-
-function unescapeChatOptionText(value) {
-  try {
-    return JSON.parse(`"${value}"`);
-  } catch (_error) {
-    return value;
+    if (info?.hasUpdate && info?.releaseUrl) {
+      const ok = await state.backend.ConfirmAction(
+        '发现新版本',
+        `${info.message}\n\n是否打开发布页？`,
+      );
+      if (ok) {
+        await state.backend.OpenExternalURL(info.releaseUrl);
+        showBanner(`已打开发布页：${info.latestVersion || info.releaseUrl}`, false);
+        return;
+      }
+    }
+    showBanner(info?.message || '暂时无法获取版本信息。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  } finally {
+    if (trigger) {
+      trigger.disabled = false;
+    }
   }
 }
 
-function buildChatOptionSubmission(question, optionValue, optionLabel = optionValue) {
-  const label = String(optionLabel ?? optionValue ?? '').trim();
-  const value = String(optionValue ?? optionLabel ?? '').trim();
-  const selection = label && value && label !== value
-    ? `我选择“${label}”（选项值：${value}）。`
-    : `我选择“${label || value}”。`;
-  return [
-    `对于你刚才给出的选项题“${question}”，${selection}`,
-    '请严格基于上一轮上下文执行这个选择，不要把它当成一个脱离上下文的新话题。',
-  ].join('\n');
+async function refreshReminders() {
+  state.reminders = normalizeReminders(await state.backend.ListReminders());
+  renderReminders();
 }
 
-function buildChatCopyText(message) {
-  const optionContent = message.role === 'assistant' ? extractChatOptionContent(message.text) : null;
-  if (!optionContent) {
-    return String(message.text || (message.streaming ? '思考中…' : '')).trim();
-  }
-
-  const parts = [];
-  if (optionContent.beforeText) {
-    parts.push(optionContent.beforeText.trim());
-  }
-  parts.push(optionContent.payload.question.trim());
-  parts.push(optionContent.payload.options.map((option) => `- ${option.label}`).join('\n'));
-  if (optionContent.afterText) {
-    parts.push(optionContent.afterText.trim());
-  }
-  return parts.filter(Boolean).join('\n\n').trim();
+async function refreshKnowledge() {
+  state.knowledge = await state.backend.ListKnowledge();
+  renderKnowledge();
 }
 
-function renderChatSessions() {
-  const container = document.getElementById('chat-session-list');
-  if (!container) return;
+async function refreshPrompts() {
+  state.prompts = await state.backend.ListPrompts();
+  renderPrompts();
+  updateChatAutocomplete();
+}
 
-  const conversations = state.chatState.conversations || [];
-  if (conversations.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state compact">
-        <div class="empty-state-icon">◌</div>
-        <h3>还没有对话</h3>
-        <p>点击上方新建对话，或输入 <code>/new</code></p>
-      </div>
-    `;
+async function refreshSkills() {
+  state.skills = normalizeSkills(await state.backend.ListSkills());
+  ensureSelectedSkill();
+  renderSkills();
+  renderChatContext();
+  updateChatAutocomplete();
+}
+
+async function refreshTools() {
+  state.tools = normalizeTools(await state.backend.ListTools());
+  renderTools();
+}
+
+async function refreshChatPrompt() {
+  state.chatPrompt = normalizeChatPromptState(await state.backend.GetChatPrompt());
+  renderChatContext();
+  updateChatAutocomplete();
+}
+
+async function refreshModel() {
+  state.model = normalizeModelSettings(await state.backend.GetModelSettings());
+  renderModel();
+}
+
+async function refreshWeixin() {
+  const next = await state.backend.GetWeixinStatus();
+  applyWeixinStatus(next, false);
+}
+
+async function refreshSettings() {
+  state.settings = normalizeSettingsState(await state.backend.GetSettings());
+  renderSettings();
+}
+
+/* Source: js/features/library-actions.js */
+async function browseFile() {
+  if (state.backendMode === 'http') {
+    const fileInput = document.getElementById('http-file-input');
+    if (fileInput) {
+      fileInput.value = '';
+      fileInput.click();
+    }
     return;
   }
 
-  container.innerHTML = conversations
-    .map((conversation) => `
-      <div
-        class="chat-session-row ${conversation.active ? 'active' : ''} ${state.chatSessionContextMenu.open && state.chatSessionContextMenu.sessionId === conversation.sessionId ? 'context-open' : ''}"
-        data-chat-session-row="${escapeAttribute(conversation.sessionId)}"
-        draggable="true"
-      >
-        <button
-          type="button"
-          class="chat-session-item ${conversation.active ? 'active' : ''}"
-          data-chat-session="${escapeAttribute(conversation.sessionId)}"
-          title="${escapeAttribute([
-            conversation.sourceLabel || '',
-            conversation.preview || '',
-            conversation.readOnly ? '只读会话' : '可继续对话',
-          ].filter(Boolean).join('\n'))}"
-        >
-          <span class="chat-session-title">${conversation.sourceLabel ? `[${escapeHTML(conversation.sourceLabel)}] ` : ''}${escapeHTML(conversation.title || '新对话')}</span>
-        </button>
-      </div>
-    `)
-    .join('');
-}
-
-function applyChatState(nextState) {
-  state.chatState = normalizeChatState(nextState);
-  state.chatState = {
-    ...state.chatState,
-    conversations: reconcileChatSessionOrder(state.chatState.conversations),
-  };
-  if (
-    state.chatSessionContextMenu.open
-    && !state.chatState.conversations.some((item) => item.sessionId === state.chatSessionContextMenu.sessionId)
-  ) {
-    state.chatSessionContextMenu = defaultChatSessionContextMenuState();
-    renderChatSessionContextMenu();
-  }
-  state.chat = (state.chatState.messages || []).map((message) => ({
-    role: message.role,
-    text: message.text,
-    time: message.time || '',
-    usage: normalizeTokenUsage(message.usage),
-    process: normalizeChatProcess(message.process),
-  }));
-  renderChatSessions();
-  renderChat();
-}
-
-function syncCurrentChatConversationFromMessages() {
-  const sessionId = state.chatState.sessionId || '';
-  if (!sessionId) return;
-
-  const conversations = Array.isArray(state.chatState.conversations) ? [...state.chatState.conversations] : [];
-  const currentIndex = conversations.findIndex((item) => item.sessionId === sessionId);
-  const nextConversation = {
-    sessionId,
-    title: summarizeChatTitle(state.chat),
-    customTitle: Boolean(currentIndex >= 0 && conversations[currentIndex]?.customTitle),
-    preview: summarizeChatPreview(state.chat),
-    updatedAt: nowLabel(),
-    updatedAtUnix: Date.now(),
-    messageCount: state.chat.length,
-    hasMessages: state.chat.length > 0,
-    active: true,
-  };
-
-  const nextConversations = conversations.map((item, index) => ({
-    ...item,
-    active: index === currentIndex ? true : false,
-  }));
-  if (currentIndex >= 0) {
-    if (conversations[currentIndex]?.customTitle) {
-      nextConversation.title = conversations[currentIndex].title || nextConversation.title;
-    }
-    nextConversations[currentIndex] = nextConversation;
-  } else {
-    nextConversations.push(nextConversation);
-  }
-
-  state.chatState = {
-    ...state.chatState,
-    sessionId,
-    conversations: reconcileChatSessionOrder(nextConversations),
-    messages: state.chat.map((message) => ({
-      role: message.role,
-      text: message.text,
-      time: message.time || '',
-      usage: normalizeTokenUsage(message.usage),
-      process: normalizeChatProcess(message.process),
-    })),
-  };
-  renderChatSessions();
-}
-
-function normalizeProjectStorageKey(project) {
-  const value = String(project || 'default').trim().toLowerCase();
-  return value || 'default';
-}
-
-function chatSessionOrderStorageKey(project = state.projectState.activeProject) {
-  return `myclaw-chat-session-order:${normalizeProjectStorageKey(project)}`;
-}
-
-function loadChatSessionOrder(project = state.projectState.activeProject) {
   try {
-    const raw = localStorage.getItem(chatSessionOrderStorageKey(project));
-    const parsed = JSON.parse(raw || '[]');
-    return Array.isArray(parsed)
-      ? parsed.map((item) => String(item || '').trim()).filter(Boolean)
-      : [];
-  } catch (_error) {
-    return [];
-  }
-}
+    const selected = await state.backend.OpenImportDialog();
+    if (!selected) return;
 
-function saveChatSessionOrder(sessionIds, project = state.projectState.activeProject) {
-  const next = [];
-  const seen = new Set();
-  for (const sessionId of sessionIds || []) {
-    const value = String(sessionId || '').trim();
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    next.push(value);
-  }
+    state.fileObject = null;
+    state.filePath = selected;
 
-  try {
-    localStorage.setItem(chatSessionOrderStorageKey(project), JSON.stringify(next));
-  } catch (_error) {
-    // Ignore local persistence failures and keep the in-memory order.
-  }
-  return next;
-}
+    // Simulate file preview
+    const preview = document.getElementById('file-preview');
+    const fileName = document.getElementById('file-name');
 
-function sameStringArray(left, right) {
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
-}
-
-function reconcileChatSessionOrder(conversations, project = state.projectState.activeProject) {
-  const list = Array.isArray(conversations)
-    ? conversations.filter((item) => item?.sessionId)
-    : [];
-  if (list.length === 0) {
-    saveChatSessionOrder([], project);
-    return [];
-  }
-
-  const stored = loadChatSessionOrder(project);
-  if (stored.length === 0) {
-    saveChatSessionOrder(list.map((item) => item.sessionId), project);
-    return list;
-  }
-
-  const byID = new Map(list.map((item) => [item.sessionId, item]));
-  const ordered = [];
-  for (const sessionId of stored) {
-    const item = byID.get(sessionId);
-    if (!item) continue;
-    ordered.push(item);
-    byID.delete(sessionId);
-  }
-  for (const item of list) {
-    if (!byID.has(item.sessionId)) continue;
-    ordered.push(item);
-    byID.delete(item.sessionId);
-  }
-
-  const mergedOrder = ordered.map((item) => item.sessionId);
-  if (!sameStringArray(stored, mergedOrder)) {
-    saveChatSessionOrder(mergedOrder, project);
-  }
-  return ordered;
-}
-
-function reorderChatSessions(sourceSessionId, targetSessionId, placeBefore) {
-  const conversations = Array.isArray(state.chatState.conversations) ? [...state.chatState.conversations] : [];
-  const sourceIndex = conversations.findIndex((item) => item.sessionId === sourceSessionId);
-  const targetIndex = conversations.findIndex((item) => item.sessionId === targetSessionId);
-  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
-
-  const [source] = conversations.splice(sourceIndex, 1);
-  let insertIndex = conversations.findIndex((item) => item.sessionId === targetSessionId);
-  if (insertIndex < 0) {
-    conversations.push(source);
-  } else {
-    if (!placeBefore) insertIndex += 1;
-    conversations.splice(insertIndex, 0, source);
-  }
-
-  state.chatState = {
-    ...state.chatState,
-    conversations,
-  };
-  saveChatSessionOrder(conversations.map((item) => item.sessionId));
-  renderChatSessions();
-}
-
-function defaultChatSessionContextMenuState() {
-  return {
-    open: false,
-    sessionId: '',
-    x: 0,
-    y: 0,
-  };
-}
-
-function openChatSessionContextMenu(sessionId, x, y) {
-  const conversation = (state.chatState.conversations || []).find((item) => item.sessionId === String(sessionId || '').trim());
-  if (conversation?.readOnly) return;
-  state.chatSessionContextMenu = {
-    open: true,
-    sessionId: String(sessionId || '').trim(),
-    x: Number(x || 0),
-    y: Number(y || 0),
-  };
-  renderChatSessionContextMenu();
-  renderChatSessions();
-}
-
-function closeChatSessionContextMenu() {
-  if (!state.chatSessionContextMenu.open) return;
-  state.chatSessionContextMenu = defaultChatSessionContextMenuState();
-  renderChatSessionContextMenu();
-  renderChatSessions();
-}
-
-function renderChatSessionContextMenu() {
-  const menu = document.getElementById('chat-session-context-menu');
-  if (!menu) return;
-
-  if (!state.chatSessionContextMenu.open) {
-    menu.hidden = true;
-    menu.style.removeProperty('left');
-    menu.style.removeProperty('top');
-    return;
-  }
-
-  menu.hidden = false;
-  menu.style.left = `${state.chatSessionContextMenu.x}px`;
-  menu.style.top = `${state.chatSessionContextMenu.y}px`;
-
-  requestAnimationFrame(() => {
-    if (menu.hidden) return;
-    const padding = 12;
-    const maxLeft = Math.max(padding, window.innerWidth - menu.offsetWidth - padding);
-    const maxTop = Math.max(padding, window.innerHeight - menu.offsetHeight - padding);
-    menu.style.left = `${Math.min(Math.max(state.chatSessionContextMenu.x, padding), maxLeft)}px`;
-    menu.style.top = `${Math.min(Math.max(state.chatSessionContextMenu.y, padding), maxTop)}px`;
-  });
-}
-
-function currentChatConversation() {
-  const sessionId = state.chatState.sessionId || '';
-  return (state.chatState.conversations || []).find((item) => item.sessionId === sessionId) || null;
-}
-
-function defaultChatSessionDragState() {
-  return {
-    sessionId: '',
-    targetSessionId: '',
-    placeBefore: true,
-    suppressClickUntil: 0,
-  };
-}
-
-function clearChatSessionDropIndicators() {
-  document.querySelectorAll('.chat-session-row.dragging, .chat-session-row.drop-before, .chat-session-row.drop-after')
-    .forEach((row) => {
-      row.classList.remove('dragging', 'drop-before', 'drop-after');
-    });
-}
-
-function summarizeChatTitle(messages) {
-  const firstUser = (messages || []).find((item) => item.role === 'user' && (item.text || '').trim());
-  return truncateText(firstUser?.text || '新对话', 28);
-}
-
-function summarizeChatPreview(messages) {
-  for (let index = (messages || []).length - 1; index >= 0; index -= 1) {
-    const message = messages[index] || {};
-    const optionContent = extractChatOptionContent(message.text);
-    const text = (
-      optionContent?.beforeText
-      || optionContent?.payload?.question
-      || optionContent?.afterText
-      || message.text
-      || ''
-    ).trim();
-    if (text) return truncateText(text, 72);
-  }
-  return '还没有消息';
-}
-
-function truncateText(value, maxRunes) {
-  const text = (value || '').trim();
-  if (!text) return '';
-  const chars = Array.from(text);
-  if (chars.length <= maxRunes) return text;
-  return `${chars.slice(0, Math.max(1, maxRunes - 1)).join('')}…`;
-}
-
-function newChatStreamRequestID() {
-  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-    return window.crypto.randomUUID();
-  }
-  return `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-let bannerTimer = 0;
-
-function defaultProjectState() {
-  return {
-    activeProject: 'default',
-    projects: [
-      {
-        name: 'default',
-        knowledgeCount: 0,
-        latestRecordedAt: '',
-        latestRecordedAtUnix: 0,
-        active: true,
-      },
-    ],
-  };
-}
-
-function defaultChatState() {
-  return {
-    sessionId: '',
-    conversations: [],
-    messages: [],
-  };
-}
-
-function defaultChatSessionDialogState() {
-  return {
-    open: false,
-    mode: '',
-    sessionId: '',
-    itemId: '',
-    initialTitle: '',
-    selectedMode: 'agent',
-    restoreFocus: null,
-  };
-}
-
-function normalizeTokenUsage(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  const inputTokens = Number(payload.inputTokens || 0);
-  const outputTokens = Number(payload.outputTokens || 0);
-  const cachedTokens = Number(payload.cachedTokens || 0);
-  const totalTokens = Number(payload.totalTokens || inputTokens + outputTokens);
-  if (inputTokens <= 0 && outputTokens <= 0 && cachedTokens <= 0 && totalTokens <= 0) {
-    return null;
-  }
-  return {
-    inputTokens,
-    outputTokens,
-    cachedTokens,
-    totalTokens,
-  };
-}
-
-function formatTokenUsage(usage) {
-  const value = normalizeTokenUsage(usage);
-  if (!value) return '';
-  return `input ${value.inputTokens} · output ${value.outputTokens} · cached ${value.cachedTokens} · total ${value.totalTokens}`;
-}
-
-function normalizeChatProcess(payload) {
-  if (!Array.isArray(payload)) return [];
-  return payload
-    .map((item) => ({
-      title: String(item?.title || '').trim(),
-      detail: String(item?.detail || '').trim(),
-    }))
-    .filter((item) => item.title || item.detail);
-}
-
-function normalizeChatState(payload) {
-  const source = Array.isArray(payload) ? payload[0] : payload;
-  const next = {
-    ...defaultChatState(),
-    ...(source || {}),
-  };
-  next.conversations = Array.isArray(next.conversations)
-    ? next.conversations.map((item) => ({
-      sessionId: item?.sessionId || '',
-      title: item?.title || '',
-      customTitle: Boolean(item?.customTitle),
-      preview: item?.preview || '',
-      source: item?.source || '',
-      sourceLabel: item?.sourceLabel || '',
-      readOnly: Boolean(item?.readOnly),
-      updatedAt: item?.updatedAt || '',
-      updatedAtUnix: Number(item?.updatedAtUnix || 0),
-      messageCount: Number(item?.messageCount || 0),
-      hasMessages: Boolean(item?.hasMessages),
-      active: Boolean(item?.active),
-    }))
-    : [];
-  next.messages = Array.isArray(next.messages)
-    ? next.messages.map((item) => ({
-      role: item?.role || 'assistant',
-      text: item?.text || '',
-      time: item?.time || '',
-      usage: normalizeTokenUsage(item?.usage),
-      process: normalizeChatProcess(item?.process),
-    }))
-    : [];
-  return next;
-}
-
-function defaultChatPromptState() {
-  return {
-    promptId: '',
-    shortId: '',
-    title: '',
-  };
-}
-
-function normalizeChatPromptState(payload) {
-  const source = Array.isArray(payload) ? payload[0] : payload;
-  return {
-    ...defaultChatPromptState(),
-    ...(source || {}),
-  };
-}
-
-function defaultAutocompleteState() {
-  return {
-    open: false,
-    trigger: '',
-    query: '',
-    tokenStart: -1,
-    tokenEnd: -1,
-    selectedIndex: 0,
-    items: [],
-  };
-}
-
-function normalizeProjectState(payload) {
-  const source = Array.isArray(payload) ? payload[0] : payload;
-  const stateValue = {
-    ...defaultProjectState(),
-    ...(source || {}),
-  };
-  const projects = Array.isArray(stateValue.projects)
-    ? stateValue.projects.map((item) => ({
-        name: item.name || 'default',
-        knowledgeCount: Number(item.knowledgeCount || 0),
-        latestRecordedAt: item.latestRecordedAt || '',
-        latestRecordedAtUnix: Number(item.latestRecordedAtUnix || 0),
-        active: Boolean(item.active),
-      }))
-    : [];
-
-  if (projects.length === 0) {
-    return defaultProjectState();
-  }
-
-  return {
-    activeProject: stateValue.activeProject || projects.find((item) => item.active)?.name || 'default',
-    projects,
-  };
-}
-
-function normalizeReminders(payload) {
-  if (!Array.isArray(payload)) return [];
-  return payload.map((item) => ({
-    id: item.id || '',
-    shortId: item.shortId || (item.id || '').slice(0, 8),
-    message: item.message || '',
-    source: item.source || '',
-    sourceLabel: item.sourceLabel || '',
-    frequency: item.frequency || 'once',
-    frequencyLabel: item.frequencyLabel || (item.frequency === 'daily' ? '每天' : '单次'),
-    scheduleLabel: item.scheduleLabel || (item.frequency === 'daily' ? '每天' : '单次'),
-    nextRunAt: item.nextRunAt || '',
-    nextRunAtUnix: Number(item.nextRunAtUnix || 0),
-    createdAt: item.createdAt || '',
-    createdAtUnix: Number(item.createdAtUnix || 0),
-  }));
-}
-
-const MODEL_PROVIDER_DEFAULTS = {
-  openai: {
-    apiType: 'responses',
-    baseUrl: 'https://api.openai.com/v1',
-  },
-  anthropic: {
-    apiType: 'messages',
-    baseUrl: 'https://api.anthropic.com/v1',
-  },
-};
-
-const MODEL_API_TYPE_OPTIONS = {
-  openai: [
-    { value: 'responses', label: 'Responses (new)' },
-    { value: 'chat_completions', label: 'Chat Completions (legacy)' },
-  ],
-  anthropic: [
-    { value: 'messages', label: 'Messages' },
-  ],
-};
-
-const DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS = 90;
-
-function defaultModelState() {
-  return {
-    profiles: [],
-    activeProfileId: '',
-    configured: false,
-    missingFields: [],
-    effectiveProfileName: '—',
-    effectiveProvider: 'openai',
-    effectiveApiType: 'responses',
-    effectiveBaseUrl: 'https://api.openai.com/v1',
-    effectiveApiKeyMasked: '(empty)',
-    effectiveModel: '',
-    effectiveRequestTimeoutSeconds: null,
-    effectiveMaxOutputTokensText: null,
-    effectiveMaxOutputTokensJSON: null,
-    effectiveTemperature: null,
-    effectiveTopP: null,
-    effectiveFrequencyPenalty: null,
-    effectivePresencePenalty: null,
-    message: '尚未保存任何模型 profile。',
-  };
-}
-
-function normalizeModelSettings(payload) {
-  const source = Array.isArray(payload) ? payload[0] : payload;
-  const stateValue = {
-    ...defaultModelState(),
-    ...(source || {}),
-  };
-  stateValue.profiles = Array.isArray(stateValue.profiles)
-    ? stateValue.profiles.map((item) => {
-        const legacyMaxOutputTokens = normalizeOptionalNumber(item.maxOutputTokens);
-        return {
-          id: item.id || '',
-          name: item.name || '',
-          provider: item.provider || 'openai',
-          apiType: item.apiType || 'responses',
-          baseUrl: item.baseUrl || MODEL_PROVIDER_DEFAULTS[item.provider || 'openai']?.baseUrl || '',
-          model: item.model || '',
-          requestTimeoutSeconds: normalizeOptionalNumber(item.requestTimeoutSeconds),
-          hasApiKey: Boolean(item.hasApiKey),
-          apiKeyMasked: item.apiKeyMasked || (item.hasApiKey ? '********' : '(empty)'),
-          active: Boolean(item.active),
-          maxOutputTokensText: coalesceOptionalNumber(item.maxOutputTokensText, legacyMaxOutputTokens),
-          maxOutputTokensJSON: coalesceOptionalNumber(item.maxOutputTokensJSON, legacyMaxOutputTokens),
-          maxOutputTokens: legacyMaxOutputTokens,
-          temperature: normalizeOptionalNumber(item.temperature),
-          topP: normalizeOptionalNumber(item.topP),
-          frequencyPenalty: normalizeOptionalNumber(item.frequencyPenalty),
-          presencePenalty: normalizeOptionalNumber(item.presencePenalty),
-        };
-      })
-    : [];
-  stateValue.effectiveMaxOutputTokensText = coalesceOptionalNumber(stateValue.effectiveMaxOutputTokensText, stateValue.effectiveMaxOutputTokens);
-  stateValue.effectiveMaxOutputTokensJSON = coalesceOptionalNumber(stateValue.effectiveMaxOutputTokensJSON, stateValue.effectiveMaxOutputTokens);
-  stateValue.effectiveRequestTimeoutSeconds = normalizeOptionalNumber(stateValue.effectiveRequestTimeoutSeconds);
-  stateValue.effectiveTemperature = normalizeOptionalNumber(stateValue.effectiveTemperature);
-  stateValue.effectiveTopP = normalizeOptionalNumber(stateValue.effectiveTopP);
-  stateValue.effectiveFrequencyPenalty = normalizeOptionalNumber(stateValue.effectiveFrequencyPenalty);
-  stateValue.effectivePresencePenalty = normalizeOptionalNumber(stateValue.effectivePresencePenalty);
-  return stateValue;
-}
-
-function defaultSettingsState() {
-  return {
-    weixinHistoryMessages: 12,
-    weixinHistoryRunes: 360,
-    weixinEverythingPath: '',
-  };
-}
-
-function normalizeSettingsState(payload) {
-  const source = Array.isArray(payload) ? payload[0] : payload;
-  return {
-    ...defaultSettingsState(),
-    ...(source || {}),
-    weixinHistoryMessages: Number(source?.weixinHistoryMessages ?? 12),
-    weixinHistoryRunes: Number(source?.weixinHistoryRunes ?? 360),
-    weixinEverythingPath: String(source?.weixinEverythingPath ?? ''),
-  };
-}
-
-function defaultWeixinState() {
-  return {
-    connected: false,
-    loggingIn: false,
-    hasAccount: false,
-    accountId: '',
-    userId: '',
-    qrCode: '',
-    qrCodeDataUrl: '',
-    message: '未连接微信，可在桌面端直接生成二维码扫码登录。',
-  };
-}
-
-function normalizeWeixinStatus(payload) {
-  const source = Array.isArray(payload) ? payload[0] : payload;
-  return {
-    ...defaultWeixinState(),
-    ...(source || {}),
-  };
-}
-
-function showBanner(message, isError) {
-  const banner = document.getElementById('banner');
-  if (!banner) return;
-
-  banner.hidden = false;
-  banner.textContent = message;
-  banner.style.borderColor = isError ? 'var(--danger)' : 'var(--accent-primary)';
-
-  window.clearTimeout(bannerTimer);
-  bannerTimer = window.setTimeout(() => {
-    banner.hidden = true;
-  }, 3200);
-}
-
-function delay(ms) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function nowLabel() {
-  return new Date().toLocaleString('zh-CN', { hour12: false });
-}
-
-function relativeTimeLabel(timestamp) {
-  const value = Number(timestamp || 0);
-  if (!value) return '未安排';
-
-  const diffSeconds = value - Math.floor(Date.now() / 1000);
-  const absSeconds = Math.abs(diffSeconds);
-  const future = diffSeconds >= 0;
-
-  if (absSeconds < 60) {
-    return future ? '1 分钟内' : '刚刚';
-  }
-
-  const units = [
-    { size: 24 * 60 * 60, label: '天' },
-    { size: 60 * 60, label: '小时' },
-    { size: 60, label: '分钟' },
-  ];
-
-  for (const unit of units) {
-    if (absSeconds >= unit.size) {
-      const amount = Math.floor(absSeconds / unit.size);
-      return future ? `${amount} ${unit.label}后` : `${amount} ${unit.label}前`;
-    }
-  }
-
-  return future ? '即将执行' : '已执行';
-}
-
-function asMessage(error) {
-  if (!error) return '发生未知错误。';
-  if (typeof error === 'string') return error;
-  if (error.message) return error.message;
-  return String(error);
-}
-
-async function openExternalLink(targetURL) {
-  try {
-    await state.backend.OpenExternalURL(targetURL);
+    if (preview) preview.classList.add('has-file');
+    if (fileName) fileName.textContent = selected.split(/[/\\]/).pop() || selected;
   } catch (error) {
     showBanner(asMessage(error), true);
   }
 }
 
-function renderMarkdown(source) {
-  const normalized = String(source ?? '').replace(/\r\n?/g, '\n');
-  const lines = normalized.split('\n');
-  const blocks = [];
-
-  for (let index = 0; index < lines.length;) {
-    const line = lines[index];
-
-    if (!line.trim()) {
-      index += 1;
-      continue;
-    }
-
-    const fence = line.match(/^```([\w+-]*)\s*$/);
-    if (fence) {
-      const codeLines = [];
-      index += 1;
-      while (index < lines.length && !/^```/.test(lines[index])) {
-        codeLines.push(lines[index]);
-        index += 1;
-      }
-      if (index < lines.length) index += 1;
-      const language = fence[1] ? ` class="language-${escapeAttribute(fence[1])}"` : '';
-      blocks.push(`<pre><code${language}>${escapeHTML(codeLines.join('\n'))}</code></pre>`);
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,6})\s+(.*)$/);
-    if (heading) {
-      const level = heading[1].length;
-      blocks.push(`<h${level}>${renderInlineMarkdown(heading[2].trim())}</h${level}>`);
-      index += 1;
-      continue;
-    }
-
-    if (/^([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
-      blocks.push('<hr>');
-      index += 1;
-      continue;
-    }
-
-    if (/^\s*>/.test(line)) {
-      const quoteLines = [];
-      while (index < lines.length && /^\s*>/.test(lines[index])) {
-        quoteLines.push(lines[index].replace(/^\s*>\s?/, ''));
-        index += 1;
-      }
-      blocks.push(`<blockquote>${renderMarkdown(quoteLines.join('\n'))}</blockquote>`);
-      continue;
-    }
-
-    const table = parseMarkdownTable(lines, index);
-    if (table) {
-      blocks.push(table.html);
-      index = table.nextIndex;
-      continue;
-    }
-
-    const list = parseMarkdownList(lines, index);
-    if (list) {
-      blocks.push(list.html);
-      index = list.nextIndex;
-      continue;
-    }
-
-    const paragraphLines = [];
-    while (index < lines.length) {
-      const current = lines[index];
-      if (!current.trim()) break;
-      if (
-        /^```/.test(current) ||
-        /^(#{1,6})\s+/.test(current) ||
-        /^([-*_])(?:\s*\1){2,}\s*$/.test(current) ||
-        /^\s*>/.test(current) ||
-        parseMarkdownTable(lines, index) ||
-        parseMarkdownList(lines, index)
-      ) {
-        break;
-      }
-      paragraphLines.push(current.trim());
-      index += 1;
-    }
-    blocks.push(`<p>${renderInlineMarkdown(paragraphLines.join('\n'))}</p>`);
+async function importFile() {
+  if (!state.filePath.trim() && !state.fileObject) {
+    showBanner('请先选择文件。', true);
+    return;
   }
 
-  return blocks.join('');
+  try {
+    const result = state.backendMode === 'http'
+      ? await state.backend.UploadImportFile(state.fileObject)
+      : await state.backend.ImportFile(state.filePath);
+
+    // Reset file preview
+    const preview = document.getElementById('file-preview');
+    if (preview) preview.classList.remove('has-file');
+    state.filePath = '';
+    state.fileObject = null;
+    const fileInput = document.getElementById('http-file-input');
+    if (fileInput) fileInput.value = '';
+
+    await refreshAll();
+    showBanner(result.message, false);
+
+    state.chat.push({
+      role: 'system',
+      text: `${result.message}\n${result.item.preview}`,
+      time: nowLabel(),
+    });
+    syncCurrentChatConversationFromMessages();
+    renderChat();
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
 }
 
-function parseMarkdownList(lines, startIndex) {
-  const firstLine = lines[startIndex];
-  const firstMatch = firstLine.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
-  if (!firstMatch) return null;
-
-  const ordered = /\d+\./.test(firstMatch[2]);
-  const itemPattern = ordered ? /^(\s*)\d+\.\s+(.*)$/ : /^(\s*)[-*+]\s+(.*)$/;
-  const items = [];
-  let index = startIndex;
-
-  while (index < lines.length) {
-    const line = lines[index];
-    if (!line.trim()) break;
-
-    const match = line.match(itemPattern);
-    if (!match) break;
-
-    const itemLines = [match[2]];
-    index += 1;
-
-    while (index < lines.length) {
-      const continuation = lines[index];
-      if (!continuation.trim()) break;
-      if (itemPattern.test(continuation)) break;
-      if (
-        /^```/.test(continuation) ||
-        /^(#{1,6})\s+/.test(continuation) ||
-        /^([-*_])(?:\s*\1){2,}\s*$/.test(continuation) ||
-        /^\s*>/.test(continuation)
-      ) {
-        break;
-      }
-      itemLines.push(continuation.trim());
-      index += 1;
+async function browseSkillArchive() {
+  if (state.backendMode === 'http') {
+    const input = document.getElementById('http-skill-zip-input');
+    if (input) {
+      input.value = '';
+      input.click();
     }
-
-    items.push(`<li>${renderInlineMarkdown(itemLines.join('\n'))}</li>`);
+    return;
   }
 
-  if (items.length === 0) return null;
-  const tag = ordered ? 'ol' : 'ul';
-  return {
-    html: `<${tag}>${items.join('')}</${tag}>`,
-    nextIndex: index,
-  };
+  try {
+    const selected = await state.backend.OpenSkillImportDialog();
+    if (!selected) return;
+    await importSkillArchiveFromPath(selected);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
 }
 
-function parseMarkdownTable(lines, startIndex) {
-  const headerLine = lines[startIndex];
-  const dividerLine = lines[startIndex + 1];
-  if (!headerLine || !dividerLine) return null;
-  if (!/\|/.test(headerLine)) return null;
-  if (!/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(dividerLine)) return null;
+async function importSkillArchiveFromPath(path) {
+  if (!path) return;
 
-  const parseRow = (line) =>
-    line
-      .trim()
-      .replace(/^\|/, '')
-      .replace(/\|$/, '')
-      .split('|')
-      .map((cell) => cell.trim());
+  try {
+    const result = await state.backend.ImportSkillArchive(path);
+    if (result && result.item && result.item.name) {
+      state.selectedSkillName = result.item.name;
+    }
+    await refreshSkills();
+    showBanner(result.message || 'skill 已导入。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
 
-  const headers = parseRow(headerLine);
-  if (headers.length === 0) return null;
+async function importSkillArchiveFromFile(file) {
+  if (!file) return;
 
-  const bodyRows = [];
-  let index = startIndex + 2;
-  while (index < lines.length && /\|/.test(lines[index]) && lines[index].trim()) {
-    bodyRows.push(parseRow(lines[index]));
-    index += 1;
+  try {
+    const result = await state.backend.UploadSkillArchive(file);
+    if (result && result.item && result.item.name) {
+      state.selectedSkillName = result.item.name;
+    }
+    const input = document.getElementById('http-skill-zip-input');
+    if (input) input.value = '';
+    await refreshSkills();
+    showBanner(result.message || 'skill 已导入。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function createKnowledge() {
+  const input = document.getElementById('memory-input');
+  const text = input?.value.trim();
+  if (!text) {
+    showBanner('请输入要保存的记忆内容。', true);
+    return;
   }
 
-  const headHTML = `<tr>${headers.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join('')}</tr>`;
-  const bodyHTML = bodyRows
-    .map((row) => `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join('')}</tr>`)
-    .join('');
-
-  return {
-    html: `<table><thead>${headHTML}</thead><tbody>${bodyHTML}</tbody></table>`,
-    nextIndex: index,
-  };
+  try {
+    const result = await state.backend.CreateKnowledge(text);
+    if (input) input.value = '';
+    await refreshAll();
+    showBanner(result.message, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
 }
 
-function renderInlineMarkdown(source) {
-  const tokens = [];
-  const stash = (html) => {
-    const key = `%%MDTOKEN${tokens.length}%%`;
-    tokens.push(html);
-    return key;
-  };
+function toggleMemoryExpand(id) {
+  const content = document.querySelector(`[data-content-id="${id}"]`);
+  const btn = document.querySelector(`[data-action="toggle-expand"][data-id="${id}"]`);
+  if (content && btn) {
+    content.classList.toggle('expanded');
+    btn.textContent = content.classList.contains('expanded') ? '收起' : '展开';
+  }
+}
 
-  let text = String(source ?? '');
-  text = text.replace(/`([^`\n]+)`/g, (_, code) => stash(`<code>${escapeHTML(code)}</code>`));
-  text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
-    const safeURL = sanitizeURL(url);
-    if (!safeURL) return match;
-    return stash(
-      `<a href="${escapeAttribute(safeURL)}" target="_blank" rel="noreferrer noopener">${escapeHTML(label)}</a>`,
-    );
+async function appendKnowledge(id) {
+  const draft = (state.appendDrafts[id] || '').trim();
+  if (!draft) {
+    showBanner('请输入补充内容。', true);
+    return;
+  }
+
+  try {
+    const result = await state.backend.AppendKnowledge(id, draft);
+    state.appendDrafts[id] = '';
+    state.openAppendId = '';
+    await refreshAll();
+    showBanner(result.message, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function deleteKnowledge(id) {
+  const targetId = String(id || '').trim();
+  if (!targetId) return;
+  const knowledge = state.knowledge.find((item) => item.id === targetId);
+  if (!knowledge) {
+    showBanner('没有找到要删除的记忆。', true);
+    return;
+  }
+  openChatSessionDialog('knowledge-delete', knowledge);
+}
+
+async function clearKnowledge() {
+  try {
+    const ok = await state.backend.ConfirmAction('清空知识库', '确认清空全部记忆吗？这个动作不可撤销。');
+    if (!ok) return;
+
+    const result = await state.backend.ClearKnowledge();
+    await refreshAll();
+    showBanner(result.message, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function setActiveProject(nextProject) {
+  const input = document.getElementById('project-name-input');
+  const project = (nextProject ?? input?.value ?? '').trim() || 'default';
+
+  try {
+    const previousProject = state.projectState.activeProject || 'default';
+    state.projectState = normalizeProjectState(await state.backend.SetActiveProject(project));
+    renderProjectState();
+    await refreshAll();
+    await refreshChatState();
+    if (state.projectState.activeProject !== previousProject) {
+      state.chat.push({
+        role: 'system',
+        text: `已切换记忆库项目 [${state.projectState.activeProject}]，后续导入和新增记忆会写入这里，对话也会优先检索这个项目。`,
+        time: nowLabel(),
+      });
+      syncCurrentChatConversationFromMessages();
+      renderChat();
+    }
+    showBanner(`已切换记忆库项目 ${state.projectState.activeProject}。`, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function createPrompt() {
+  const titleInput = document.getElementById('prompt-title-input');
+  const contentInput = document.getElementById('prompt-content-input');
+  const title = titleInput?.value.trim() || '';
+  const content = contentInput?.value.trim() || '';
+
+  if (!title) {
+    showBanner('请输入 Prompt 标题。', true);
+    return;
+  }
+  if (!content) {
+    showBanner('请输入 Prompt 内容。', true);
+    return;
+  }
+
+  try {
+    const result = await state.backend.CreatePrompt(title, content);
+    if (titleInput) titleInput.value = '';
+    if (contentInput) contentInput.value = '';
+    await refreshAll();
+    showBanner(result.message, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+function togglePromptExpand(id) {
+  const content = document.querySelector(`[data-prompt-content-id="${id}"]`);
+  const btn = document.querySelector(`[data-action="toggle-expand-prompt"][data-id="${id}"]`);
+  if (content && btn) {
+    content.classList.toggle('expanded');
+    content.classList.toggle('collapsed');
+    btn.textContent = content.classList.contains('expanded') ? '收起' : '展开';
+  }
+}
+
+function insertPromptToChat(id) {
+  const prompt = state.prompts.find((item) => item.id === id);
+  if (!prompt) {
+    showBanner('没有找到对应的 Prompt。', true);
+    return;
+  }
+
+  const input = document.getElementById('chat-input');
+  if (input) {
+    input.value = prompt.content || '';
+    const cursor = input.value.length;
+    input.setSelectionRange(cursor, cursor);
+    autoResizeChatInput();
+    updateChatAutocomplete();
+    input.focus();
+  }
+
+  window.navigateTo('chat');
+  showBanner(`已将 Prompt #${prompt.shortId} 放入对话输入框。`, false);
+}
+
+async function deletePrompt(id) {
+  const targetId = String(id || '').trim();
+  if (!targetId) return;
+  const prompt = state.prompts.find((item) => item.id === targetId);
+  if (!prompt) {
+    showBanner('没有找到要删除的 Prompt。', true);
+    return;
+  }
+  openChatSessionDialog('prompt-delete', prompt);
+}
+
+async function clearPromptsLibrary() {
+  try {
+    const ok = await state.backend.ConfirmAction('清空 Prompt 库', '确认清空全部 Prompt 吗？这个动作不可撤销。');
+    if (!ok) return;
+
+    const result = await state.backend.ClearPrompts();
+    await refreshAll();
+    showBanner(result.message, false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+/* Source: js/features/chat-composer.js */
+async function sendMessage(rawText = null, displayText = null) {
+  if (state.chatStreaming) return;
+
+  const conversation = currentChatConversation();
+  if (conversation?.readOnly) {
+    showBanner('当前为微信会话，只支持查看历史；请新建本地对话后继续。', true);
+    return;
+  }
+
+  const input = document.getElementById('chat-input');
+  const text = String(rawText ?? input?.value ?? '').trim();
+  if (!text) return;
+  const visibleText = String(displayText ?? text).trim() || text;
+  if (text === '/new') {
+    closeChatAutocomplete();
+    if (input && rawText == null) {
+      input.value = '';
+      autoResizeChatInput();
+    }
+    await startNewConversation();
+    return;
+  }
+
+  state.chat.push({ role: 'user', text: visibleText, time: nowLabel() });
+  syncCurrentChatConversationFromMessages();
+  renderChat();
+  closeChatAutocomplete();
+  if (input && rawText == null) {
+    input.value = '';
+    autoResizeChatInput();
+  }
+
+  const placeholder = {
+    role: 'assistant',
+    text: '',
+    time: '',
+    streaming: true,
+  };
+  state.chat.push(placeholder);
+  renderChat();
+
+  state.chatStreaming = true;
+  try {
+    const send = typeof state.backend.SendMessageStream === 'function'
+      ? state.backend.SendMessageStream(text, {
+          onDelta: (delta) => {
+            if (!delta) return;
+            placeholder.text += delta;
+            syncCurrentChatConversationFromMessages();
+            renderChat();
+          },
+        })
+      : state.backend.SendMessage(text);
+    const result = await send;
+    if (result.sessionChanged) {
+      state.chat.pop();
+      await refreshChatState();
+      await Promise.all([refreshSkills(), refreshChatPrompt()]);
+      showBanner(result.reply || '已开启新对话。', false);
+      return;
+    }
+    placeholder.text = result.reply || placeholder.text;
+    placeholder.time = result.timestamp || nowLabel();
+    placeholder.usage = normalizeTokenUsage(result.usage);
+    placeholder.process = normalizeChatProcess(result.process);
+    placeholder.streaming = false;
+    syncCurrentChatConversationFromMessages();
+    renderChat();
+    await Promise.all([refreshAll(), refreshChatState()]);
+  } catch (error) {
+    if ((placeholder.text || '').trim()) {
+      placeholder.time = nowLabel();
+      placeholder.streaming = false;
+      state.chat.push({
+        role: 'system',
+        text: asMessage(error),
+        time: nowLabel(),
+      });
+    } else {
+      placeholder.role = 'system';
+      placeholder.text = asMessage(error);
+      placeholder.time = nowLabel();
+      placeholder.streaming = false;
+    }
+    syncCurrentChatConversationFromMessages();
+    renderChat();
+    showBanner(asMessage(error), true);
+  } finally {
+    state.chatStreaming = false;
+    renderChatContentActions();
+    renderChatComposerState();
+  }
+}
+
+async function startNewConversation() {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
+  }
+  openChatSessionDialog('new', { mode: 'agent' });
+}
+
+async function exportChatMarkdown() {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
+  }
+  try {
+    const result = await state.backend.ExportChatMarkdown();
+    if (result?.message) {
+      showBanner(result.message, false);
+    }
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+async function copyChatMessage(messageIndex) {
+  const message = state.chat[messageIndex];
+  if (!message) {
+    showBanner('没有找到要复制的对话内容。', true);
+    return;
+  }
+
+  const text = buildChatCopyText(message);
+  if (!text) {
+    showBanner('当前这条对话没有可复制的内容。', true);
+    return;
+  }
+
+  try {
+    await copyTextToClipboard(text);
+    showBanner('已复制当前对话。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+function findRefreshableChatMessageIndex() {
+  if (state.chatStreaming || state.chat.length === 0) return -1;
+  const messageIndex = state.chat.length - 1;
+  const message = state.chat[messageIndex];
+  if (!message || message.role !== 'assistant' || message.streaming) {
+    return -1;
+  }
+  return String(message.text || '').trim() ? messageIndex : -1;
+}
+
+async function confirmRefreshChatMessage(messageIndex) {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
+  }
+
+  const refreshableIndex = findRefreshableChatMessageIndex();
+  if (messageIndex !== refreshableIndex) {
+    showBanner('目前只能刷新当前最后一条回复。', true);
+    return;
+  }
+
+  const message = state.chat[messageIndex];
+  if (!message) {
+    showBanner('没有找到要刷新的回复。', true);
+    return;
+  }
+
+  openChatSessionDialog('refresh', {
+    sessionId: state.chatState.sessionId,
+    preview: buildChatCopyText(message),
   });
-
-  let html = escapeHTML(text);
-  html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
-  html = html.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-  html = html.replace(/_([^_\n]+)_/g, '<em>$1</em>');
-  html = html.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
-  html = html.replace(/\n/g, '<br>');
-
-  return html.replace(/%%MDTOKEN(\d+)%%/g, (_, tokenIndex) => tokens[Number(tokenIndex)] || '');
 }
 
-function sanitizeURL(value) {
-  const url = String(value ?? '').trim();
-  if (!url) return '';
-
-  try {
-    const parsed = new URL(url, window.location.href);
-    const protocol = parsed.protocol.toLowerCase();
-    if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
-      return parsed.href;
-    }
-  } catch (error) {
-    return '';
+async function refreshCurrentChatResponse() {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
   }
 
-  return '';
-}
-
-function sanitizeHTTPURL(value) {
-  const url = String(value ?? '').trim();
-  if (!url) return '';
-
-  try {
-    const parsed = new URL(url, window.location.href);
-    const protocol = parsed.protocol.toLowerCase();
-    if (protocol === 'http:' || protocol === 'https:') {
-      return parsed.href;
-    }
-  } catch (error) {
-    return '';
+  const messageIndex = findRefreshableChatMessageIndex();
+  if (messageIndex < 0) {
+    showBanner('当前没有可刷新的回复。', true);
+    return;
   }
 
-  return '';
+  const previousMessage = state.chat[messageIndex];
+  const placeholder = {
+    role: 'assistant',
+    text: '',
+    time: '',
+    streaming: true,
+  };
+
+  state.chat = [...state.chat.slice(0, messageIndex), placeholder];
+  syncCurrentChatConversationFromMessages();
+  renderChat();
+
+  state.chatStreaming = true;
+  try {
+    const result = await state.backend.RefreshChatResponse();
+    placeholder.text = result.reply || placeholder.text;
+    placeholder.time = result.timestamp || nowLabel();
+    placeholder.usage = normalizeTokenUsage(result.usage);
+    placeholder.process = normalizeChatProcess(result.process);
+    placeholder.streaming = false;
+    syncCurrentChatConversationFromMessages();
+    renderChat();
+    await refreshAll();
+    showBanner('已刷新当前回复。', false);
+  } catch (error) {
+    state.chat = [...state.chat.slice(0, messageIndex), previousMessage];
+    syncCurrentChatConversationFromMessages();
+    renderChat();
+    await refreshChatState().catch(() => {});
+    showBanner(asMessage(error), true);
+  } finally {
+    state.chatStreaming = false;
+    renderChatContentActions();
+    renderChatComposerState();
+  }
 }
 
-function preview(value, maxLength) {
-  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
-  if (!text) return '';
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(maxLength - 1, 1))}…`;
+async function copyTextToClipboard(text) {
+  const value = String(text ?? '');
+  if (!value) {
+    throw new Error('当前没有可复制的内容。');
+  }
+
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch (_error) {
+      // Fall back to execCommand for desktop shells that do not expose clipboard permissions.
+    }
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', 'readonly');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  textarea.style.left = '-9999px';
+  document.body.append(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  const copied = typeof document.execCommand === 'function' && document.execCommand('copy');
+  textarea.remove();
+
+  if (!copied) {
+    throw new Error('复制失败，请手动选择内容后复制。');
+  }
 }
 
-function stripFrontmatter(source) {
-  const text = String(source ?? '').replace(/\r\n?/g, '\n').trim();
-  if (!text.startsWith('---\n')) return text;
-
-  const boundary = text.indexOf('\n---\n', 4);
-  if (boundary === -1) return text;
-  return text.slice(boundary + 5).trim();
+async function sendChatOption(question, value, label = value) {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
+  }
+  await sendMessage(buildChatOptionSubmission(question, value, label), label);
 }
 
-function escapeHTML(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+async function switchChatSession(sessionId) {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
+  }
+  const nextSessionId = (sessionId || '').trim();
+  if (!nextSessionId || nextSessionId === state.chatState.sessionId) return;
+
+  try {
+    applyChatState(normalizeChatState(await state.backend.SwitchChatSession(nextSessionId)));
+    await Promise.all([refreshSkills(), refreshChatPrompt()]);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
 }
 
-function escapeAttribute(value) {
-  return escapeHTML(value).replaceAll('`', '&#96;');
+async function renameChatSession(sessionId) {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
+  }
+  const conversation = (state.chatState.conversations || []).find((item) => item.sessionId === sessionId);
+  if (!conversation) return;
+  openChatSessionDialog('rename', conversation);
 }
+
+async function deleteChatSession(sessionId) {
+  if (state.chatStreaming) {
+    showBanner('当前回复尚未完成。', true);
+    return;
+  }
+  const conversation = (state.chatState.conversations || []).find((item) => item.sessionId === sessionId);
+  if (!conversation) return;
+  openChatSessionDialog('delete', conversation);
+}
+
+function renderChatContext() {
+  const container = document.getElementById('chat-context-bar');
+  if (!container) return;
+
+  const chips = [];
+  const conversation = currentChatConversation();
+  if (conversation?.sourceLabel) {
+    chips.push(`
+      <span class="chat-context-chip ${conversation.readOnly ? 'skill' : 'prompt'}">
+        <span>来源</span>
+        <strong>${escapeHTML(conversation.sourceLabel)}</strong>
+        ${conversation.readOnly ? '<span>只读</span>' : ''}
+      </span>
+    `);
+  }
+  if (state.chatPrompt.promptId) {
+    chips.push(`
+      <span class="chat-context-chip prompt">
+        <span>Prompt</span>
+        <strong>${escapeHTML(state.chatPrompt.title || `#${state.chatPrompt.shortId}`)}</strong>
+        <button type="button" data-chat-context-action="clear-prompt" title="清除当前 Prompt">×</button>
+      </span>
+    `);
+  }
+
+  const loadedSkills = [...state.skills]
+    .filter((item) => item.loaded)
+    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+  for (const skill of loadedSkills) {
+    chips.push(`
+      <span class="chat-context-chip skill">
+        <span>Skill</span>
+        <strong>${escapeHTML(skill.name)}</strong>
+        <button type="button" data-chat-context-action="unload-skill" data-value="${escapeAttribute(skill.name)}" title="卸载技能">×</button>
+      </span>
+    `);
+  }
+
+  container.innerHTML = chips.join('');
+  renderChatComposerState();
+}
+
+function renderChatComposerState() {
+  const input = document.getElementById('chat-input');
+  const sendButton = document.getElementById('chat-send');
+  const conversation = currentChatConversation();
+  const readOnly = Boolean(conversation?.readOnly);
+
+  if (input instanceof HTMLTextAreaElement) {
+    input.disabled = readOnly || state.chatStreaming;
+    input.placeholder = readOnly
+      ? '当前为微信会话，只读查看；如需继续对话，请新建本地对话。'
+      : '输入消息，或使用 / 命令、$ 技能、@ Prompt...';
+  }
+  if (sendButton instanceof HTMLButtonElement) {
+    sendButton.disabled = readOnly || state.chatStreaming;
+    sendButton.title = readOnly ? '微信会话只支持查看历史' : '发送消息';
+  }
+}
+
+async function clearChatPromptSelection() {
+  try {
+    await state.backend.ClearChatPrompt();
+    state.chatPrompt = defaultChatPromptState();
+    renderChatContext();
+    updateChatAutocomplete();
+    showBanner('已清除当前对话 Prompt。', false);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
+function autoResizeChatInput() {
+  const input = document.getElementById('chat-input');
+  if (!(input instanceof HTMLTextAreaElement)) return;
+  input.style.height = 'auto';
+  input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+}
+
+function updateChatAutocomplete() {
+  const input = document.getElementById('chat-input');
+  if (!(input instanceof HTMLTextAreaElement)) {
+    closeChatAutocomplete();
+    return;
+  }
+
+  const active = getActiveChatTrigger(input);
+  if (!active) {
+    closeChatAutocomplete();
+    return;
+  }
+
+  const items = buildAutocompleteItems(active.trigger, active.query);
+  state.autocomplete = {
+    open: true,
+    trigger: active.trigger,
+    query: active.query,
+    tokenStart: active.start,
+    tokenEnd: active.end,
+    selectedIndex: firstSelectableAutocompleteIndex(items),
+    items,
+  };
+  renderChatAutocomplete();
+}
+
+function getActiveChatTrigger(input) {
+  const value = input.value || '';
+  const caret = input.selectionStart ?? value.length;
+  let start = caret;
+  while (start > 0 && !/\s/.test(value[start - 1])) {
+    start -= 1;
+  }
+
+  if (start >= value.length) return null;
+  const trigger = value[start];
+  if (!['/', '$', '@'].includes(trigger)) return null;
+
+  let end = caret;
+  while (end < value.length && !/\s/.test(value[end])) {
+    end += 1;
+  }
+
+  return {
+    trigger,
+    query: value.slice(start + 1, caret),
+    start,
+    end,
+  };
+}
+
+function buildAutocompleteItems(trigger, query) {
+  switch (trigger) {
+    case '/':
+      return buildCommandAutocompleteItems(query);
+    case '$':
+      return buildSkillAutocompleteItems(query);
+    case '@':
+      return buildPromptAutocompleteItems(query);
+    default:
+      return [];
+  }
+}
+
+function buildCommandAutocompleteItems(query) {
+  const filtered = CHAT_SLASH_COMMANDS.filter((item) =>
+    autocompleteMatches(query, [item.label, item.insert, item.description]),
+  );
+  const items = filtered.map((item) => ({
+    kind: 'command',
+    title: item.label,
+    description: item.description,
+    meta: 'slash',
+    insertText: item.insert,
+    disabled: false,
+  }));
+  if (items.length > 0) return items;
+  return [
+    {
+      kind: 'empty',
+      title: '没有匹配的 slash command',
+      description: '继续输入，或直接发送普通消息。',
+      meta: '',
+      disabled: true,
+    },
+  ];
+}
+
+function buildSkillAutocompleteItems(query) {
+  const sorted = [...state.skills].sort((left, right) => {
+    if (left.loaded !== right.loaded) return left.loaded ? -1 : 1;
+    return left.name.localeCompare(right.name, 'zh-CN');
+  });
+  const filtered = sorted.filter((item) =>
+    autocompleteMatches(query, [item.name, item.description, item.dir]),
+  );
+  if (filtered.length === 0) {
+    return [
+      {
+        kind: 'empty',
+        title: state.skills.length === 0 ? '当前没有可用 skill' : '没有匹配的 skill',
+        description: state.skills.length === 0 ? '先在 Skill 库导入或添加本地技能。' : '尝试按技能名或描述搜索。',
+        meta: '',
+        disabled: true,
+      },
+    ];
+  }
+
+  return filtered.map((item) => ({
+    kind: 'skill',
+    title: `$${item.name}`,
+    description: item.description || '加载到当前对话会话',
+    meta: item.loaded ? '已加载' : '可加载',
+    name: item.name,
+    disabled: false,
+  }));
+}
+
+function buildPromptAutocompleteItems(query) {
+  const filtered = state.prompts.filter((item) =>
+    autocompleteMatches(query, [item.title, item.shortId, item.content]),
+  );
+  const items = filtered.map((item) => ({
+    kind: 'prompt',
+    title: `@${item.title}`,
+    description: preview(item.content, 80),
+    meta: state.chatPrompt.promptId === item.id ? `当前 · #${item.shortId}` : `Prompt · #${item.shortId}`,
+    promptId: item.id,
+    shortId: item.shortId,
+    disabled: false,
+  }));
+
+  if (state.chatPrompt.promptId) {
+    items.unshift({
+      kind: 'prompt-clear',
+      title: '@清除当前 Prompt',
+      description: `当前使用：${state.chatPrompt.title || `#${state.chatPrompt.shortId}`}`,
+      meta: 'Prompt',
+      disabled: false,
+    });
+  }
+
+  if (items.length > 0) return items;
+  return [
+    {
+      kind: 'empty',
+      title: state.prompts.length === 0 ? '当前没有可用 Prompt' : '没有匹配的 Prompt',
+      description: state.prompts.length === 0 ? '先在 Prompt 库保存常用模板。' : '尝试按标题、ID 或内容搜索。',
+      meta: '',
+      disabled: true,
+    },
+  ];
+}
+
+function autocompleteMatches(query, values) {
+  const normalized = String(query || '').trim().toLowerCase();
+  if (!normalized) return true;
+  return values.some((value) => String(value || '').toLowerCase().includes(normalized));
+}
+
+function firstSelectableAutocompleteIndex(items) {
+  const index = items.findIndex((item) => !item.disabled);
+  return index >= 0 ? index : 0;
+}
+
+function moveAutocompleteSelection(direction) {
+  const items = state.autocomplete.items || [];
+  if (!state.autocomplete.open || items.length === 0) return;
+
+  let nextIndex = state.autocomplete.selectedIndex;
+  for (let step = 0; step < items.length; step += 1) {
+    nextIndex = (nextIndex + direction + items.length) % items.length;
+    if (!items[nextIndex]?.disabled) {
+      state.autocomplete.selectedIndex = nextIndex;
+      renderChatAutocomplete();
+      return;
+    }
+  }
+}
+
+function renderChatAutocomplete() {
+  const container = document.getElementById('chat-autocomplete');
+  if (!container) return;
+
+  if (!state.autocomplete.open || (state.autocomplete.items || []).length === 0) {
+    container.hidden = true;
+    container.innerHTML = '';
+    return;
+  }
+
+  container.hidden = false;
+  container.innerHTML = `
+    <div class="chat-autocomplete-list">
+      ${(state.autocomplete.items || [])
+        .map((item, index) => `
+          <button
+            type="button"
+            class="chat-autocomplete-item ${index === state.autocomplete.selectedIndex ? 'active' : ''} ${item.disabled ? 'disabled' : ''}"
+            data-autocomplete-index="${index}"
+            ${item.disabled ? 'disabled' : ''}
+          >
+            <div class="chat-autocomplete-head">
+              <span class="chat-autocomplete-title">${escapeHTML(item.title || '')}</span>
+              ${item.meta ? `<span class="chat-autocomplete-meta">${escapeHTML(item.meta)}</span>` : ''}
+            </div>
+            <div class="chat-autocomplete-desc">${escapeHTML(item.description || '')}</div>
+          </button>
+        `)
+        .join('')}
+    </div>
+  `;
+}
+
+function closeChatAutocomplete() {
+  state.autocomplete = defaultAutocompleteState();
+  renderChatAutocomplete();
+}
+
+async function applySelectedAutocompleteItem() {
+  const items = state.autocomplete.items || [];
+  const item = items[state.autocomplete.selectedIndex];
+  if (!item || item.disabled) return;
+  await applyAutocompleteItem(item);
+}
+
+async function applyAutocompleteItem(item) {
+  switch (item.kind) {
+    case 'command':
+      replaceCurrentChatToken(item.insertText || '');
+      closeChatAutocomplete();
+      break;
+    case 'skill':
+      replaceCurrentChatToken('');
+      closeChatAutocomplete();
+      await loadSkill(item.name || '');
+      focusChatInput();
+      break;
+    case 'prompt':
+      replaceCurrentChatToken('');
+      closeChatAutocomplete();
+      try {
+        state.chatPrompt = normalizeChatPromptState(await state.backend.SetChatPrompt(item.promptId || ''));
+        renderChatContext();
+        showBanner(`已为当前对话启用 Prompt ${item.title.replace(/^@/, '')}。`, false);
+      } catch (error) {
+        showBanner(asMessage(error), true);
+      }
+      focusChatInput();
+      break;
+    case 'prompt-clear':
+      replaceCurrentChatToken('');
+      closeChatAutocomplete();
+      await clearChatPromptSelection();
+      focusChatInput();
+      break;
+    default:
+      break;
+  }
+}
+
+function replaceCurrentChatToken(replacement) {
+  const input = document.getElementById('chat-input');
+  if (!(input instanceof HTMLTextAreaElement)) return;
+
+  const value = input.value || '';
+  let start = state.autocomplete.tokenStart;
+  let end = state.autocomplete.tokenEnd;
+  if (start < 0 || end < start) return;
+
+  if (!replacement) {
+    if (start === 0) {
+      while (end < value.length && /\s/.test(value[end])) {
+        end += 1;
+      }
+    } else if (/\s/.test(value[start - 1] || '') && /\s/.test(value[end] || '')) {
+      while (end < value.length && /\s/.test(value[end])) {
+        end += 1;
+      }
+    }
+  }
+
+  input.value = value.slice(0, start) + replacement + value.slice(end);
+  const cursor = start + replacement.length;
+  input.setSelectionRange(cursor, cursor);
+  autoResizeChatInput();
+}
+
+function focusChatInput() {
+  const input = document.getElementById('chat-input');
+  if (!(input instanceof HTMLTextAreaElement)) return;
+  input.focus();
+  updateChatAutocomplete();
+}
+
+/* Source: js/core/init.js */
+document.addEventListener("DOMContentLoaded", () => {
+  void init();
+});
+
+async function init() {
+  initTheme();
+  bindStaticEvents();
+  bindNavigation();
+  bindQuickAddModal();
+  bindChatSessionUI();
+  renderChatShortcuts();
+  renderChatContext();
+  renderChatAutocomplete();
+  renderProjectState();
+  renderChatSessions();
+  renderChat();
+  renderKnowledge();
+  renderReminders();
+  renderPrompts();
+  renderSkills();
+  renderTools();
+  renderModel();
+  renderWeixin();
+  renderSettings();
+
+  try {
+    state.backend = await waitForBackend();
+    state.backendMode = state.backend.mode || 'wails';
+    bindRuntimeEvents();
+    startBackendPolling();
+    await refreshAll();
+    await refreshChatState();
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+

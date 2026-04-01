@@ -1,0 +1,101 @@
+/* Tools View */
+.tools-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.tool-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-elevated);
+}
+
+.tool-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.tool-card-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.tool-card-title-row h3 {
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.tool-card-name {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.tool-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tool-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.tool-meta-pill.provider {
+  background: rgba(196, 122, 92, 0.08);
+  border-color: rgba(196, 122, 92, 0.18);
+  color: var(--accent-primary);
+}
+
+.tool-card-desc,
+.tool-card-purpose {
+  margin-top: 14px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text-secondary);
+}
+
+.tool-card-purpose {
+  color: var(--text-muted);
+}
+
+.tool-config {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.tool-card-note {
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--text-muted);
+}
+
+.tool-card-note a {
+  color: var(--accent-primary);
+}
+
+.tool-card-actions {
+  display: flex;
+  gap: 10px;
+}
+

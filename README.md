@@ -444,7 +444,7 @@ workflow 上传的 artifact 现在只包含 NSIS 安装器：
 如果你只想手工调用 Wails，也可以在 `cmd/myclaw-desktop/` 下执行：
 
 ```powershell
-wails build -platform windows/amd64 -o myclaw-amd64.exe -nsis -webview2 download -m -s
+wails build -platform windows/amd64 -o myclaw-amd64.exe -nsis -webview2 download -s
 ```
 
 ### GitHub Actions macOS 签名 DMG

@@ -1,0 +1,166 @@
+/* Responsive */
+@media (max-width: 768px) {
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    height: auto;
+  }
+
+  .sidebar-nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .nav-item {
+    white-space: nowrap;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .quick-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .weixin-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .model-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .skill-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-card-header,
+  .tool-card-tags {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .prompt-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .memory-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .memory-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .memory-search {
+    width: 100%;
+  }
+
+  .memory-header-actions {
+    justify-content: stretch;
+  }
+
+  .memory-header-actions .btn {
+    flex: 1;
+  }
+
+  .reminder-panel-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .reminder-inline-tip {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .reminder-card .memory-card-header,
+  .reminder-card-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .reminder-card-side {
+    min-width: 0;
+    text-align: left;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .content-body {
+    padding: 16px;
+  }
+
+  .content-header-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .project-toolbar-switch {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .chat-container,
+  .chat-container.chat-sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-sidebar {
+    max-height: 240px;
+  }
+
+  .chat-container.chat-sidebar-collapsed .chat-sidebar-shell::before {
+    content: none;
+  }
+
+  .chat-container.chat-sidebar-collapsed .chat-sidebar {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+    padding: 14px;
+    border-color: var(--border);
+    box-shadow: var(--shadow-elevated);
+    background: var(--bg-surface);
+  }
+
+  .chat-sidebar-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .chat-content-actions {
+    margin-right: 0;
+  }
+
+  .chat-sidebar-toggle {
+    display: none;
+  }
+
+  .dialog-backdrop {
+    padding: 16px;
+  }
+
+  .dialog-actions {
+    flex-direction: column-reverse;
+  }
+
+  .dialog-actions .btn {
+    width: 100%;
+  }
+
+  .chat-content-actions {
+    flex-direction: column;
+  }
+
+  .chat-content-actions .btn {
+    width: 100%;
+  }
+}

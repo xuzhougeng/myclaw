@@ -1,0 +1,159 @@
+/* Weixin View */
+.weixin-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: 16px;
+}
+
+.weixin-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-elevated);
+}
+
+.weixin-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.weixin-card-header h3 {
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+
+.weixin-card-header p {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.status-pill {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-pill.off {
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.status-pill.pending {
+  background: var(--accent-glow);
+  color: var(--accent-primary);
+  border: 1px solid rgba(196, 122, 92, 0.28);
+}
+
+.status-pill.on {
+  background: var(--accent-secondary-bg);
+  color: var(--accent-secondary);
+  border: 1px solid rgba(122, 156, 138, 0.24);
+}
+
+.weixin-status-copy {
+  margin-top: 16px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.weixin-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.weixin-account {
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+}
+
+.weixin-account-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.weixin-account-row + .weixin-account-row {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.weixin-account-row strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.weixin-qr-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.weixin-qr-frame {
+  min-height: 360px;
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--border-focus);
+  background:
+    radial-gradient(circle at top, var(--accent-glow), transparent 48%),
+    var(--bg-input);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+#weixin-qr-image {
+  width: min(100%, 320px);
+  border-radius: 18px;
+  background: white;
+  padding: 18px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+}
+
+.weixin-qr-empty {
+  text-align: center;
+  max-width: 260px;
+}
+
+.weixin-qr-icon {
+  font-size: 46px;
+  color: var(--accent-primary);
+  margin-bottom: 16px;
+}
+
+.weixin-qr-empty h3 {
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.weixin-qr-empty p {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.weixin-qr-caption {
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+

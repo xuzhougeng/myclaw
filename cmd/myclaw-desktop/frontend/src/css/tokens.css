@@ -1,0 +1,78 @@
+:root {
+  /* Palette: Deep Terra + Sage (Dark) */
+  --bg-deep: #1a1816;
+  --bg-sidebar: #12100e;
+  --bg-surface: #24211f;
+  --bg-elevated: #2d2a28;
+  --bg-input: #1c1a18;
+
+  --border: #3a3632;
+  --border-focus: #524a42;
+  --border-accent: #c47a5c;
+
+  --text-primary: #f0ebe6;
+  --text-secondary: #a89a8e;
+  --text-muted: #6b615a;
+
+  /* Terra cotta accent */
+  --accent-primary: #c47a5c;
+  --accent-glow: rgba(196, 122, 92, 0.12);
+  --accent-hover: #d68a6a;
+
+  /* Sage secondary */
+  --accent-secondary: #7a9c8a;
+  --accent-secondary-bg: rgba(122, 156, 138, 0.1);
+
+  --danger: #d76a6a;
+  --danger-bg: rgba(215, 106, 106, 0.1);
+
+  --success: #7a9c8a;
+
+  --sidebar-width: 200px;
+  --chat-sidebar-width: 280px;
+  --chat-sidebar-rail-width: 44px;
+
+  --shadow-elevated: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 20px var(--accent-glow);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Consolas, monospace;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* Light Theme */
+[data-theme="light"] {
+  --bg-deep: #f8f6f4;
+  --bg-sidebar: #f0ede9;
+  --bg-surface: #ffffff;
+  --bg-elevated: #faf8f6;
+  --bg-input: #f5f3f0;
+
+  --border: #e0dcd4;
+  --border-focus: #c4b8a8;
+  --border-accent: #c47a5c;
+
+  --text-primary: #2a2622;
+  --text-secondary: #6a625a;
+  --text-muted: #9a928a;
+
+  --accent-primary: #b56a4c;
+  --accent-glow: rgba(181, 106, 76, 0.1);
+  --accent-hover: #c47a5c;
+
+  --accent-secondary: #5a8c7a;
+  --accent-secondary-bg: rgba(90, 140, 122, 0.08);
+
+  --danger: #c45a5a;
+  --danger-bg: rgba(196, 90, 90, 0.08);
+
+  --success: #5a8c7a;
+
+  --shadow-elevated: 0 4px 24px rgba(42, 38, 34, 0.08);
+  --shadow-glow: 0 0 20px var(--accent-glow);
+}
+

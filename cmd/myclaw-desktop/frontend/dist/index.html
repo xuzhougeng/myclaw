@@ -117,35 +117,35 @@
 
             <h3 style="margin-bottom: 12px; font-size: 14px; color: var(--text-secondary);">快速操作</h3>
             <div class="quick-actions">
-              <div class="action-card" onclick="navigateTo('memory')">
+              <div class="action-card" data-nav-view="memory">
                 <h3>记忆库</h3>
                 <p>切换记忆库项目、导入文件并管理记忆</p>
               </div>
-              <div class="action-card" onclick="navigateTo('reminders')">
+              <div class="action-card" data-nav-view="reminders">
                 <h3>提醒列表</h3>
                 <p>查看当前 desktop 用户的定时任务</p>
               </div>
-              <div class="action-card" onclick="navigateTo('prompts')">
+              <div class="action-card" data-nav-view="prompts">
                 <h3>Prompt 库</h3>
                 <p>沉淀常用提示词模板</p>
               </div>
-              <div class="action-card" onclick="navigateTo('skills')">
+              <div class="action-card" data-nav-view="skills">
                 <h3>Skill 库</h3>
                 <p>把技能加载到当前 desktop 会话</p>
               </div>
-              <div class="action-card" onclick="navigateTo('tools')">
+              <div class="action-card" data-nav-view="tools">
                 <h3>工具页</h3>
                 <p>查看当前 claw 可调用的本地能力</p>
               </div>
-              <div class="action-card" onclick="navigateTo('chat')">
+              <div class="action-card" data-nav-view="chat">
                 <h3>开始对话</h3>
                 <p>与 AI 助手交流</p>
               </div>
-              <div class="action-card" onclick="navigateTo('settings', 'settings-section-weixin')">
+              <div class="action-card" data-nav-view="settings" data-nav-section="settings-section-weixin">
                 <h3>微信接入</h3>
                 <p>在设置里直接扫码登录</p>
               </div>
-              <div class="action-card" onclick="navigateTo('settings', 'settings-section-model')">
+              <div class="action-card" data-nav-view="settings" data-nav-section="settings-section-model">
                 <h3>模型配置</h3>
                 <p>在设置里保存与测试 profile</p>
               </div>

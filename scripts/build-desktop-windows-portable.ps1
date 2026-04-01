@@ -77,6 +77,26 @@ function Get-GoFallbackEnvironment {
     return $environment
 }
 
+function Invoke-FrontendBundleBuild {
+    $goCommand = Get-Command go -ErrorAction SilentlyContinue
+    if ($null -eq $goCommand) {
+        throw "go was not found in PATH. It is required to build desktop frontend bundles."
+    }
+
+    $environment = Get-GoFallbackEnvironment -GoCommand $goCommand.Source
+
+    Push-Location $repoRoot
+    try {
+        Invoke-ExternalCommand -Command $goCommand.Source -Arguments @(
+            "run",
+            "./scripts/build_frontend_bundle.go"
+        ) -Environment $environment
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 function Get-WailsVersionFromGoMod {
     $goModPath = Join-Path $repoRoot "go.mod"
     if (-not (Test-Path $goModPath)) {
@@ -118,6 +138,7 @@ function Get-WailsInvocation {
     }
 }
 $wailsInvocation = Get-WailsInvocation
+Invoke-FrontendBundleBuild
 
 $portableBaseName = if ([string]::IsNullOrWhiteSpace($Version)) {
     "{0}-desktop-windows-{1}" -f $AppName, $Arch
@@ -145,7 +166,7 @@ $buildArgs = @(
     "-platform", "windows/$Arch",
     "-o", $portableExeName,
     "-webview2", "download",
-    "-m",
+    # Keep standard Wails bindings; obfuscated bindings change the frontend call path.
     "-s"
 )
 

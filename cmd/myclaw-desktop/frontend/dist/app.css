@@ -1,3 +1,4 @@
+/* Source: css/tokens.css */
 :root {
   /* Palette: Deep Terra + Sage (Dark) */
   --bg-deep: #1a1816;
@@ -76,6 +77,7 @@
   --shadow-glow: 0 0 20px var(--accent-glow);
 }
 
+/* Source: css/base-layout.css */
 * {
   box-sizing: border-box;
   margin: 0;
@@ -460,6 +462,7 @@ select {
   animation: fade-in 250ms ease;
 }
 
+/* Source: css/views/dashboard.css */
 /* Dashboard View */
 .dashboard-grid {
   display: grid;
@@ -542,6 +545,7 @@ select {
   color: var(--text-secondary);
 }
 
+/* Source: css/views/memory.css */
 /* Import View */
 .import-section {
   background: var(--bg-surface);
@@ -905,6 +909,7 @@ select {
   font-size: 11px;
 }
 
+/* Source: css/views/prompts.css */
 /* Prompt View */
 .prompt-layout {
   display: grid;
@@ -980,6 +985,7 @@ select {
   color: var(--text-primary);
 }
 
+/* Source: css/views/skills.css */
 /* Skills View */
 .skill-layout {
   display: grid;
@@ -1142,6 +1148,7 @@ select {
   line-height: 1.7;
 }
 
+/* Source: css/views/tools.css */
 /* Tools View */
 .tools-grid {
   display: grid;
@@ -1243,6 +1250,7 @@ select {
   gap: 10px;
 }
 
+/* Source: css/views/chat-shell.css */
 /* Chat View */
 .chat-container {
   display: grid;
@@ -1500,6 +1508,7 @@ select {
   margin: 0 8px 14px 0;
 }
 
+/* Source: css/views/model-settings.css */
 /* Model View */
 .model-layout {
   display: grid;
@@ -1696,6 +1705,7 @@ select {
   color: var(--text-secondary);
 }
 
+/* Source: css/views/weixin.css */
 /* Weixin View */
 .weixin-layout {
   display: grid;
@@ -1855,6 +1865,7 @@ select {
   line-height: 1.6;
 }
 
+/* Source: css/views/chat-content.css */
 .chat-messages {
   flex: 1;
   min-width: 0;
@@ -2406,6 +2417,7 @@ select {
   color: var(--accent-primary);
 }
 
+/* Source: css/components.css */
 /* Context menu */
 .context-menu {
   position: fixed;
@@ -2755,6 +2767,7 @@ select {
   }
 }
 
+/* Source: css/responsive.css */
 /* Responsive */
 @media (max-width: 768px) {
   .app-shell {
@@ -2921,3 +2934,4 @@ select {
     width: 100%;
   }
 }
+

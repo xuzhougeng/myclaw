@@ -8,7 +8,7 @@ GO ?= go
 CGO_ENABLED ?= 0
 HTTP_DEV_ADDR ?= 127.0.0.1:3415
 
-.PHONY: help dev test clean install-hooks build build-current build-linux build-linux-amd64 build-linux-arm64 build-windows build-windows-amd64 build-windows-arm64 build-macos build-macos-amd64 build-macos-arm64 package-linux package-macos package-windows release
+.PHONY: help frontend-bundle dev test clean install-hooks build build-current build-linux build-linux-amd64 build-linux-arm64 build-windows build-windows-amd64 build-windows-arm64 build-macos build-macos-amd64 build-macos-arm64 package-linux package-macos package-windows release
 
 help:
 	@printf "Targets:\n"
@@ -28,7 +28,10 @@ help:
 install-hooks:
 	sh ./scripts/install-hooks.sh
 
-dev:
+frontend-bundle:
+	$(GO) run ./scripts/build_frontend_bundle.go
+
+dev: frontend-bundle
 	$(GO) run $(DESKTOP_CMD_PATH) -http-dev -http-listen $(HTTP_DEV_ADDR)
 
 test:
