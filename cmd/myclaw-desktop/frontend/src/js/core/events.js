@@ -386,6 +386,19 @@ function bindStaticEvents() {
     modelProvider.addEventListener('change', () => syncModelProviderFields(true));
   }
 
+  const modelSection = document.getElementById('settings-section-model');
+  if (modelSection) {
+    const markModelFormDirty = (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) return;
+      if (!target.id || !target.id.startsWith('model-')) return;
+      if (target.id === 'model-profile-select') return;
+      state.modelFormDirty = true;
+    };
+    modelSection.addEventListener('input', markModelFormDirty);
+    modelSection.addEventListener('change', markModelFormDirty);
+  }
+
   // Memory list events
   const memoryList = document.getElementById('memory-list');
   if (memoryList) {

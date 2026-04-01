@@ -564,6 +564,7 @@ function populateModelForm(profile) {
 function syncModelFormFromSelection(fromUser) {
   const profile = selectedModelProfile();
   populateModelForm(profile);
+  state.modelFormDirty = !profile;
   if (fromUser && profile) {
     showBanner(`已切换到 profile：${profile.name || profile.model || profile.id}`, false);
   }
@@ -575,6 +576,7 @@ function createNewModelProfileDraft() {
     profileSelect.value = '';
   }
   populateModelForm(null);
+  state.modelFormDirty = true;
 }
 
 function readOptionalNumber(id) {
@@ -643,6 +645,7 @@ async function saveModelConfig() {
   try {
     const result = await state.backend.SaveModelConfig(readModelForm());
     state.model = normalizeModelSettings(result);
+    state.modelFormDirty = false;
     renderModel();
     await refreshOverview();
     showBanner('模型 profile 已保存。', false);
@@ -660,6 +663,7 @@ async function setActiveModelProfile() {
 
   try {
     state.model = normalizeModelSettings(await state.backend.SetActiveModel(selected.id));
+    state.modelFormDirty = false;
     renderModel();
     await refreshOverview();
     showBanner(`已切换当前模型到 ${selected.name || selected.model || selected.id}。`, false);
@@ -696,6 +700,7 @@ async function deleteModelProfile() {
     if (!ok) return;
 
     state.model = normalizeModelSettings(await state.backend.DeleteModelConfig(selected.id));
+    state.modelFormDirty = false;
     renderModel();
     await refreshOverview();
     showBanner('模型 profile 已删除。', false);

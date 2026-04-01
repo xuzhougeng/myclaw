@@ -802,6 +802,9 @@ async function refreshChatPrompt() {
 
 async function refreshModel() {
   state.model = normalizeModelSettings(await state.backend.GetModelSettings());
+  if (state.modelFormDirty) {
+    return;
+  }
   renderModel();
 }
 

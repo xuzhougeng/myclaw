@@ -19,6 +19,7 @@ const state = {
   appendDrafts: {},
   openAppendId: "",
   model: defaultModelState(),
+  modelFormDirty: false,
   weixin: defaultWeixinState(),
   settings: defaultSettingsState(),
   chat: [],
