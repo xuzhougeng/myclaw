@@ -32,6 +32,9 @@ async function init() {
     await refreshAll();
     await refreshChatState();
   } catch (error) {
+    reportDesktopDiagnostics('init-failed', {
+      error,
+    });
     showBanner(asMessage(error), true);
   }
 }

@@ -449,7 +449,19 @@ function bindStaticEvents() {
 function bindRuntimeEvents() {
   if (!window.runtime || typeof window.runtime.EventsOn !== 'function') return;
 
-  window.runtime.EventsOn('reminder:due', (payload) => {
+  const bindEvent = (name, handler) => {
+    try {
+      window.runtime.EventsOn(name, handler);
+    } catch (error) {
+      reportDesktopDiagnostics('runtime-event-bind-failed', {
+        eventName: name,
+        error,
+      });
+      throw error;
+    }
+  };
+
+  bindEvent('reminder:due', (payload) => {
     const reminder = Array.isArray(payload) ? payload[0] : payload;
     if (!reminder) return;
 
@@ -466,17 +478,17 @@ function bindRuntimeEvents() {
     void refreshReminders().catch(() => {});
   });
 
-  window.runtime.EventsOn('weixin:status', (payload) => {
+  bindEvent('weixin:status', (payload) => {
     const next = normalizeWeixinStatus(payload);
     applyWeixinStatus(next, true);
   });
 
-  window.runtime.EventsOn('chat:changed', () => {
+  bindEvent('chat:changed', () => {
     if (state.chatStreaming) return;
     void refreshChatState().catch(() => {});
   });
 
-  window.runtime.EventsOn('chat:stream', (payload) => {
+  bindEvent('chat:stream', (payload) => {
     const event = Array.isArray(payload) ? payload[0] : payload;
     dispatchChatStreamEvent(event);
   });

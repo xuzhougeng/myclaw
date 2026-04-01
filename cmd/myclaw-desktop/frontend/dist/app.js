@@ -3510,7 +3510,19 @@ function bindStaticEvents() {
 function bindRuntimeEvents() {
   if (!window.runtime || typeof window.runtime.EventsOn !== 'function') return;
 
-  window.runtime.EventsOn('reminder:due', (payload) => {
+  const bindEvent = (name, handler) => {
+    try {
+      window.runtime.EventsOn(name, handler);
+    } catch (error) {
+      reportDesktopDiagnostics('runtime-event-bind-failed', {
+        eventName: name,
+        error,
+      });
+      throw error;
+    }
+  };
+
+  bindEvent('reminder:due', (payload) => {
     const reminder = Array.isArray(payload) ? payload[0] : payload;
     if (!reminder) return;
 
@@ -3527,17 +3539,17 @@ function bindRuntimeEvents() {
     void refreshReminders().catch(() => {});
   });
 
-  window.runtime.EventsOn('weixin:status', (payload) => {
+  bindEvent('weixin:status', (payload) => {
     const next = normalizeWeixinStatus(payload);
     applyWeixinStatus(next, true);
   });
 
-  window.runtime.EventsOn('chat:changed', () => {
+  bindEvent('chat:changed', () => {
     if (state.chatStreaming) return;
     void refreshChatState().catch(() => {});
   });
 
-  window.runtime.EventsOn('chat:stream', (payload) => {
+  bindEvent('chat:stream', (payload) => {
     const event = Array.isArray(payload) ? payload[0] : payload;
     dispatchChatStreamEvent(event);
   });
@@ -3608,6 +3620,7 @@ const desktopDiagnosticsState = {
   installed: false,
   entries: [],
   bannerShown: false,
+  outboundMessages: [],
 };
 
 function describeDiagnosticFunction(value) {
@@ -3691,6 +3704,7 @@ function buildDesktopDiagnosticSnapshot(reason, detail = {}) {
         eventsOnType: typeof window.runtime?.EventsOn,
       },
     },
+    outboundMessages: desktopDiagnosticsState.outboundMessages.slice(-12),
   };
 }
 
@@ -3787,6 +3801,28 @@ function reportDesktopDiagnostics(reason, detail = {}) {
   console.error(`[desktop-debug] ${reason}`, snapshot);
 }
 
+function recordDesktopOutboundMessage(rawMessage) {
+  if (!desktopDiagnosticsEnabled()) return;
+
+  const message = String(rawMessage || '');
+  const entry = {
+    timestamp: new Date().toISOString(),
+    prefix: message.slice(0, 2),
+    preview: message.slice(0, 240),
+  };
+  if (message.startsWith('C') || message.startsWith('c') || message.startsWith('EE')) {
+    try {
+      entry.payload = summarizeDiagnosticValue(JSON.parse(message.slice(message.startsWith('EE') ? 2 : 1)));
+    } catch (error) {
+      entry.parseError = asMessage(error);
+    }
+  }
+  desktopDiagnosticsState.outboundMessages.push(entry);
+  if (desktopDiagnosticsState.outboundMessages.length > 20) {
+    desktopDiagnosticsState.outboundMessages = desktopDiagnosticsState.outboundMessages.slice(-20);
+  }
+}
+
 function installDesktopDebugDiagnostics() {
   if (!desktopDiagnosticsEnabled() || desktopDiagnosticsState.installed) return;
   desktopDiagnosticsState.installed = true;
@@ -3864,14 +3900,36 @@ function installWailsBridgeShim() {
     return false;
   }
 
-  window.WailsInvoke = (message) => sender(message);
+  window.WailsInvoke = (message) => {
+    recordDesktopOutboundMessage(message);
+    try {
+      return sender(message);
+    } catch (error) {
+      reportDesktopDiagnostics('wailsinvoke-throw', {
+        message,
+        error,
+      });
+      throw error;
+    }
+  };
 
   if (nativeSender) {
     try {
       if (!window.external || typeof window.external !== 'object') {
         window.external = {};
       }
-      window.external.invoke = (message) => nativeSender(message);
+      window.external.invoke = (message) => {
+        recordDesktopOutboundMessage(message);
+        try {
+          return nativeSender(message);
+        } catch (error) {
+          reportDesktopDiagnostics('external-invoke-throw', {
+            message,
+            error,
+          });
+          throw error;
+        }
+      };
     } catch (error) {
       // Ignore readonly host objects; direct WailsInvoke override is enough.
     }
@@ -3933,8 +3991,18 @@ function invokeWailsMethod(methodName, args = [], timeout = 0) {
 
     window.wails.callbacks[callbackID] = {
       timeoutHandle,
-      reject,
-      resolve,
+      reject: (error) => {
+        reportDesktopDiagnostics('invoke-callback-error', {
+          methodName,
+          callbackID,
+          args,
+          error,
+        });
+        reject(error);
+      },
+      resolve: (result) => {
+        resolve(result);
+      },
     };
 
     try {
@@ -5350,6 +5418,9 @@ async function init() {
     await refreshAll();
     await refreshChatState();
   } catch (error) {
+    reportDesktopDiagnostics('init-failed', {
+      error,
+    });
     showBanner(asMessage(error), true);
   }
 }

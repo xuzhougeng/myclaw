@@ -6,6 +6,7 @@ const desktopDiagnosticsState = {
   installed: false,
   entries: [],
   bannerShown: false,
+  outboundMessages: [],
 };
 
 function describeDiagnosticFunction(value) {
@@ -89,6 +90,7 @@ function buildDesktopDiagnosticSnapshot(reason, detail = {}) {
         eventsOnType: typeof window.runtime?.EventsOn,
       },
     },
+    outboundMessages: desktopDiagnosticsState.outboundMessages.slice(-12),
   };
 }
 
@@ -185,6 +187,28 @@ function reportDesktopDiagnostics(reason, detail = {}) {
   console.error(`[desktop-debug] ${reason}`, snapshot);
 }
 
+function recordDesktopOutboundMessage(rawMessage) {
+  if (!desktopDiagnosticsEnabled()) return;
+
+  const message = String(rawMessage || '');
+  const entry = {
+    timestamp: new Date().toISOString(),
+    prefix: message.slice(0, 2),
+    preview: message.slice(0, 240),
+  };
+  if (message.startsWith('C') || message.startsWith('c') || message.startsWith('EE')) {
+    try {
+      entry.payload = summarizeDiagnosticValue(JSON.parse(message.slice(message.startsWith('EE') ? 2 : 1)));
+    } catch (error) {
+      entry.parseError = asMessage(error);
+    }
+  }
+  desktopDiagnosticsState.outboundMessages.push(entry);
+  if (desktopDiagnosticsState.outboundMessages.length > 20) {
+    desktopDiagnosticsState.outboundMessages = desktopDiagnosticsState.outboundMessages.slice(-20);
+  }
+}
+
 function installDesktopDebugDiagnostics() {
   if (!desktopDiagnosticsEnabled() || desktopDiagnosticsState.installed) return;
   desktopDiagnosticsState.installed = true;
@@ -262,14 +286,36 @@ function installWailsBridgeShim() {
     return false;
   }
 
-  window.WailsInvoke = (message) => sender(message);
+  window.WailsInvoke = (message) => {
+    recordDesktopOutboundMessage(message);
+    try {
+      return sender(message);
+    } catch (error) {
+      reportDesktopDiagnostics('wailsinvoke-throw', {
+        message,
+        error,
+      });
+      throw error;
+    }
+  };
 
   if (nativeSender) {
     try {
       if (!window.external || typeof window.external !== 'object') {
         window.external = {};
       }
-      window.external.invoke = (message) => nativeSender(message);
+      window.external.invoke = (message) => {
+        recordDesktopOutboundMessage(message);
+        try {
+          return nativeSender(message);
+        } catch (error) {
+          reportDesktopDiagnostics('external-invoke-throw', {
+            message,
+            error,
+          });
+          throw error;
+        }
+      };
     } catch (error) {
       // Ignore readonly host objects; direct WailsInvoke override is enough.
     }
@@ -331,8 +377,18 @@ function invokeWailsMethod(methodName, args = [], timeout = 0) {
 
     window.wails.callbacks[callbackID] = {
       timeoutHandle,
-      reject,
-      resolve,
+      reject: (error) => {
+        reportDesktopDiagnostics('invoke-callback-error', {
+          methodName,
+          callbackID,
+          args,
+          error,
+        });
+        reject(error);
+      },
+      resolve: (result) => {
+        resolve(result);
+      },
     };
 
     try {
