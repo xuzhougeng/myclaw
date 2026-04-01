@@ -62,7 +62,7 @@ func Definition() toolcontract.Spec {
 		DisplayOrder:      31,
 		Purpose:           "Run a small allowlisted set of read-only Bash-oriented commands on Linux and macOS.",
 		Description:       "Inspect the local machine on Linux or macOS with one approved read-only command, routed through Bash semantics but still validated against a strict allowlist.",
-		InputContract:     `Provide {"command":"..."} and optionally {"args":[...],"timeout_seconds":5}. Only allowlisted commands and exact argument variants are accepted. This tool is not exposed on Windows or WeChat.`,
+		InputContract:     `Provide {"command":"..."} and optionally {"args":[...],"timeout_seconds":5}. Only allowlisted commands and exact argument variants are accepted. This tool is only exposed on Linux and macOS.`,
 		OutputContract:    "Returns JSON with tool, shell, command, args, exit_code, stdout, stderr, and truncated.",
 		InputJSONExample:  `{"command":"uname","args":["-a"]}`,
 		OutputJSONExample: `{"tool":"bash_tool","shell":"bash","command":"uname","args":["-a"],"exit_code":0,"stdout":"Linux demo-host 6.8.0\n","stderr":""}`,
@@ -92,7 +92,7 @@ Use this when the user needs current host/process/disk/basic shell-visible state
 }
 
 func AllowedForInterface(name string) bool {
-	return !strings.EqualFold(strings.TrimSpace(name), "weixin")
+	return true
 }
 
 func SupportedForCurrentPlatform() bool {

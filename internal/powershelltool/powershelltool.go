@@ -63,7 +63,7 @@ func Definition() toolcontract.Spec {
 		DisplayOrder:      31,
 		Purpose:           "Run a small allowlisted set of read-only PowerShell commands on Windows.",
 		Description:       "Inspect the local Windows machine with one approved read-only PowerShell cmdlet or command, executed through PowerShell with strict argument validation.",
-		InputContract:     `Provide {"command":"..."} and optionally {"args":[...],"timeout_seconds":5}. Only allowlisted PowerShell commands and exact argument variants are accepted. This tool is only exposed on Windows and never on WeChat.`,
+		InputContract:     `Provide {"command":"..."} and optionally {"args":[...],"timeout_seconds":5}. Only allowlisted PowerShell commands and exact argument variants are accepted. This tool is only exposed on Windows.`,
 		OutputContract:    "Returns JSON with tool, shell, command, args, exit_code, stdout, stderr, and truncated.",
 		InputJSONExample:  `{"command":"Get-Process"}`,
 		OutputJSONExample: `{"tool":"powershell_tool","shell":"powershell","command":"Get-Process","args":[],"exit_code":0,"stdout":"Handles  NPM(K)    PM(K)      WS(K)\n","stderr":""}`,
@@ -93,7 +93,7 @@ Use this when the user needs current host/process/network/basic PowerShell-visib
 }
 
 func AllowedForInterface(name string) bool {
-	return !strings.EqualFold(strings.TrimSpace(name), "weixin")
+	return true
 }
 
 func SupportedForCurrentPlatform() bool {

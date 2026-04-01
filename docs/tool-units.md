@@ -127,6 +127,12 @@ func FormatResult(result ToolResult) (string, error) {
 - `AllowedForInterface(name string) bool`
 - `SupportedForCurrentPlatform() bool`
 
+但对 desktop / weixin 的 agent tool 暴露有一个额外约束：
+
+- 默认不要因为接口名是 `weixin` 就隐藏工具
+- desktop 和 weixin 的 `ListAgentToolDefinitions` 应默认保持一致
+- 如果必须收窄候选集，理由应是平台不支持、用户显式关闭，或真正的安全/权限边界，而不是 transport 偏好
+
 ## 新建 Tool Checklist
 
 提交一个新 tool 前，逐项确认：
@@ -167,6 +173,8 @@ func FormatResult(result ToolResult) (string, error) {
   shortcut help 或 usage 文本能稳定返回。
 - runtime 注册测试
   例如 `tool provider`、command registry、接口 gating。
+- desktop / weixin 暴露一致性测试
+  如果某个工具对 desktop 暴露，也应验证它默认对 weixin 暴露，除非存在明确的平台不可用条件。
 
 ## 运行时接入要求
 
@@ -221,6 +229,7 @@ Flags：
 - Input contract: `path`, `limit`, `include_hidden`, `directories_only`
 - Output contract: resolved directory path, effective limit, returned item count, truncation flag, and ordered items with `index`, `name`, `path`, `is_dir`, `size_bytes`, and `modified_at`
 - Shortcut registration: none; exposed through the shared local agent tool provider and hidden from WeChat contexts
+- Shortcut registration: none; exposed through the shared local agent tool provider for both desktop and WeChat
 - Current pipeline split:
   - tool opportunity detection and planning in `internal/ai`
   - runtime exposure in `internal/app`
@@ -236,7 +245,7 @@ Flags：
 - Purpose: Inspect local machine state through platform-native shell command surfaces, while keeping execution inside strict read-only allowlists.
 - Input contract: `command`, optional `args`, optional `timeout_seconds`
 - Output contract: tool name, shell name, executed command, args, exit code, stdout, stderr, truncation flag
-- Shortcut registration: none; exposed through the shared local agent tool provider and filtered by platform/interface
+- Shortcut registration: none; exposed through the shared local agent tool provider and filtered only by platform support
 - Current pipeline split:
   - tool opportunity detection and tool planning in `internal/ai`
   - runtime exposure and platform gating in `internal/app`

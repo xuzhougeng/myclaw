@@ -82,7 +82,7 @@ Notes:
 }
 
 func AllowedForInterface(name string) bool {
-	return !strings.EqualFold(strings.TrimSpace(name), "weixin")
+	return true
 }
 
 func NormalizeInput(raw ToolInput) ToolInput {

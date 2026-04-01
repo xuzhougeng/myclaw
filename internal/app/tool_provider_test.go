@@ -114,7 +114,7 @@ func TestLocalToolFamiliesAreExposed(t *testing.T) {
 	}
 }
 
-func TestReadonlySystemCommandNotExposedOnWeixin(t *testing.T) {
+func TestHostToolsExposedOnWeixin(t *testing.T) {
 	t.Parallel()
 
 	store := knowledge.NewStore(filepath.Join(t.TempDir(), "app.db"))
@@ -124,16 +124,30 @@ func TestReadonlySystemCommandNotExposedOnWeixin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Definitions() failed: %v", err)
 	}
+	var (
+		hasDirlist    bool
+		hasBash       bool
+		hasPowerShell bool
+	)
 	for _, def := range defs {
 		if strings.HasSuffix(def.Name, "::bash_tool") {
-			t.Fatalf("unexpected bash tool in weixin definitions: %#v", def)
+			hasBash = true
 		}
 		if strings.HasSuffix(def.Name, "::powershell_tool") {
-			t.Fatalf("unexpected powershell tool in weixin definitions: %#v", def)
+			hasPowerShell = true
 		}
 		if strings.HasSuffix(def.Name, "::list_directory") {
-			t.Fatalf("unexpected directory listing tool in weixin definitions: %#v", def)
+			hasDirlist = true
 		}
+	}
+	if !hasDirlist {
+		t.Fatalf("expected directory listing tool in weixin definitions: %#v", defs)
+	}
+	if bashtool.SupportedForCurrentPlatform() && !hasBash {
+		t.Fatalf("expected bash tool in weixin definitions: %#v", defs)
+	}
+	if powershelltool.SupportedForCurrentPlatform() && !hasPowerShell {
+		t.Fatalf("expected powershell tool in weixin definitions: %#v", defs)
 	}
 }
 

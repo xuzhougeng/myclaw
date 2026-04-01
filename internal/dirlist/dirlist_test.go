@@ -115,8 +115,8 @@ func TestExecuteHonorsLimitAndDefaultPath(t *testing.T) {
 func TestAllowedForInterface(t *testing.T) {
 	t.Parallel()
 
-	if AllowedForInterface("weixin") {
-		t.Fatal("expected weixin to be blocked")
+	if !AllowedForInterface("weixin") {
+		t.Fatal("expected weixin to be allowed")
 	}
 	if !AllowedForInterface("desktop") {
 		t.Fatal("expected desktop to be allowed")
