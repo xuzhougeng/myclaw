@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`cmd/myclaw` is the CLI entry point; `cmd/myclaw-desktop` hosts the Wails desktop app and checked-in web assets under `frontend/dist/`. Shared business logic lives in `internal/` packages such as `ai`, `app`, `knowledge`, `reminder`, `runtimepolicy`, `terminal`, and `weixin`. Keep new code in `internal/<domain>` unless it is an executable entry point. Repo docs and images live in `docs/`; release packaging scripts live in `scripts/` and `packaging/windows/`.
+`cmd/myclaw` is the CLI entry point; `cmd/myclaw-desktop` hosts the Wails desktop app and checked-in web assets under `frontend/dist/`; `cmd/myclaw-eval` is the model evaluation CLI. Shared business logic lives in `internal/` packages such as `ai`, `app`, `dirlist`, `fileingest`, `knowledge`, `modelconfig`, `projectstate`, `promptlib`, `reminder`, `runtimepolicy`, `sessionstate`, `skilllib`, `sqliteutil`, `terminal`, and `weixin`. Keep new code in `internal/<domain>` unless it is an executable entry point. Repo docs and images live in `docs/`; release packaging scripts live in `scripts/` and `packaging/windows/`.
 
 Persistent app state is now centered on a SQLite database (`app.db`) under the data directory. Keep core runtime state in shared storage packages, and treat extra files such as WeChat credentials or secret keys as interface-specific/supporting artifacts rather than the primary source of truth.
 
@@ -23,7 +23,7 @@ This repository is being refactored toward a conversation-first, interface-thin 
 - If a change alters architecture assumptions, update `README.md` and this file in the same change.
 
 ## Build, Test, and Development Commands
-Use `go run ./cmd/myclaw` for the terminal app and `go run ./cmd/myclaw-desktop` for the desktop shell. `make dev` starts the desktop app in HTTP dev mode on `127.0.0.1:3415`. `make test` runs `go test ./...` across the repository. `make build-current` builds the CLI into `dist/`; `make package-linux`, `make package-windows`, and `make package-macos` create release archives.
+Use `go run ./cmd/myclaw` for the terminal app, `go run ./cmd/myclaw-desktop` for the desktop shell, and `go run ./cmd/myclaw-eval -dataset <path>` to run a JSONL evaluation dataset against the AI stages; see `docs/ai-stage-eval.md` for format details. `make dev` starts the desktop app in HTTP dev mode on `127.0.0.1:3415`. `make test` runs `go test ./...` across the repository. `make build-current` builds the CLI into `dist/`; `make package-linux`, `make package-windows`, and `make package-macos` create release archives.
 
 ## Coding Style & Naming Conventions
 Target Go 1.24 and let `gofmt` own formatting; do not hand-align whitespace. Follow Go naming: exported identifiers use PascalCase, internal helpers use camelCase, package directories stay lowercase, and platform files use suffixes like `_windows.go` or `_stub.go`. Keep functions small and package boundaries clear; prefer extending existing `internal/*` packages over adding cross-package shortcuts.
