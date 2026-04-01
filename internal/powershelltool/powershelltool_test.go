@@ -21,8 +21,6 @@ func TestDefinitionHasFamilyMetadata(t *testing.T) {
 }
 
 func TestExecuteUsesAllowlistedCommand(t *testing.T) {
-	t.Parallel()
-
 	oldGOOS := currentGOOS
 	oldRun := runCommand
 	oldProgram := powerShellProgram
@@ -56,8 +54,6 @@ func TestExecuteUsesAllowlistedCommand(t *testing.T) {
 }
 
 func TestExecuteRejectsDisallowedArgs(t *testing.T) {
-	t.Parallel()
-
 	oldGOOS := currentGOOS
 	currentGOOS = func() string { return "windows" }
 	t.Cleanup(func() {
@@ -74,8 +70,6 @@ func TestExecuteRejectsDisallowedArgs(t *testing.T) {
 }
 
 func TestSupportedForCurrentPlatform(t *testing.T) {
-	t.Parallel()
-
 	oldGOOS := currentGOOS
 	t.Cleanup(func() {
 		currentGOOS = oldGOOS
