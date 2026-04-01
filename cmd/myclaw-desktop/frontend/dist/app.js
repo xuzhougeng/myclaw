@@ -757,6 +757,20 @@ async function submitChatSessionDialog() {
 }
 
 function bindStaticEvents() {
+  document.addEventListener('click', (event) => {
+    const anchor = event.target.closest('a[href]');
+    if (!anchor) return;
+
+    const targetURL = sanitizeHTTPURL(anchor.getAttribute('href') || anchor.href || '');
+    if (!targetURL) return;
+    if (state.backendMode !== 'wails' || !state.backend || typeof state.backend.OpenExternalURL !== 'function') {
+      return;
+    }
+
+    event.preventDefault();
+    void openExternalLink(targetURL);
+  });
+
   // Theme toggle
   const themeToggle = document.getElementById('theme-toggle');
   if (themeToggle) {
@@ -4698,6 +4712,14 @@ function asMessage(error) {
   return String(error);
 }
 
+async function openExternalLink(targetURL) {
+  try {
+    await state.backend.OpenExternalURL(targetURL);
+  } catch (error) {
+    showBanner(asMessage(error), true);
+  }
+}
+
 function renderMarkdown(source) {
   const normalized = String(source ?? '').replace(/\r\n?/g, '\n');
   const lines = normalized.split('\n');
@@ -4906,6 +4928,23 @@ function sanitizeURL(value) {
     const parsed = new URL(url, window.location.href);
     const protocol = parsed.protocol.toLowerCase();
     if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
+      return parsed.href;
+    }
+  } catch (error) {
+    return '';
+  }
+
+  return '';
+}
+
+function sanitizeHTTPURL(value) {
+  const url = String(value ?? '').trim();
+  if (!url) return '';
+
+  try {
+    const parsed = new URL(url, window.location.href);
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol === 'http:' || protocol === 'https:') {
       return parsed.href;
     }
   } catch (error) {
