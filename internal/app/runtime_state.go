@@ -87,6 +87,9 @@ func (s *Service) maybeAppendConversationHistory(ctx context.Context, mc Message
 	if !conversationPersistenceEnabled(ctx) {
 		return
 	}
+	if conversationAlreadyPersisted(ctx) {
+		return
+	}
 	s.appendConversationHistory(ctx, mc, userInput, assistantReply)
 }
 
@@ -129,7 +132,9 @@ func (s *Service) appendConversationHistoryWithSummary(ctx context.Context, mc M
 		},
 	)
 	snapshot.History = trimSessionHistory(history, limits)
-	_ = s.saveSessionSnapshot(ctx, snapshot)
+	if err := s.saveSessionSnapshot(ctx, snapshot); err == nil {
+		markConversationPersisted(ctx)
+	}
 }
 
 func (s *Service) RecordConversationTurn(ctx context.Context, mc MessageContext, userInput, assistantReply string) {

@@ -134,6 +134,96 @@ func TestDesktopSendMessageHelpDoesNotPersistHistory(t *testing.T) {
 	}
 }
 
+func TestDesktopSendMessageKBListPersistsHistory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "app.db"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "app.db"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "app.db"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "app.db")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "app.db"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	result, err := app.SendMessage("/kb list")
+	if err != nil {
+		t.Fatalf("send /kb list: %v", err)
+	}
+	if !result.HistoryPersisted {
+		t.Fatalf("expected /kb list to persist history, got %#v", result)
+	}
+	if !strings.Contains(result.Reply, "知识库为空") {
+		t.Fatalf("expected list reply, got %#v", result)
+	}
+
+	state, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("get chat state: %v", err)
+	}
+	if len(state.Messages) != 2 {
+		t.Fatalf("expected /kb list exchange in chat history, got %#v", state.Messages)
+	}
+	if state.Messages[0].Role != "user" || state.Messages[0].Text != "/kb list" {
+		t.Fatalf("unexpected persisted user message: %#v", state.Messages[0])
+	}
+	if state.Messages[1].Role != "assistant" || !strings.Contains(state.Messages[1].Text, "知识库为空") {
+		t.Fatalf("unexpected persisted assistant message: %#v", state.Messages[1])
+	}
+}
+
+func TestDesktopSendMessageUnavailableAIPersistsHistory(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []string{"agent", "ask"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			store := knowledge.NewStore(filepath.Join(root, "app.db"))
+			projectStore := projectstate.NewStore(filepath.Join(root, "app.db"))
+			promptStore := promptlib.NewStore(filepath.Join(root, "app.db"))
+			reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "app.db")))
+			sessionStore := sessionstate.NewStore(filepath.Join(root, "app.db"))
+			service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, promptStore)
+			app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+			if mode == "ask" {
+				state, err := app.NewChatSession("ask")
+				if err != nil {
+					t.Fatalf("new ask session: %v", err)
+				}
+				if state.SessionID == "" {
+					t.Fatalf("expected ask session id, got %#v", state)
+				}
+			}
+
+			result, err := app.SendMessage("hello")
+			if err != nil {
+				t.Fatalf("send message: %v", err)
+			}
+			if !result.HistoryPersisted {
+				t.Fatalf("expected unavailable-ai reply to persist history, got %#v", result)
+			}
+			if !strings.Contains(result.Reply, "模型尚未启用") {
+				t.Fatalf("expected unavailable-ai reply, got %#v", result)
+			}
+
+			state, err := app.GetChatState()
+			if err != nil {
+				t.Fatalf("get chat state: %v", err)
+			}
+			if len(state.Messages) != 2 {
+				t.Fatalf("expected persisted unavailable-ai exchange, got %#v", state.Messages)
+			}
+			if state.Messages[0].Role != "user" || state.Messages[0].Text != "hello" {
+				t.Fatalf("unexpected persisted user message: %#v", state.Messages[0])
+			}
+			if state.Messages[1].Role != "assistant" || !strings.Contains(state.Messages[1].Text, "模型尚未启用") {
+				t.Fatalf("unexpected persisted assistant message: %#v", state.Messages[1])
+			}
+		})
+	}
+}
+
 func TestDesktopSendMessageReturnsAndPersistsUsage(t *testing.T) {
 	t.Parallel()
 

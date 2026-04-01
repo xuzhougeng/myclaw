@@ -160,6 +160,7 @@ func (s *Service) SetProjectStore(store *projectstate.Store) {
 
 func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input string) (string, error) {
 	var err error
+	ctx = withConversationPersistenceTracker(ctx)
 	ctx, err = s.withKnowledgeContext(ctx, mc)
 	if err != nil {
 		return "", err
@@ -174,6 +175,7 @@ func (s *Service) HandleMessage(ctx context.Context, mc MessageContext, input st
 
 func (s *Service) HandleMessageStream(ctx context.Context, mc MessageContext, input string, onDelta func(string)) (string, error) {
 	var err error
+	ctx = withConversationPersistenceTracker(ctx)
 	ctx, err = s.withKnowledgeContext(ctx, mc)
 	if err != nil {
 		return "", err
@@ -194,28 +196,28 @@ func (s *Service) handleMessageDispatch(ctx context.Context, mc MessageContext, 
 		if err == nil {
 			emitIfPresent(onDelta, reply)
 		}
-		return reply, err
+		return s.finalizeMessageReply(ctx, mc, text, reply, err)
 	}
 
 	if reply, ok, err := s.tryHandleNaturalAppend(ctx, mc, text); ok || err != nil {
 		if err == nil {
 			emitIfPresent(onDelta, reply)
 		}
-		return reply, err
+		return s.finalizeMessageReply(ctx, mc, text, reply, err)
 	}
 
 	if reply, ok, err := s.tryHandleNaturalReminder(ctx, mc, text); ok || err != nil {
 		if err == nil {
 			emitIfPresent(onDelta, reply)
 		}
-		return reply, err
+		return s.finalizeMessageReply(ctx, mc, text, reply, err)
 	}
 
 	if reply, ok, err := s.tryHandleNaturalForget(ctx, text); ok || err != nil {
 		if err == nil {
 			emitIfPresent(onDelta, reply)
 		}
-		return reply, err
+		return s.finalizeMessageReply(ctx, mc, text, reply, err)
 	}
 
 	if memoryText, ok := parseRememberIntent(text); ok {
@@ -229,24 +231,44 @@ func (s *Service) handleMessageDispatch(ctx context.Context, mc MessageContext, 
 		}
 		reply := fmt.Sprintf("已记住 #%s\n%s", shortID(entry.ID), preview(entry.Text, maxReplyPreviewRunes))
 		emitIfPresent(onDelta, reply)
-		return reply, nil
+		return s.finalizeMessageReply(ctx, mc, text, reply, nil)
 	}
 
 	if reply, ok, err := s.tryHandleDirectFileIngest(ctx, mc, text); ok || err != nil {
 		if err == nil {
 			emitIfPresent(onDelta, reply)
 		}
-		return reply, err
+		return s.finalizeMessageReply(ctx, mc, text, reply, err)
 	}
 
 	if reply, ok, err := s.tryHandleFileSearch(ctx, mc, text); ok || err != nil {
 		if err == nil {
 			emitIfPresent(onDelta, reply)
 		}
-		return reply, err
+		return s.finalizeMessageReply(ctx, mc, text, reply, err)
 	}
 
-	return s.handleConversationMessageStream(ctx, mc, text, onDelta)
+	reply, err := s.handleConversationMessageStream(ctx, mc, text, onDelta)
+	return s.finalizeMessageReply(ctx, mc, text, reply, err)
+}
+
+func (s *Service) finalizeMessageReply(ctx context.Context, mc MessageContext, input, reply string, err error) (string, error) {
+	if err != nil {
+		return reply, err
+	}
+	s.persistConversationTurnIfNeeded(ctx, mc, input, reply)
+	return reply, nil
+}
+
+func (s *Service) persistConversationTurnIfNeeded(ctx context.Context, mc MessageContext, input, reply string) {
+	if strings.TrimSpace(reply) == "" {
+		return
+	}
+	policy := InspectInputPolicy(input)
+	if policy.IsKnownCommand && !policy.PersistHistory {
+		return
+	}
+	s.maybeAppendConversationHistory(ctx, mc, input, reply)
 }
 
 func (s *Service) tryHandleNaturalAppend(ctx context.Context, mc MessageContext, input string) (string, bool, error) {
