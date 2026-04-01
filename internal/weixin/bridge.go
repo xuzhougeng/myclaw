@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"myclaw/internal/ai"
 	"myclaw/internal/app"
 	"myclaw/internal/filesearch"
 	"myclaw/internal/reminder"
@@ -70,6 +71,16 @@ func (b *Bridge) reportEvent(scope string, fields map[string]string) {
 	if b.eventReporter != nil {
 		b.eventReporter(strings.TrimSpace(scope), fields)
 	}
+}
+
+func (b *Bridge) withProcessTraceObserver(ctx context.Context) context.Context {
+	ctx = ai.WithCallTraceCollector(ctx)
+	return ai.WithCallTraceObserver(ctx, func(step ai.CallTraceStep) {
+		b.reportEvent("processTrace", map[string]string{
+			"detail": truncate(strings.TrimSpace(step.Detail), 240),
+			"title":  strings.TrimSpace(step.Title),
+		})
+	})
 }
 
 func (b *Bridge) reportRecoveredPanic(scope string, recovered any) {
@@ -269,6 +280,7 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 			if sendErr := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, "开启新对话失败，请稍后重试。"); sendErr != nil {
 				log.Printf("[weixin] send /new failure reply failed: %v", sendErr)
 			}
+			b.registerReminderNotifier(msg)
 			return
 		}
 		reply := "已进入新对话。"
@@ -279,6 +291,7 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 		if err := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); err != nil {
 			log.Printf("[weixin] send /new reply failed: %v", err)
 		}
+		b.registerReminderNotifier(msg)
 		return
 	}
 
@@ -286,6 +299,7 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 		if err := b.handleStatelessCommand(ctx, msg, app.CanonicalizeCommandInput(text)); err != nil {
 			log.Printf("[weixin] handle stateless command failed: %v", err)
 		}
+		b.registerReminderNotifier(msg)
 		return
 	}
 
@@ -294,7 +308,7 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 		log.Printf("[weixin] resolve stateless message context failed: %v", err)
 		return
 	}
-	serviceCtx := app.WithConversationPersistenceDisabled(ctx)
+	serviceCtx := b.withProcessTraceObserver(app.WithConversationPersistenceDisabled(ctx))
 	if reply, handled, err := b.handleFileSearch(serviceCtx, msg, statelessMessageContext, text); handled {
 		if err != nil {
 			log.Printf("[weixin] handle /find failed: %v", err)
@@ -305,6 +319,7 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 				log.Printf("[weixin] send /find reply failed: %v", sendErr)
 			}
 		}
+		b.registerReminderNotifier(msg)
 		return
 	}
 
@@ -314,44 +329,28 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 		return
 	}
 
-	if b.reminders != nil {
-		userID := msg.FromUserID
-		contextToken := msg.ContextToken
-		b.reminders.RegisterNotifier(reminder.Target{Interface: "weixin", UserID: userID}, reminder.NotifierFunc(func(ctx context.Context, item reminder.Reminder) (err error) {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					b.reportRecoveredPanic(fmt.Sprintf("reminder notify id=%s from=%s", strings.TrimSpace(item.ID), strings.TrimSpace(userID)), recovered)
-					err = fmt.Errorf("weixin reminder notifier panic: %v", recovered)
-				}
-			}()
-
-			b.reportEvent("reminder.notify.before", map[string]string{
-				"contextToken": strings.TrimSpace(contextToken),
-				"id":           strings.TrimSpace(item.ID),
-				"message":      truncate(item.Message, 120),
-				"user":         strings.TrimSpace(userID),
-			})
-			text := fmt.Sprintf("提醒时间到了：%s", item.Message)
-			err = b.sendChunkedReply(ctx, userID, contextToken, text)
-			b.reportEvent("reminder.notify.after", map[string]string{
-				"error": strings.TrimSpace(fmt.Sprint(err)),
-				"id":    strings.TrimSpace(item.ID),
-				"user":  strings.TrimSpace(userID),
-			})
-			return err
-		}))
-	}
-
 	if b.service == nil {
 		reply := prefixConversationNotice(conversationNotice, "处理失败，服务尚未初始化。")
 		b.notifyConversationUpdated(ConversationUpdate{SessionID: messageContext.SessionID, Activate: activateConversation})
 		if err := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); err != nil {
 			log.Printf("[weixin] send service unavailable reply failed: %v", err)
 		}
+		b.registerReminderNotifier(msg)
 		return
 	}
 
+	b.reportEvent("handleMessage.beforeService", map[string]string{
+		"contextToken": strings.TrimSpace(msg.ContextToken),
+		"fromUser":     strings.TrimSpace(msg.FromUserID),
+		"sessionId":    strings.TrimSpace(messageContext.SessionID),
+	})
 	reply, err := b.service.HandleMessage(serviceCtx, messageContext, text)
+	b.reportEvent("handleMessage.afterService", map[string]string{
+		"contextToken": strings.TrimSpace(msg.ContextToken),
+		"error":        strings.TrimSpace(fmt.Sprint(err)),
+		"fromUser":     strings.TrimSpace(msg.FromUserID),
+		"sessionId":    strings.TrimSpace(messageContext.SessionID),
+	})
 	if err != nil {
 		log.Printf("[weixin] handle message failed: %v", err)
 		reply = "处理失败，请稍后重试。"
@@ -371,6 +370,47 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 	if err := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, reply); err != nil {
 		log.Printf("[weixin] send reply failed: %v", err)
 	}
+	b.registerReminderNotifier(msg)
+}
+
+func (b *Bridge) registerReminderNotifier(msg WeixinMessage) {
+	if b.reminders == nil {
+		return
+	}
+
+	userID := strings.TrimSpace(msg.FromUserID)
+	contextToken := strings.TrimSpace(msg.ContextToken)
+	if userID == "" || contextToken == "" {
+		return
+	}
+
+	b.reportEvent("reminder.notifier.register", map[string]string{
+		"contextToken": contextToken,
+		"user":         userID,
+	})
+	b.reminders.RegisterNotifier(reminder.Target{Interface: "weixin", UserID: userID}, reminder.NotifierFunc(func(ctx context.Context, item reminder.Reminder) (err error) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				b.reportRecoveredPanic(fmt.Sprintf("reminder notify id=%s from=%s", strings.TrimSpace(item.ID), userID), recovered)
+				err = fmt.Errorf("weixin reminder notifier panic: %v", recovered)
+			}
+		}()
+
+		b.reportEvent("reminder.notify.before", map[string]string{
+			"contextToken": contextToken,
+			"id":           strings.TrimSpace(item.ID),
+			"message":      truncate(item.Message, 120),
+			"user":         userID,
+		})
+		text := fmt.Sprintf("提醒时间到了：%s", item.Message)
+		err = b.sendChunkedReply(ctx, userID, contextToken, text)
+		b.reportEvent("reminder.notify.after", map[string]string{
+			"error": strings.TrimSpace(fmt.Sprint(err)),
+			"id":    strings.TrimSpace(item.ID),
+			"user":  userID,
+		})
+		return err
+	}))
 }
 
 func prefixConversationNotice(notice, reply string) string {
@@ -433,7 +473,7 @@ func (b *Bridge) handleStatelessCommand(ctx context.Context, msg WeixinMessage, 
 		if err != nil {
 			return err
 		}
-		serviceCtx := app.WithConversationPersistenceDisabled(ctx)
+		serviceCtx := b.withProcessTraceObserver(app.WithConversationPersistenceDisabled(ctx))
 
 		nextReply, err := b.service.HandleMessage(serviceCtx, messageContext, command)
 		if err != nil {

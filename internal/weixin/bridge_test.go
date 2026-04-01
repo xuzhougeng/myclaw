@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -414,6 +415,51 @@ func TestHandleMessageReusesConversationAcrossContextTokens(t *testing.T) {
 	}
 	if sessionID := strings.TrimSpace(bridge.conversationSessions["user:user-1"]); sessionID != "weixin-user:user-1" {
 		t.Fatalf("unexpected bound session id: %#v", bridge.conversationSessions)
+	}
+}
+
+func TestHandleMessageReportsProcessTraceEvents(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "app.db"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "app.db")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "app.db"))
+	service := appsvc.NewServiceWithRuntime(store, bridgeTestAI{
+		route: aicore.RouteDecision{Command: "help"},
+	}, reminders, nil, sessionStore, nil)
+
+	var sent SendMessageRequest
+	var scopes []string
+	var titles []string
+	bridge := NewBridge(newTestClient(t, &sent), service, reminders, BridgeConfig{
+		DataDir: root,
+		EventReporter: func(scope string, fields map[string]string) {
+			scopes = append(scopes, scope)
+			if strings.TrimSpace(scope) == "processTrace" {
+				titles = append(titles, strings.TrimSpace(fields["title"]))
+			}
+		},
+	})
+
+	msg := WeixinMessage{
+		FromUserID:   "user-1",
+		ContextToken: "ctx-1",
+		MessageType:  MessageTypeUser,
+		MessageState: MessageStateFinish,
+		ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "怎么用"}}},
+	}
+
+	bridge.handleMessage(context.Background(), msg)
+
+	if !strings.Contains(extractText(sent.Msg), "可用命令:") {
+		t.Fatalf("unexpected help reply: %#v", sent.Msg)
+	}
+	if !slices.Contains(scopes, "processTrace") {
+		t.Fatalf("expected processTrace event, got %#v", scopes)
+	}
+	if !slices.Contains(titles, "AI 路由") {
+		t.Fatalf("expected AI route process trace, got %#v", titles)
 	}
 }
 
