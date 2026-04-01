@@ -1,7 +1,6 @@
 async function waitForBackend() {
   for (let index = 0; index < 80; index += 1) {
-    const backend = window.go && window.go.main && window.go.main.DesktopApp;
-    if (backend) return createWailsBackend(backend);
+    if (hasWailsRuntime()) return createWailsBackend();
     await delay(50);
   }
   if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
@@ -10,37 +9,94 @@ async function waitForBackend() {
   throw new Error('Wails 后端尚未就绪。');
 }
 
-function createWailsBackend(backend) {
+function hasWailsRuntime() {
+  return typeof window.WailsInvoke === 'function'
+    && Boolean(window.wails)
+    && Boolean(window.wails.callbacks)
+    && typeof window.wails.Callback === 'function';
+}
+
+function newWailsCallbackID(methodName) {
+  const prefix = String(methodName || 'wails').replaceAll('.', '_');
+  if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+    const parts = new Uint32Array(2);
+    window.crypto.getRandomValues(parts);
+    return `${prefix}-${parts[0]}-${parts[1]}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function invokeWailsMethod(methodName, args = [], timeout = 0) {
+  return new Promise((resolve, reject) => {
+    if (!hasWailsRuntime()) {
+      reject(new Error('Wails runtime 尚未就绪。'));
+      return;
+    }
+
+    const callbackID = newWailsCallbackID(methodName);
+    const payload = {
+      name: methodName,
+      args: Array.isArray(args) ? args : [args],
+      callbackID,
+    };
+
+    let timeoutHandle = 0;
+    if (timeout > 0) {
+      timeoutHandle = window.setTimeout(() => {
+        delete window.wails.callbacks[callbackID];
+        reject(new Error(`调用 ${methodName} 超时。`));
+      }, timeout);
+    }
+
+    window.wails.callbacks[callbackID] = {
+      timeoutHandle,
+      reject,
+      resolve,
+    };
+
+    try {
+      window.WailsInvoke(`C${JSON.stringify(payload)}`);
+    } catch (error) {
+      window.clearTimeout(timeoutHandle);
+      delete window.wails.callbacks[callbackID];
+      reject(error);
+    }
+  });
+}
+
+function createWailsBackend() {
+  const call = (methodName, ...args) => invokeWailsMethod(`main.DesktopApp.${methodName}`, args);
+
   return {
     mode: 'wails',
-    GetOverview: () => backend.GetOverview(),
-    GetProjectState: () => backend.GetProjectState(),
-    SetActiveProject: (name) => backend.SetActiveProject(name),
-    ListReminders: () => backend.ListReminders(),
-    ListKnowledge: () => backend.ListKnowledge(),
-    CreateKnowledge: (text) => backend.CreateKnowledge(text),
-    AppendKnowledge: (idOrPrefix, addition) => backend.AppendKnowledge(idOrPrefix, addition),
-    DeleteKnowledge: (idOrPrefix) => backend.DeleteKnowledge(idOrPrefix),
-    ClearKnowledge: () => backend.ClearKnowledge(),
-    ListPrompts: () => backend.ListPrompts(),
-    CreatePrompt: (title, content) => backend.CreatePrompt(title, content),
-    DeletePrompt: (idOrPrefix) => backend.DeletePrompt(idOrPrefix),
-    ClearPrompts: () => backend.ClearPrompts(),
-    ListSkills: () => backend.ListSkills(),
-    ListTools: () => backend.ListTools(),
-    LoadSkill: (name) => backend.LoadSkill(name),
-    UnloadSkill: (name) => backend.UnloadSkill(name),
-    OpenSkillImportDialog: () => backend.OpenSkillImportDialog(),
-    ImportSkillArchive: (path) => backend.ImportSkillArchive(path),
+    GetOverview: () => call('GetOverview'),
+    GetProjectState: () => call('GetProjectState'),
+    SetActiveProject: (name) => call('SetActiveProject', name),
+    ListReminders: () => call('ListReminders'),
+    ListKnowledge: () => call('ListKnowledge'),
+    CreateKnowledge: (text) => call('CreateKnowledge', text),
+    AppendKnowledge: (idOrPrefix, addition) => call('AppendKnowledge', idOrPrefix, addition),
+    DeleteKnowledge: (idOrPrefix) => call('DeleteKnowledge', idOrPrefix),
+    ClearKnowledge: () => call('ClearKnowledge'),
+    ListPrompts: () => call('ListPrompts'),
+    CreatePrompt: (title, content) => call('CreatePrompt', title, content),
+    DeletePrompt: (idOrPrefix) => call('DeletePrompt', idOrPrefix),
+    ClearPrompts: () => call('ClearPrompts'),
+    ListSkills: () => call('ListSkills'),
+    ListTools: () => call('ListTools'),
+    LoadSkill: (name) => call('LoadSkill', name),
+    UnloadSkill: (name) => call('UnloadSkill', name),
+    OpenSkillImportDialog: () => call('OpenSkillImportDialog'),
+    ImportSkillArchive: (path) => call('ImportSkillArchive', path),
     UploadSkillArchive: () => Promise.reject(new Error('Wails 模式不使用浏览器上传。')),
-    ConfirmAction: (title, message) => backend.ConfirmAction(title, message),
-    OpenImportDialog: () => backend.OpenImportDialog(),
-    ImportFile: (path) => backend.ImportFile(path),
+    ConfirmAction: (title, message) => call('ConfirmAction', title, message),
+    OpenImportDialog: () => call('OpenImportDialog'),
+    ImportFile: (path) => call('ImportFile', path),
     UploadImportFile: () => Promise.reject(new Error('Wails 模式不使用浏览器上传。')),
-    SendMessage: (input) => backend.SendMessage(input),
+    SendMessage: (input) => call('SendMessage', input),
     SendMessageStream: async (input, handlers = {}) => {
-      if (typeof backend.SendMessageStream !== 'function' || !window.runtime || typeof window.runtime.EventsOn !== 'function') {
-        const result = await backend.SendMessage(input);
+      if (!window.runtime || typeof window.runtime.EventsOn !== 'function') {
+        const result = await call('SendMessage', input);
         if (typeof handlers.onDelta === 'function' && result?.reply) {
           handlers.onDelta(result.reply);
         }
@@ -54,34 +110,34 @@ function createWailsBackend(backend) {
         }
       };
       try {
-        return await backend.SendMessageStream(requestId, input);
+        return await call('SendMessageStream', requestId, input);
       } finally {
         delete state.chatStreamHandlers[requestId];
       }
     },
-    GetChatState: () => backend.GetChatState(),
-    GetVersionInfo: () => backend.GetVersionInfo(),
-    OpenExternalURL: (url) => backend.OpenExternalURL(url),
-    RefreshChatResponse: () => backend.RefreshChatResponse(),
-    ExportChatMarkdown: () => backend.ExportChatMarkdown(),
-    NewChatSession: (mode = 'agent') => backend.NewChatSession(mode),
-    SwitchChatSession: (sessionId) => backend.SwitchChatSession(sessionId),
-    RenameChatSession: (sessionId, title) => backend.RenameChatSession(sessionId, title),
-    DeleteChatSession: (sessionId) => backend.DeleteChatSession(sessionId),
-    GetChatPrompt: () => backend.GetChatPrompt(),
-    SetChatPrompt: (idOrPrefix) => backend.SetChatPrompt(idOrPrefix),
-    ClearChatPrompt: () => backend.ClearChatPrompt(),
-    GetModelSettings: () => backend.GetModelSettings(),
-    SaveModelConfig: (payload) => backend.SaveModelConfig(payload),
-    TestModelConnection: (id) => backend.TestModelConnection(id),
-    DeleteModelConfig: (id) => backend.DeleteModelConfig(id),
-    SetActiveModel: (id) => backend.SetActiveModel(id),
-    GetWeixinStatus: () => backend.GetWeixinStatus(),
-    StartWeixinLogin: () => backend.StartWeixinLogin(),
-    CancelWeixinLogin: () => backend.CancelWeixinLogin(),
-    LogoutWeixin: () => backend.LogoutWeixin(),
-    GetSettings: () => backend.GetSettings(),
-    SaveSettings: (payload) => backend.SaveSettings(payload),
+    GetChatState: () => call('GetChatState'),
+    GetVersionInfo: () => call('GetVersionInfo'),
+    OpenExternalURL: (url) => call('OpenExternalURL', url),
+    RefreshChatResponse: () => call('RefreshChatResponse'),
+    ExportChatMarkdown: () => call('ExportChatMarkdown'),
+    NewChatSession: (mode = 'agent') => call('NewChatSession', mode),
+    SwitchChatSession: (sessionId) => call('SwitchChatSession', sessionId),
+    RenameChatSession: (sessionId, title) => call('RenameChatSession', sessionId, title),
+    DeleteChatSession: (sessionId) => call('DeleteChatSession', sessionId),
+    GetChatPrompt: () => call('GetChatPrompt'),
+    SetChatPrompt: (idOrPrefix) => call('SetChatPrompt', idOrPrefix),
+    ClearChatPrompt: () => call('ClearChatPrompt'),
+    GetModelSettings: () => call('GetModelSettings'),
+    SaveModelConfig: (payload) => call('SaveModelConfig', payload),
+    TestModelConnection: (id) => call('TestModelConnection', id),
+    DeleteModelConfig: (id) => call('DeleteModelConfig', id),
+    SetActiveModel: (id) => call('SetActiveModel', id),
+    GetWeixinStatus: () => call('GetWeixinStatus'),
+    StartWeixinLogin: () => call('StartWeixinLogin'),
+    CancelWeixinLogin: () => call('CancelWeixinLogin'),
+    LogoutWeixin: () => call('LogoutWeixin'),
+    GetSettings: () => call('GetSettings'),
+    SaveSettings: (payload) => call('SaveSettings', payload),
   };
 }
 
