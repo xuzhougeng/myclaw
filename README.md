@@ -84,6 +84,7 @@ flowchart TD
 ```text
 cmd/myclaw            CLI / terminal 入口
 cmd/myclaw-desktop    Wails 桌面端与 HTTP dev 入口
+cmd/myclaw-eval       模型评估 CLI，运行 eval/testdata/*.jsonl 数据集
 internal/app          统一对话运行时、会话逻辑、命令分发
 internal/ai           AI 命令路由、通用工具决策、回答与摘要
 internal/filesearch   独立文件检索工具单元
@@ -95,6 +96,14 @@ internal/taskcontext  单次任务 scratchpad 与任务摘要状态
 internal/terminal     终端接口适配
 internal/toolcontract 统一工具契约定义
 internal/weixin       微信接口适配、消息桥接与文件发送能力
+internal/dirlist      list_directory 工具单元，原生文件系统目录列举
+internal/systemcmd    readonly_system_command 工具单元，允许列表只读系统命令
+internal/sessionstate 会话快照持久化（历史消息、模式、已加载技能）
+internal/skilllib     技能加载与管理
+internal/fileingest   图片与 PDF 摄入（视觉总结 / go-fitz 全文提取）
+internal/promptlib    提示词模板管理与存储
+internal/projectstate 项目运行时状态跟踪
+internal/sqliteutil   SQLite 公共工具函数
 ```
 
 ## 运行
@@ -130,6 +139,7 @@ go run ./cmd/myclaw-desktop
 - 微信页面，支持在桌面端直接显示二维码扫码登录
 - 新建对话时可直接选择 `ask` 或 `agent`
 - 对话面板，可继续使用 `/kb remember`、`/notice`、`/kb forget`、`/debug-search` 等命令
+- 工具能力页面，可查看当前已注册的工具单元契约
 
 桌面版默认数据目录会放到用户配置目录：
 
@@ -178,6 +188,22 @@ make dev HTTP_DEV_ADDR=127.0.0.1:8080
 - 文件导入会走浏览器上传接口，而不是 Wails 原生文件对话框
 - 原生提醒弹窗和 Wails 事件只在桌面窗口模式下可用
 
+### 0.7. 模型评估模式
+
+运行 JSONL 数据集对 AI 各阶段进行评估：
+
+```bash
+go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl
+go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl -output eval/testdata/runs/result.json
+```
+
+参数说明：
+- `-data-dir`：数据目录（默认 `data`）
+- `-dataset`：数据集文件路径（必填）
+- `-output`：评估结果输出路径（默认自动生成到 `eval/testdata/runs/`）
+
+评估数据集格式和评测规范详见 [docs/ai-stage-eval.md](./docs/ai-stage-eval.md)。
+
 ### 1. 微信扫码登录
 
 ```bash
@@ -219,6 +245,10 @@ MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
 - `/skill load writer`
 - `/skill unload writer`
 - `/skill clear`
+- `/prompt`
+- `/prompt list`
+- `/prompt use <提示词ID前缀>`
+- `/prompt clear`
 - `@kb macOS 什么时候做？`
 - `@ai 帮我直接分析这个方案`
 - `/translate Puppeteer is a browser automation tool.`
