@@ -70,6 +70,45 @@ func TestDesktopChatSessionsCanBeCreatedAndSwitched(t *testing.T) {
 	}
 }
 
+func TestDesktopChatStateIncludesConversationMode(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "app.db"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "app.db"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "app.db"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "app.db")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "app.db"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	initial, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("get initial chat state: %v", err)
+	}
+	if len(initial.Conversations) == 0 {
+		t.Fatalf("expected initial conversation, got %#v", initial)
+	}
+	if initial.Conversations[0].Mode != "agent" {
+		t.Fatalf("expected default desktop mode=agent, got %#v", initial.Conversations[0])
+	}
+
+	askState, err := app.NewChatSession("ask")
+	if err != nil {
+		t.Fatalf("new ask session: %v", err)
+	}
+	active := askState.Conversations[0]
+	for _, conversation := range askState.Conversations {
+		if conversation.Active {
+			active = conversation
+			break
+		}
+	}
+	if active.Mode != "ask" {
+		t.Fatalf("expected active ask conversation mode, got %#v", active)
+	}
+}
+
 func TestDesktopSendMessageNewConversationReturnsSessionChanged(t *testing.T) {
 	t.Parallel()
 

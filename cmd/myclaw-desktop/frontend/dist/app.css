@@ -2295,6 +2295,19 @@ select {
   font-weight: 600;
 }
 
+.chat-context-mode {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(36, 45, 60, 0.08);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 .chat-context-chip button {
   border: 0;
   background: transparent;

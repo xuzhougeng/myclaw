@@ -25,6 +25,7 @@ type ChatConversation struct {
 	Preview       string `json:"preview"`
 	Source        string `json:"source"`
 	SourceLabel   string `json:"sourceLabel"`
+	Mode          string `json:"mode"`
 	ReadOnly      bool   `json:"readOnly"`
 	UpdatedAt     string `json:"updatedAt"`
 	UpdatedAtUnix int64  `json:"updatedAtUnix"`
@@ -242,6 +243,7 @@ func (a *DesktopApp) buildChatState(ctx context.Context, project string) (ChatSt
 					Preview:      "还没有消息",
 					Source:       desktopInterface,
 					SourceLabel:  "桌面",
+					Mode:         string(appsvc.ModeAgent),
 					MessageCount: 0,
 					HasMessages:  false,
 					Active:       true,
@@ -590,6 +592,7 @@ func toChatConversation(item chatSessionSnapshot, active bool) ChatConversation 
 		Preview:       chatConversationPreview(item.Snapshot.History),
 		Source:        strings.TrimSpace(item.Source),
 		SourceLabel:   strings.TrimSpace(item.SourceLabel),
+		Mode:          conversationModeLabel(item),
 		ReadOnly:      item.ReadOnly,
 		UpdatedAt:     updatedAt,
 		UpdatedAtUnix: item.Snapshot.UpdatedAt.Unix(),
@@ -616,6 +619,13 @@ func toChatMessages(snapshot sessionstate.Snapshot) []ChatMessage {
 		})
 	}
 	return messages
+}
+
+func conversationModeLabel(item chatSessionSnapshot) string {
+	if !isDesktopConversationSource(item.Source) {
+		return ""
+	}
+	return normalizeNewChatMode(item.Snapshot.Mode)
 }
 
 func trimmedChatSnapshotForRefresh(snapshot sessionstate.Snapshot) (sessionstate.Snapshot, string, error) {

@@ -507,6 +507,7 @@ function applyChatState(nextState) {
     ? mergeTransientChatMessages(incomingMessages)
     : incomingMessages;
   renderChatSessions();
+  renderChatContext();
   renderChat();
 }
 

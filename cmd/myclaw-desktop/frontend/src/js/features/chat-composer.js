@@ -322,10 +322,16 @@ function renderChatContext() {
   const chips = [];
   const conversation = currentChatConversation();
   if (conversation?.sourceLabel) {
+    const modeLabel = conversation.mode === 'ask'
+      ? 'Ask Mode'
+      : conversation.mode === 'agent'
+        ? 'Agent Mode'
+        : '';
     chips.push(`
       <span class="chat-context-chip ${conversation.readOnly ? 'skill' : 'prompt'}">
         <span>来源</span>
         <strong>${escapeHTML(conversation.sourceLabel)}</strong>
+        ${modeLabel ? `<span class="chat-context-mode">${escapeHTML(modeLabel)}</span>` : ''}
         ${conversation.readOnly ? '<span>只读</span>' : ''}
       </span>
     `);

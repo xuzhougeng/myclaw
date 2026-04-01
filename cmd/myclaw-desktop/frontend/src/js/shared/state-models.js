@@ -193,6 +193,7 @@ function normalizeChatState(payload) {
       preview: item?.preview || '',
       source: item?.source || '',
       sourceLabel: item?.sourceLabel || '',
+      mode: item?.mode === 'ask' ? 'ask' : item?.mode === 'agent' ? 'agent' : '',
       readOnly: Boolean(item?.readOnly),
       updatedAt: item?.updatedAt || '',
       updatedAtUnix: Number(item?.updatedAtUnix || 0),
