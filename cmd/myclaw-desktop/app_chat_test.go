@@ -680,6 +680,102 @@ func TestDesktopRefreshChatResponseRestoresPreviousReplyOnFailure(t *testing.T) 
 	}
 }
 
+func TestDesktopChatStateSurvivesNewSessionSwitchAndRestart(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "knowledge.json"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "project.json"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "prompts.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	service := appsvc.NewServiceWithRuntime(store, desktopTestAI{
+		route: ai.RouteDecision{Command: "answer"},
+		chatFunc: func(_ context.Context, input string, history []ai.ConversationMessage) string {
+			return "reply:" + input
+		},
+	}, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	firstReply, err := app.SendMessage("first")
+	if err != nil {
+		t.Fatalf("send first message: %v", err)
+	}
+	firstSessionID := firstReply.SessionID
+	if firstSessionID == "" {
+		t.Fatalf("expected first session id, got %#v", firstReply)
+	}
+
+	modeState, err := app.SetChatMode("knowledge")
+	if err != nil {
+		t.Fatalf("set first session mode: %v", err)
+	}
+	if modeState.Mode != "knowledge" {
+		t.Fatalf("expected knowledge mode, got %#v", modeState)
+	}
+
+	secondState, err := app.NewChatSession()
+	if err != nil {
+		t.Fatalf("new second session: %v", err)
+	}
+	secondSessionID := secondState.SessionID
+	if secondSessionID == "" || secondSessionID == firstSessionID {
+		t.Fatalf("expected distinct second session id, got first=%q second=%#v", firstSessionID, secondState)
+	}
+
+	secondReply, err := app.SendMessage("second")
+	if err != nil {
+		t.Fatalf("send second message: %v", err)
+	}
+	if secondReply.SessionID != secondSessionID {
+		t.Fatalf("expected second reply to stay in session %q, got %#v", secondSessionID, secondReply)
+	}
+
+	firstState, err := app.SwitchChatSession(firstSessionID)
+	if err != nil {
+		t.Fatalf("switch back to first session: %v", err)
+	}
+	if firstState.SessionID != firstSessionID {
+		t.Fatalf("expected first session to be active, got %#v", firstState)
+	}
+	if len(firstState.Messages) != 2 || firstState.Messages[0].Text != "first" || firstState.Messages[1].Text != "reply:first" {
+		t.Fatalf("expected first session history before restart, got %#v", firstState.Messages)
+	}
+
+	reloadedService := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, promptStore)
+	reloadedApp := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, reloadedService, sessionStore, reminders, nil)
+
+	reloadedState, err := reloadedApp.GetChatState()
+	if err != nil {
+		t.Fatalf("reload chat state: %v", err)
+	}
+	if reloadedState.SessionID != firstSessionID {
+		t.Fatalf("expected restart to restore first session %q, got %#v", firstSessionID, reloadedState)
+	}
+	if len(reloadedState.Messages) != 2 || reloadedState.Messages[0].Text != "first" || reloadedState.Messages[1].Text != "reply:first" {
+		t.Fatalf("expected first session history after restart, got %#v", reloadedState.Messages)
+	}
+
+	reloadedMode, err := reloadedApp.GetChatMode()
+	if err != nil {
+		t.Fatalf("get reloaded mode: %v", err)
+	}
+	if reloadedMode.Mode != "knowledge" {
+		t.Fatalf("expected first session mode to survive restart, got %#v", reloadedMode)
+	}
+
+	secondReloadedState, err := reloadedApp.SwitchChatSession(secondSessionID)
+	if err != nil {
+		t.Fatalf("switch to second session after restart: %v", err)
+	}
+	if secondReloadedState.SessionID != secondSessionID {
+		t.Fatalf("expected second session after restart, got %#v", secondReloadedState)
+	}
+	if len(secondReloadedState.Messages) != 2 || secondReloadedState.Messages[0].Text != "second" || secondReloadedState.Messages[1].Text != "reply:second" {
+		t.Fatalf("expected second session history after restart, got %#v", secondReloadedState.Messages)
+	}
+}
+
 func TestBuildCurrentChatMarkdownExportFormatsConversation(t *testing.T) {
 	t.Parallel()
 

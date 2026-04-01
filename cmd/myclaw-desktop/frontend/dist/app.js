@@ -1949,6 +1949,8 @@ async function sendMessage(rawText = null, displayText = null) {
     showBanner(asMessage(error), true);
   } finally {
     state.chatStreaming = false;
+    renderChatContentActions();
+    renderChatComposerState();
   }
 }
 
@@ -2083,6 +2085,7 @@ async function refreshCurrentChatResponse() {
   } finally {
     state.chatStreaming = false;
     renderChatContentActions();
+    renderChatComposerState();
   }
 }
 

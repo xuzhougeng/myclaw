@@ -1303,6 +1303,60 @@ func TestModePersistsAcrossServiceRestarts(t *testing.T) {
 	}
 }
 
+func TestSetModePreservesConversationHistory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "entries.json"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "reminders.json")))
+	stateStore := sessionstate.NewStore(filepath.Join(root, "sessions.json"))
+	mc := MessageContext{Interface: "desktop", UserID: "u1", SessionID: "s1", Project: "alpha"}
+
+	service := NewServiceWithSkillsAndSessions(store, fakeAI{
+		configured: true,
+		route: ai.RouteDecision{
+			Command:  "answer",
+			Question: "第一轮",
+		},
+		chatFunc: func(_ context.Context, input string, history []ai.ConversationMessage) string {
+			if input != "第一轮" {
+				t.Fatalf("unexpected chat input: %q", input)
+			}
+			if len(history) != 0 {
+				t.Fatalf("expected empty first history, got %#v", history)
+			}
+			return "第一轮回复"
+		},
+	}, reminders, nil, stateStore)
+
+	if _, err := service.HandleMessage(context.Background(), mc, "第一轮"); err != nil {
+		t.Fatalf("handle first message: %v", err)
+	}
+	if _, err := service.SetMode(context.Background(), mc, ModeKnowledge); err != nil {
+		t.Fatalf("set mode: %v", err)
+	}
+
+	snapshot, ok, err := stateStore.Load(context.Background(), conversationSessionKey(mc))
+	if err != nil {
+		t.Fatalf("load session snapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected persisted session snapshot")
+	}
+	if snapshot.Mode != string(ModeKnowledge) {
+		t.Fatalf("expected persisted mode %q, got %#v", ModeKnowledge, snapshot)
+	}
+	if len(snapshot.History) != 2 {
+		t.Fatalf("expected history to be preserved, got %#v", snapshot.History)
+	}
+	if snapshot.History[0].Role != "user" || snapshot.History[0].Content != "第一轮" {
+		t.Fatalf("unexpected preserved user message: %#v", snapshot.History[0])
+	}
+	if snapshot.History[1].Role != "assistant" || snapshot.History[1].Content != "第一轮回复" {
+		t.Fatalf("unexpected preserved assistant message: %#v", snapshot.History[1])
+	}
+}
+
 func TestLoadedSkillsPersistAcrossServiceRestarts(t *testing.T) {
 	t.Parallel()
 

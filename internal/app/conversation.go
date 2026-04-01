@@ -8,7 +8,6 @@ import (
 
 	"myclaw/internal/ai"
 	"myclaw/internal/knowledge"
-	"myclaw/internal/sessionstate"
 )
 
 func (s *Service) conversationMode(ctx context.Context, mc MessageContext) (Mode, error) {
@@ -51,10 +50,12 @@ func (s *Service) setConversationMode(ctx context.Context, mc MessageContext, mo
 	s.rememberConversationMode(key, mode)
 
 	if s.sessionStore != nil {
-		if _, err := s.sessionStore.Save(ctx, sessionstate.Snapshot{
-			Key:  key,
-			Mode: string(mode),
-		}); err != nil {
+		snapshot, err := s.sessionSnapshotByKey(ctx, key)
+		if err != nil {
+			return "", err
+		}
+		snapshot.Mode = string(mode)
+		if err := s.saveSessionSnapshot(ctx, snapshot); err != nil {
 			return "", err
 		}
 	}
