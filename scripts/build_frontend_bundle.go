@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 )
 
 type bundleSpec struct {
 	output  string
 	sources []string
+	header  []byte
 }
 
 func main() {
@@ -44,6 +46,7 @@ func main() {
 		},
 		{
 			output: "app.js",
+			header: buildJSBundleHeader(),
 			sources: []string{
 				filepath.Join("js", "core", "navigation.js"),
 				filepath.Join("js", "shared", "state-models.js"),
@@ -62,7 +65,7 @@ func main() {
 	}
 
 	for _, bundle := range bundles {
-		content, err := concatBundle(srcDir, bundle.sources)
+		content, err := concatBundle(srcDir, bundle.header, bundle.sources)
 		if err != nil {
 			exitf("build %s: %v", bundle.output, err)
 		}
@@ -82,8 +85,26 @@ func repoRoot() (string, error) {
 	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..")), nil
 }
 
-func concatBundle(baseDir string, sources []string) ([]byte, error) {
+func buildJSBundleHeader() []byte {
+	debugEnabled := os.Getenv("MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS") == "1"
+	buildMode := "release"
+	if debugEnabled {
+		buildMode = "debug"
+	}
+	return []byte(fmt.Sprintf(
+		"window.__MYCLAW_DESKTOP_BUILD_MODE__ = %q;\nwindow.__MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS__ = %s;\n",
+		buildMode,
+		strconv.FormatBool(debugEnabled),
+	))
+}
+
+func concatBundle(baseDir string, header []byte, sources []string) ([]byte, error) {
 	var out bytes.Buffer
+	trimmedHeader := bytes.TrimRight(normalizeLF(header), "\n")
+	if len(trimmedHeader) > 0 {
+		out.Write(trimmedHeader)
+		out.WriteString("\n\n")
+	}
 	for index, source := range sources {
 		sourcePath := filepath.Join(baseDir, source)
 		content, err := os.ReadFile(sourcePath)

@@ -4,7 +4,8 @@ param(
     [string]$OutputDir = "dist",
     [string]$AppName = "myclaw",
     [string]$Version = "",
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$DebugMode
 )
 
 Set-StrictMode -Version Latest
@@ -90,12 +91,17 @@ function Get-DesktopBuildEnvironment {
 }
 
 function Invoke-FrontendBundleBuild {
+    param(
+        [switch]$DebugMode
+    )
+
     $goCommand = Get-Command go -ErrorAction SilentlyContinue
     if ($null -eq $goCommand) {
         throw "go was not found in PATH. It is required to build desktop frontend bundles."
     }
 
     $environment = Get-GoFallbackEnvironment -GoCommand $goCommand.Source
+    $environment["MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS"] = if ($DebugMode) { "1" } else { "0" }
 
     Push-Location $repoRoot
     try {
@@ -158,7 +164,11 @@ else {
     @{}
 }
 $wailsInvocation = Get-WailsInvocation
-Invoke-FrontendBundleBuild
+Invoke-FrontendBundleBuild -DebugMode:$DebugMode
+
+if ($DebugMode) {
+    Write-Host "Desktop build debug mode enabled: frontend self-diagnostics will be bundled into this artifact."
+}
 
 $portableBaseName = if ([string]::IsNullOrWhiteSpace($Version)) {
     "{0}-desktop-windows-{1}" -f $AppName, $Arch

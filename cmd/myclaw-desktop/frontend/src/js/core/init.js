@@ -3,6 +3,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 async function init() {
+  installDesktopDebugDiagnostics();
   initTheme();
   bindStaticEvents();
   bindNavigation();

@@ -434,6 +434,15 @@ workflow 上传的 artifact 现在只包含 NSIS 安装器：
 .\scripts\package-desktop-windows.ps1 -Version 0.1.0
 ```
 
+如果你要做桌面端问题排查，可以显式打开自诊断版构建：
+
+```powershell
+.\scripts\build-desktop-windows-portable.ps1 -Arch amd64 -DebugMode
+.\scripts\package-desktop-windows.ps1 -Version 0.1.0 -DebugMode
+```
+
+`-DebugMode` 会把前端桌面运行时自诊断一起打进产物，在页面右下角显示 `Desktop Diagnostics` 面板，并记录 `window.WailsInvoke`、`window.chrome.webview.postMessage`、`window.external.invoke` 等桥接状态。GitHub Actions 里手动触发 `windows-nsis-installer` 时也会自动启用这个模式；tag push 的自动发布构建保持普通模式。
+
 这两个脚本会优先使用 `PATH` 里的 `wails`；如果没找到，会自动回退到仓库 `go.mod` 锁定版本的 `go run github.com/wailsapp/wails/v2/cmd/wails@<version>`。
 
 桌面脚本会强制使用 `CGO_ENABLED=1`，因为桌面端运行依赖 SQLite；如果你的 shell 里全局设置了 `CGO_ENABLED=0`，脚本也会覆盖它。

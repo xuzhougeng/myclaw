@@ -1,9 +1,238 @@
+function desktopDiagnosticsEnabled() {
+  return window.__MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS__ === true;
+}
+
+const desktopDiagnosticsState = {
+  installed: false,
+  entries: [],
+  bannerShown: false,
+};
+
+function describeDiagnosticFunction(value) {
+  if (typeof value !== 'function') return '';
+  try {
+    return String(value).replace(/\s+/g, ' ').slice(0, 240);
+  } catch (error) {
+    return `[uninspectable function: ${asMessage(error)}]`;
+  }
+}
+
+function summarizeDiagnosticValue(value) {
+  if (value instanceof Error) {
+    return {
+      name: value.name || 'Error',
+      message: value.message || '',
+      stack: value.stack || '',
+    };
+  }
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 8).map((item) => summarizeDiagnosticValue(item));
+  }
+  if (typeof value === 'function') {
+    return describeDiagnosticFunction(value);
+  }
+  if (typeof value === 'object') {
+    const summary = {};
+    Object.entries(value).slice(0, 16).forEach(([key, item]) => {
+      summary[key] = summarizeDiagnosticValue(item);
+    });
+    return summary;
+  }
+  return String(value);
+}
+
+function buildDesktopDiagnosticSnapshot(reason, detail = {}) {
+  return {
+    timestamp: new Date().toISOString(),
+    reason,
+    detail: summarizeDiagnosticValue(detail),
+    buildMode: window.__MYCLAW_DESKTOP_BUILD_MODE__ || 'release',
+    location: window.location.href,
+    readyState: document.readyState,
+    userAgent: navigator.userAgent,
+    runtime: {
+      WailsInvoke: {
+        type: typeof window.WailsInvoke,
+        preview: describeDiagnosticFunction(window.WailsInvoke),
+      },
+      chrome: {
+        type: typeof window.chrome,
+        hasWebview: Boolean(window.chrome?.webview),
+        postMessageType: typeof window.chrome?.webview?.postMessage,
+        postMessagePreview: describeDiagnosticFunction(window.chrome?.webview?.postMessage),
+      },
+      webkit: {
+        hasExternalHandler: Boolean(window.webkit?.messageHandlers?.external),
+        postMessageType: typeof window.webkit?.messageHandlers?.external?.postMessage,
+        postMessagePreview: describeDiagnosticFunction(window.webkit?.messageHandlers?.external?.postMessage),
+      },
+      external: {
+        type: typeof window.external,
+        invokeType: typeof window.external?.invoke,
+        invokePreview: describeDiagnosticFunction(window.external?.invoke),
+      },
+      go: {
+        hasDesktopApp: Boolean(window.go?.main?.DesktopApp),
+        desktopMethods: Object.keys(window.go?.main?.DesktopApp || {}).slice(0, 20),
+      },
+      wails: {
+        present: Boolean(window.wails),
+        callbackCount: Object.keys(window.wails?.callbacks || {}).length,
+        callbackType: typeof window.wails?.Callback,
+      },
+      runtime: {
+        present: Boolean(window.runtime),
+        eventsOnType: typeof window.runtime?.EventsOn,
+      },
+    },
+  };
+}
+
+function formatDesktopDiagnosticEntries() {
+  return desktopDiagnosticsState.entries
+    .map((entry, index) => `#${desktopDiagnosticsState.entries.length - index}\n${JSON.stringify(entry, null, 2)}`)
+    .join('\n\n');
+}
+
+function ensureDesktopDiagnosticsPanel() {
+  if (!desktopDiagnosticsEnabled() || !document.body) return null;
+
+  let panel = document.getElementById('desktop-debug-panel');
+  if (!panel) {
+    panel = document.createElement('details');
+    panel.id = 'desktop-debug-panel';
+    panel.open = true;
+    panel.style.position = 'fixed';
+    panel.style.right = '16px';
+    panel.style.bottom = '16px';
+    panel.style.zIndex = '99999';
+    panel.style.width = 'min(680px, calc(100vw - 24px))';
+    panel.style.maxHeight = '52vh';
+    panel.style.padding = '10px 12px 12px';
+    panel.style.border = '1px solid rgba(255, 107, 107, 0.65)';
+    panel.style.borderRadius = '14px';
+    panel.style.background = 'rgba(6, 11, 18, 0.96)';
+    panel.style.color = '#dbe7f3';
+    panel.style.boxShadow = '0 14px 36px rgba(0, 0, 0, 0.35)';
+    panel.style.backdropFilter = 'blur(12px)';
+
+    const summary = document.createElement('summary');
+    summary.textContent = 'Desktop Diagnostics';
+    summary.style.cursor = 'pointer';
+    summary.style.fontWeight = '700';
+    summary.style.marginBottom = '8px';
+    panel.appendChild(summary);
+
+    const meta = document.createElement('div');
+    meta.id = 'desktop-debug-meta';
+    meta.style.fontSize = '12px';
+    meta.style.color = '#9db2c8';
+    meta.style.marginBottom = '8px';
+    panel.appendChild(meta);
+
+    const output = document.createElement('pre');
+    output.id = 'desktop-debug-output';
+    output.style.margin = '0';
+    output.style.maxHeight = 'calc(52vh - 52px)';
+    output.style.overflow = 'auto';
+    output.style.whiteSpace = 'pre-wrap';
+    output.style.wordBreak = 'break-word';
+    output.style.fontSize = '11px';
+    output.style.lineHeight = '1.45';
+    output.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace';
+    panel.appendChild(output);
+
+    document.body.appendChild(panel);
+  }
+
+  const meta = document.getElementById('desktop-debug-meta');
+  if (meta) {
+    meta.textContent = `build=${window.__MYCLAW_DESKTOP_BUILD_MODE__ || 'release'}  entries=${desktopDiagnosticsState.entries.length}`;
+  }
+
+  const output = document.getElementById('desktop-debug-output');
+  if (output) {
+    output.textContent = formatDesktopDiagnosticEntries();
+  }
+
+  return panel;
+}
+
+function reportDesktopDiagnostics(reason, detail = {}) {
+  if (!desktopDiagnosticsEnabled()) return;
+
+  const snapshot = buildDesktopDiagnosticSnapshot(reason, detail);
+  desktopDiagnosticsState.entries.push(snapshot);
+  if (desktopDiagnosticsState.entries.length > 12) {
+    desktopDiagnosticsState.entries = desktopDiagnosticsState.entries.slice(-12);
+  }
+
+  try {
+    ensureDesktopDiagnosticsPanel();
+  } catch (error) {
+    console.error('[desktop-debug] render diagnostics panel failed', error);
+  }
+
+  if (reason !== 'diagnostics-enabled' && !desktopDiagnosticsState.bannerShown && typeof showBanner === 'function') {
+    desktopDiagnosticsState.bannerShown = true;
+    showBanner('已捕获桌面运行时诊断，请展开右下角 Desktop Diagnostics 面板。', true);
+  }
+
+  console.error(`[desktop-debug] ${reason}`, snapshot);
+}
+
+function installDesktopDebugDiagnostics() {
+  if (!desktopDiagnosticsEnabled() || desktopDiagnosticsState.installed) return;
+  desktopDiagnosticsState.installed = true;
+
+  window.addEventListener('error', (event) => {
+    reportDesktopDiagnostics('window-error', {
+      message: event.message || '',
+      filename: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      error: event.error || null,
+    });
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    reportDesktopDiagnostics('unhandled-rejection', {
+      reason: event.reason || null,
+    });
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      ensureDesktopDiagnosticsPanel();
+      reportDesktopDiagnostics('diagnostics-enabled', {
+        protocol: window.location.protocol,
+      });
+    }, { once: true });
+    return;
+  }
+
+  ensureDesktopDiagnosticsPanel();
+  reportDesktopDiagnostics('diagnostics-enabled', {
+    protocol: window.location.protocol,
+  });
+}
+
 async function waitForBackend() {
   for (let index = 0; index < 80; index += 1) {
     if (hasWailsRuntime()) return createWailsBackend();
     await delay(50);
   }
+  reportDesktopDiagnostics('backend-unavailable-after-wait', {
+    protocol: window.location.protocol,
+  });
   if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+    reportDesktopDiagnostics('falling-back-to-http-backend', {
+      protocol: window.location.protocol,
+    });
     return createHTTPBackend();
   }
   throw new Error('Wails 后端尚未就绪。');
@@ -28,7 +257,10 @@ function installWailsBridgeShim() {
     ? window.WailsInvoke.bind(window)
     : null;
   const sender = nativeSender || currentInvoke;
-  if (!sender) return false;
+  if (!sender) {
+    reportDesktopDiagnostics('wails-bridge-sender-missing', {});
+    return false;
+  }
 
   window.WailsInvoke = (message) => sender(message);
 
@@ -66,7 +298,13 @@ function newWailsCallbackID(methodName) {
 function invokeWailsMethod(methodName, args = [], timeout = 0) {
   return new Promise((resolve, reject) => {
     if (!hasWailsRuntime()) {
-      reject(new Error('Wails runtime 尚未就绪。'));
+      const error = new Error('Wails runtime 尚未就绪。');
+      reportDesktopDiagnostics('invoke-without-runtime', {
+        methodName,
+        args,
+        error,
+      });
+      reject(error);
       return;
     }
 
@@ -81,7 +319,13 @@ function invokeWailsMethod(methodName, args = [], timeout = 0) {
     if (timeout > 0) {
       timeoutHandle = window.setTimeout(() => {
         delete window.wails.callbacks[callbackID];
-        reject(new Error(`调用 ${methodName} 超时。`));
+        const error = new Error(`调用 ${methodName} 超时。`);
+        reportDesktopDiagnostics('invoke-timeout', {
+          methodName,
+          callbackID,
+          error,
+        });
+        reject(error);
       }, timeout);
     }
 
@@ -96,6 +340,12 @@ function invokeWailsMethod(methodName, args = [], timeout = 0) {
     } catch (error) {
       window.clearTimeout(timeoutHandle);
       delete window.wails.callbacks[callbackID];
+      reportDesktopDiagnostics('invoke-throw', {
+        methodName,
+        callbackID,
+        payload,
+        error,
+      });
       reject(error);
     }
   });

@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Version
+    [string]$Version,
+    [switch]$DebugMode
 )
 
 $ErrorActionPreference = "Stop"
@@ -89,12 +90,17 @@ function Get-DesktopBuildEnvironment {
 }
 
 function Invoke-FrontendBundleBuild {
+    param(
+        [switch]$DebugMode
+    )
+
     $goCommand = Get-Command go -ErrorAction SilentlyContinue
     if ($null -eq $goCommand) {
         throw "go was not found in PATH. It is required to build desktop frontend bundles."
     }
 
     $environment = Get-GoFallbackEnvironment -GoCommand $goCommand.Source
+    $environment["MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS"] = if ($DebugMode) { "1" } else { "0" }
 
     Push-Location $repoRoot
     try {
@@ -157,7 +163,11 @@ else {
     @{}
 }
 $wailsInvocation = Get-WailsInvocation
-Invoke-FrontendBundleBuild
+Invoke-FrontendBundleBuild -DebugMode:$DebugMode
+
+if ($DebugMode) {
+    Write-Host "Desktop build debug mode enabled: frontend self-diagnostics will be bundled into this artifact."
+}
 
 if (Test-Path $installerPath) {
     Remove-Item $installerPath -Force

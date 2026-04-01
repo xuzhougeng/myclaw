@@ -63,7 +63,11 @@ jobs:
       - name: Build desktop installer
         shell: powershell
         run: |
-          ./scripts/package-desktop-windows.ps1 -Version $env:BUILD_VERSION
+          if ($env:GITHUB_EVENT_NAME -eq "workflow_dispatch") {
+            ./scripts/package-desktop-windows.ps1 -Version $env:BUILD_VERSION -DebugMode
+          } else {
+            ./scripts/package-desktop-windows.ps1 -Version $env:BUILD_VERSION
+          }
 
       - name: Verify installer output
         shell: powershell
