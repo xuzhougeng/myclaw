@@ -518,6 +518,18 @@ func (f bridgeTestAI) DecideAgentStep(context.Context, string, []aicore.Conversa
 	return aicore.AgentStepDecision{}, nil
 }
 
+func (f bridgeTestAI) PlanNext(_ context.Context, _ string, _ []aicore.ConversationMessage, _ []aicore.AgentToolDefinition, _ aicore.AgentTaskState) (aicore.LoopDecision, error) {
+	return aicore.LoopDecision{Action: aicore.LoopAnswer, Answer: ""}, nil
+}
+
+func (f bridgeTestAI) SummarizeWorkingState(_ context.Context, _ aicore.AgentTaskState) (string, error) {
+	return "", nil
+}
+
+func (f bridgeTestAI) SummarizeFinal(_ context.Context, _ aicore.AgentTaskState, finalAnswer string) (string, error) {
+	return finalAnswer, nil
+}
+
 func (f bridgeTestAI) TranslateToChinese(context.Context, string) (string, error) {
 	return "", nil
 }

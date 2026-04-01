@@ -19,15 +19,31 @@ const (
 	AgentToolProviderACP   AgentToolProviderKind = "acp"
 )
 
+// ToolSideEffectLevel describes the potential impact of executing a tool.
+type ToolSideEffectLevel string
+
+const (
+	// ToolSideEffectReadOnly tools never modify state.
+	ToolSideEffectReadOnly ToolSideEffectLevel = "read_only"
+	// ToolSideEffectSoftWrite tools modify state but the change is reversible or low-risk.
+	ToolSideEffectSoftWrite ToolSideEffectLevel = "soft_write"
+	// ToolSideEffectDestructive tools delete or irreversibly modify state.
+	ToolSideEffectDestructive ToolSideEffectLevel = "destructive"
+)
+
+// AgentToolSpec describes a single tool exposed by an AgentToolProvider.
 type AgentToolSpec struct {
-	Purpose           string
-	Name              string
-	Description       string
-	InputContract     string
-	OutputContract    string
-	Usage             string
-	InputJSONExample  string
-	OutputJSONExample string
+	Purpose              string
+	Name                 string
+	Description          string
+	InputContract        string
+	OutputContract       string
+	Usage                string
+	InputJSONExample     string
+	OutputJSONExample    string
+	SideEffectLevel      ToolSideEffectLevel
+	RequiresConfirmation bool
+	IsIdempotent         bool
 }
 
 type AgentToolProvider interface {
@@ -103,6 +119,7 @@ func (r *agentToolProviders) Definitions(ctx context.Context, mc MessageContext)
 				Usage:             strings.TrimSpace(tool.Usage),
 				InputJSONExample:  strings.TrimSpace(tool.InputJSONExample),
 				OutputJSONExample: strings.TrimSpace(tool.OutputJSONExample),
+				SideEffectLevel:   string(tool.SideEffectLevel),
 			})
 		}
 	}

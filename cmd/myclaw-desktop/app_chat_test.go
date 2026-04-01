@@ -1000,6 +1000,18 @@ func (f desktopTestAI) DecideAgentStep(context.Context, string, []ai.Conversatio
 	return ai.AgentStepDecision{}, nil
 }
 
+func (f desktopTestAI) PlanNext(_ context.Context, _ string, _ []ai.ConversationMessage, _ []ai.AgentToolDefinition, _ ai.AgentTaskState) (ai.LoopDecision, error) {
+	return ai.LoopDecision{Action: ai.LoopAnswer, Answer: ""}, nil
+}
+
+func (f desktopTestAI) SummarizeWorkingState(_ context.Context, _ ai.AgentTaskState) (string, error) {
+	return "", nil
+}
+
+func (f desktopTestAI) SummarizeFinal(_ context.Context, _ ai.AgentTaskState, finalAnswer string) (string, error) {
+	return finalAnswer, nil
+}
+
 func (f desktopTestAI) TranslateToChinese(context.Context, string) (string, error) {
 	return "", nil
 }

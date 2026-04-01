@@ -2003,6 +2003,33 @@ func (f fakeAI) DecideAgentStep(ctx context.Context, task string, history []ai.C
 	return f.agentStep, nil
 }
 
+func (f fakeAI) PlanNext(ctx context.Context, task string, history []ai.ConversationMessage, tools []ai.AgentToolDefinition, state ai.AgentTaskState) (ai.LoopDecision, error) {
+	results := make([]ai.AgentToolResult, 0, len(state.ToolAttempts))
+	for _, a := range state.ToolAttempts {
+		results = append(results, ai.AgentToolResult{ToolName: a.ToolName, ToolInput: a.ToolInput, Output: a.RawOutput})
+	}
+	step, err := f.DecideAgentStep(ctx, task, history, tools, results)
+	if err != nil {
+		return ai.LoopDecision{}, err
+	}
+	switch step.Action {
+	case "answer":
+		return ai.LoopDecision{Action: ai.LoopAnswer, Answer: step.Answer}, nil
+	case "tool":
+		return ai.LoopDecision{Action: ai.LoopContinue, ToolName: step.ToolName, ToolInput: step.ToolInput}, nil
+	default:
+		return ai.LoopDecision{}, fmt.Errorf("unsupported agent action %q", step.Action)
+	}
+}
+
+func (f fakeAI) SummarizeWorkingState(_ context.Context, _ ai.AgentTaskState) (string, error) {
+	return "", nil
+}
+
+func (f fakeAI) SummarizeFinal(_ context.Context, _ ai.AgentTaskState, finalAnswer string) (string, error) {
+	return finalAnswer, nil
+}
+
 func (f fakeAI) TranslateToChinese(ctx context.Context, input string) (string, error) {
 	if f.translationFunc != nil {
 		return f.translationFunc(ctx, input), nil

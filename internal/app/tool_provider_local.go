@@ -31,15 +31,20 @@ func (p *localAgentToolProvider) ProviderKey() string {
 
 func (p *localAgentToolProvider) ListAgentTools(context.Context, MessageContext) ([]AgentToolSpec, error) {
 	return []AgentToolSpec{
-		agentToolSpecFromContract(localKnowledgeSearchContract()),
-		agentToolSpecFromContract(localRememberContract()),
-		agentToolSpecFromContract(localAppendKnowledgeContract()),
-		agentToolSpecFromContract(localForgetKnowledgeContract()),
-		agentToolSpecFromContract(filesearch.Definition()),
-		agentToolSpecFromContract(localReminderListContract()),
-		agentToolSpecFromContract(localReminderAddContract()),
-		agentToolSpecFromContract(localReminderRemoveContract()),
+		specWithLevel(agentToolSpecFromContract(localKnowledgeSearchContract()), ToolSideEffectReadOnly),
+		specWithLevel(agentToolSpecFromContract(localRememberContract()), ToolSideEffectSoftWrite),
+		specWithLevel(agentToolSpecFromContract(localAppendKnowledgeContract()), ToolSideEffectSoftWrite),
+		specWithLevel(agentToolSpecFromContract(localForgetKnowledgeContract()), ToolSideEffectDestructive),
+		specWithLevel(agentToolSpecFromContract(filesearch.Definition()), ToolSideEffectReadOnly),
+		specWithLevel(agentToolSpecFromContract(localReminderListContract()), ToolSideEffectReadOnly),
+		specWithLevel(agentToolSpecFromContract(localReminderAddContract()), ToolSideEffectSoftWrite),
+		specWithLevel(agentToolSpecFromContract(localReminderRemoveContract()), ToolSideEffectDestructive),
 	}, nil
+}
+
+func specWithLevel(s AgentToolSpec, level ToolSideEffectLevel) AgentToolSpec {
+	s.SideEffectLevel = level
+	return s
 }
 
 func (p *localAgentToolProvider) ExecuteAgentTool(ctx context.Context, mc MessageContext, toolName, rawInput string) (string, error) {

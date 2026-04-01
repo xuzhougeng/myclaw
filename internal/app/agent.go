@@ -3,59 +3,64 @@ package app
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"myclaw/internal/ai"
 )
 
 const maxAgentToolSteps = 3
 
+// serviceAgentRuntime implements ai.AgentLoopRuntime using the Service.
+type serviceAgentRuntime struct {
+	service *Service
+}
+
+func (r *serviceAgentRuntime) LoadHistory(ctx context.Context, mc any) []ai.ConversationMessage {
+	return r.service.conversationHistory(ctx, mc.(MessageContext))
+}
+
+func (r *serviceAgentRuntime) ListTools(ctx context.Context, mc any) ([]ai.AgentToolDefinition, error) {
+	return r.service.toolProviders.Definitions(ctx, mc.(MessageContext))
+}
+
+func (r *serviceAgentRuntime) ExecuteTool(ctx context.Context, mc any, toolName, toolInput string) (string, error) {
+	output, err := r.service.toolProviders.Execute(ctx, mc.(MessageContext), toolName, toolInput)
+	if err != nil {
+		return "", err
+	}
+	summary := summarizeToolOutputForModel(output)
+	recordToolArtifact(ctx, toolName, toolInput, output, summary)
+	addProcessTrace(ctx, "tool:"+toolName, toolInput+"\n→ "+summary)
+	return output, nil
+}
+
+func (r *serviceAgentRuntime) PersistTurn(ctx context.Context, mc any, userInput, assistantReply, finalSummary string) {
+	setTurnSummary(ctx, finalSummary)
+	r.service.maybeAppendConversationHistory(ctx, mc.(MessageContext), userInput, assistantReply)
+}
+
+// serviceAgentPlanner implements ai.AgentPlanner using the aiBackend.
+type serviceAgentPlanner struct {
+	svc aiBackend
+}
+
+func (p *serviceAgentPlanner) PlanNext(ctx context.Context, task string, history []ai.ConversationMessage, tools []ai.AgentToolDefinition, state ai.AgentTaskState) (ai.LoopDecision, error) {
+	return p.svc.PlanNext(ctx, task, history, tools, state)
+}
+
+func (p *serviceAgentPlanner) SummarizeWorkingState(ctx context.Context, state ai.AgentTaskState) (string, error) {
+	return p.svc.SummarizeWorkingState(ctx, state)
+}
+
+func (p *serviceAgentPlanner) SummarizeFinal(ctx context.Context, state ai.AgentTaskState, finalAnswer string) (string, error) {
+	return p.svc.SummarizeFinal(ctx, state, finalAnswer)
+}
+
 func (s *Service) handleAgentQuestion(ctx context.Context, mc MessageContext, question string) (string, error) {
 	if s.toolProviders == nil {
-		return "", fmt.Errorf("agent tool providers are not configured")
+		return "", fmt.Errorf("agent tool providers not configured")
 	}
-
-	history := s.conversationHistory(ctx, mc)
-	results := make([]ai.AgentToolResult, 0, maxAgentToolSteps)
-
-	for step := 0; step < maxAgentToolSteps; step++ {
-		definitions, err := s.toolProviders.Definitions(ctx, mc)
-		if err != nil {
-			return "", err
-		}
-
-		decision, err := s.aiService.DecideAgentStep(ctx, question, history, definitions, results)
-		if err != nil {
-			return "", err
-		}
-
-		switch decision.Action {
-		case "answer":
-			reply := strings.TrimSpace(decision.Answer)
-			if reply == "" {
-				return "", fmt.Errorf("agent returned empty answer")
-			}
-			addProcessTrace(ctx, fmt.Sprintf("Agent 决策 %d", step+1), "action=answer\nreply="+preview(reply, maxReplyPreviewRunes))
-			s.maybeAppendConversationHistory(ctx, mc, question, reply)
-			return reply, nil
-		case "tool":
-			addProcessTrace(ctx, fmt.Sprintf("Agent 决策 %d", step+1), "action=tool\ntool="+strings.TrimSpace(decision.ToolName)+"\ninput="+strings.TrimSpace(decision.ToolInput))
-			output, err := s.toolProviders.Execute(ctx, mc, decision.ToolName, decision.ToolInput)
-			if err != nil {
-				output = "工具执行失败: " + err.Error()
-			}
-			summary := summarizeToolOutputForModel(output)
-			recordToolArtifact(ctx, decision.ToolName, decision.ToolInput, output, summary)
-			addProcessTrace(ctx, fmt.Sprintf("Agent 工具结果 %d", step+1), preview(summary, maxReplyPreviewRunes))
-			results = append(results, ai.AgentToolResult{
-				ToolName:  strings.TrimSpace(decision.ToolName),
-				ToolInput: strings.TrimSpace(decision.ToolInput),
-				Output:    strings.TrimSpace(summary),
-			})
-		default:
-			return "", fmt.Errorf("unsupported agent action %q", decision.Action)
-		}
-	}
-
-	return "", fmt.Errorf("agent reached the maximum tool step limit")
+	runtime := &serviceAgentRuntime{service: s}
+	planner := &serviceAgentPlanner{svc: s.aiService}
+	answer, _, err := ai.RunAgentLoop(ctx, runtime, planner, mc, question, maxAgentToolSteps)
+	return answer, err
 }

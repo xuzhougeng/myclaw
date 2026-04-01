@@ -43,5 +43,14 @@ func DemoTools() map[string]ai.ToolCapability {
 }`,
 			OutputContract: "返回匹配的文件路径列表",
 		},
+		"local::forget_knowledge": {
+			Name:        "local::forget_knowledge",
+			Purpose:     "从知识库中永久删除指定条目",
+			Description: "删除知识库中的一条或多条笔记，操作不可逆",
+			InputContract: `{
+  "id": "note-id-to-delete"
+}`,
+			OutputContract: "返回删除结果",
+		},
 	}
 }

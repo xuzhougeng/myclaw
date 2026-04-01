@@ -2,6 +2,7 @@ package taskcontext
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -14,9 +15,10 @@ type ToolArtifact struct {
 }
 
 type State struct {
-	mu          sync.Mutex
-	turnSummary string
-	artifacts   []ToolArtifact
+	mu             sync.Mutex
+	turnSummary    string
+	workingSummary string
+	artifacts      []ToolArtifact
 }
 
 type stateKey struct{}
@@ -82,4 +84,55 @@ func ToolArtifacts(ctx context.Context) []ToolArtifact {
 	out := make([]ToolArtifact, len(state.artifacts))
 	copy(out, state.artifacts)
 	return out
+}
+
+// SetWorkingSummary updates the in-progress working summary for this task.
+func SetWorkingSummary(ctx context.Context, summary string) {
+	state, _ := ctx.Value(stateKey{}).(*State)
+	if state == nil {
+		return
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return
+	}
+	state.mu.Lock()
+	state.workingSummary = summary
+	state.mu.Unlock()
+}
+
+// WorkingSummary returns the current working summary.
+func WorkingSummary(ctx context.Context) string {
+	state, _ := ctx.Value(stateKey{}).(*State)
+	if state == nil {
+		return ""
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return strings.TrimSpace(state.workingSummary)
+}
+
+// ArtifactsSummary returns a compact numbered list of all tool artifacts.
+// Returns empty string if no artifacts recorded.
+func ArtifactsSummary(ctx context.Context) string {
+	state, _ := ctx.Value(stateKey{}).(*State)
+	if state == nil {
+		return ""
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.artifacts) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for i, a := range state.artifacts {
+		var status string
+		if a.Summary == "" {
+			status = a.RawOutput
+		} else {
+			status = a.Summary
+		}
+		fmt.Fprintf(&sb, "%d. tool=%s: %s\n", i+1, a.ToolName, status)
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
