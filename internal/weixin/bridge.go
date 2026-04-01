@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,7 @@ type Account struct {
 type BridgeConfig struct {
 	DataDir        string
 	EverythingPath string
+	PanicReporter  func(scope string, recovered any, stack []byte)
 }
 
 type Bridge struct {
@@ -45,18 +47,28 @@ type Bridge struct {
 	conversationLoaded   bool
 	fileSearch           *filesearch.ShortcutHandler
 	fileSender           *FileSender
+	panicReporter        func(scope string, recovered any, stack []byte)
 }
 
 func NewBridge(client *Client, service *app.Service, reminders *reminder.Manager, config BridgeConfig) *Bridge {
 	bridge := &Bridge{
-		client:     client,
-		service:    service,
-		reminders:  reminders,
-		config:     config,
-		fileSearch: filesearch.NewShortcutHandler(strings.TrimSpace(config.EverythingPath), filesearch.ExecuteWithEverything),
-		fileSender: NewFileSender(client),
+		client:        client,
+		service:       service,
+		reminders:     reminders,
+		config:        config,
+		fileSearch:    filesearch.NewShortcutHandler(strings.TrimSpace(config.EverythingPath), filesearch.ExecuteWithEverything),
+		fileSender:    NewFileSender(client),
+		panicReporter: config.PanicReporter,
 	}
 	return bridge
+}
+
+func (b *Bridge) reportRecoveredPanic(scope string, recovered any) {
+	stack := debug.Stack()
+	log.Printf("[weixin] panic in %s: %v\n%s", strings.TrimSpace(scope), recovered, strings.TrimSpace(string(stack)))
+	if b.panicReporter != nil {
+		b.panicReporter(strings.TrimSpace(scope), recovered, stack)
+	}
 }
 
 func (b *Bridge) SetConversationUpdatedHook(fn func(ConversationUpdate)) {
@@ -161,7 +173,14 @@ func (b *Bridge) Logout() error {
 	return nil
 }
 
-func (b *Bridge) Run(ctx context.Context) error {
+func (b *Bridge) Run(ctx context.Context) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			b.reportRecoveredPanic("bridge.run", recovered)
+			err = fmt.Errorf("weixin bridge panic: %v", recovered)
+		}
+	}()
+
 	log.Printf("[weixin] bridge started, polling for messages")
 
 	bufPath := filepath.Join(b.config.DataDir, "weixin-bridge", "sync_buf")
@@ -208,6 +227,12 @@ func (b *Bridge) Run(ctx context.Context) error {
 }
 
 func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			b.reportRecoveredPanic(fmt.Sprintf("handleMessage from=%s context=%s", strings.TrimSpace(msg.FromUserID), strings.TrimSpace(msg.ContextToken)), recovered)
+		}
+	}()
+
 	text := extractText(msg)
 	log.Printf("[weixin] inbound from=%s text=%s", msg.FromUserID, truncate(text, 80))
 	inputPolicy := app.InspectInputPolicy(text)
@@ -266,7 +291,14 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 	if b.reminders != nil {
 		userID := msg.FromUserID
 		contextToken := msg.ContextToken
-		b.reminders.RegisterNotifier(reminder.Target{Interface: "weixin", UserID: userID}, reminder.NotifierFunc(func(ctx context.Context, item reminder.Reminder) error {
+		b.reminders.RegisterNotifier(reminder.Target{Interface: "weixin", UserID: userID}, reminder.NotifierFunc(func(ctx context.Context, item reminder.Reminder) (err error) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					b.reportRecoveredPanic(fmt.Sprintf("reminder notify id=%s from=%s", strings.TrimSpace(item.ID), strings.TrimSpace(userID)), recovered)
+					err = fmt.Errorf("weixin reminder notifier panic: %v", recovered)
+				}
+			}()
+
 			text := fmt.Sprintf("提醒时间到了：%s", item.Message)
 			return b.sendChunkedReply(ctx, userID, contextToken, text)
 		}))

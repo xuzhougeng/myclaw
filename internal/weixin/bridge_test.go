@@ -114,6 +114,44 @@ func TestLoadAccountUsesSavedCredentials(t *testing.T) {
 	}
 }
 
+func TestHandleMessageRecoversAndReportsPanics(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	var sent SendMessageRequest
+	var reportedScope string
+	var reportedPanic any
+	bridge := NewBridge(newTestClient(t, &sent), nil, nil, BridgeConfig{
+		DataDir: root,
+		PanicReporter: func(scope string, recovered any, _ []byte) {
+			reportedScope = scope
+			reportedPanic = recovered
+		},
+	})
+	bridge.SetConversationUpdatedHook(func(ConversationUpdate) {
+		panic("boom")
+	})
+
+	msg := WeixinMessage{
+		FromUserID:   "user-1",
+		ContextToken: "ctx-1",
+		MessageType:  MessageTypeUser,
+		MessageState: MessageStateFinish,
+		ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "你好"}}},
+		ClientID:     "client-1",
+		ToUserID:     "bot",
+	}
+
+	bridge.handleMessage(context.Background(), msg)
+
+	if !strings.Contains(reportedScope, "handleMessage") {
+		t.Fatalf("expected handleMessage panic scope, got %q", reportedScope)
+	}
+	if reportedPanic != "boom" {
+		t.Fatalf("unexpected reported panic: %#v", reportedPanic)
+	}
+}
+
 func TestHandleMessageSlashFindDoesNotCreateConversation(t *testing.T) {
 	t.Parallel()
 

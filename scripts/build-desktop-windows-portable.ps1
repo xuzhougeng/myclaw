@@ -201,8 +201,15 @@ $buildArgs = @(
     "-s"
 )
 
+$ldflagsParts = @()
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
-    $buildArgs += @("-ldflags", "-X main.appVersion=$Version")
+    $ldflagsParts += "-X main.appVersion=$Version"
+}
+if ($DebugMode) {
+    $ldflagsParts += "-X main.desktopBuildMode=debug"
+}
+if ($ldflagsParts.Count -gt 0) {
+    $buildArgs += @("-ldflags", ($ldflagsParts -join " "))
 }
 
 Push-Location $desktopDir

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"log"
 	"path/filepath"
+	"strings"
 
 	"myclaw/internal/ai"
 	appsvc "myclaw/internal/app"
@@ -65,6 +66,9 @@ func main() {
 	weixinBridge := weixin.NewBridge(weixin.NewClient("", ""), service, reminderManager, weixin.BridgeConfig{
 		DataDir:        dataDir,
 		EverythingPath: envOrDefault("MYCLAW_WEIXIN_EVERYTHING_PATH", ""),
+		PanicReporter: func(scope string, recovered any, stack []byte) {
+			reportDesktopBackendPanic(dataDir, "weixin."+strings.TrimSpace(scope), recovered, stack)
+		},
 	})
 	desktopApp := NewDesktopApp(dataDir, store, promptStore, projectStore, modelStore, aiService, service, sessionStore, reminderManager, weixinBridge)
 

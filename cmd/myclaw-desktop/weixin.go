@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -216,6 +217,12 @@ func (a *DesktopApp) startWeixinBridge() {
 	a.weixinMu.Unlock()
 
 	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				reportDesktopBackendPanic(a.dataDir, "desktop.weixinBridge.run", recovered, debug.Stack())
+			}
+		}()
+
 		err := a.weixinBridge.Run(runCtx)
 		if errors.Is(err, context.Canceled) || runCtx.Err() != nil {
 			return

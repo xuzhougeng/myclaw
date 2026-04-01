@@ -14,7 +14,11 @@ $scriptDir = Split-Path -Parent $PSCommandPath
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
 $outputRoot = Join-Path $repoRoot "dist"
 $installerPath = Join-Path $outputRoot $versionedInstallerName
-$ldflags = "-X main.appVersion=$Version"
+$ldflagsParts = @("-X main.appVersion=$Version")
+if ($DebugMode) {
+    $ldflagsParts += "-X main.desktopBuildMode=debug"
+}
+$ldflags = $ldflagsParts -join " "
 
 function Invoke-ExternalCommand {
     param(
