@@ -581,6 +581,9 @@ func TestDesktopChatStateIncludesWeixinConversation(t *testing.T) {
 		if item.Source != "weixin:user-1" || item.SourceLabel != "微信" {
 			t.Fatalf("unexpected weixin source metadata: %#v", item)
 		}
+		if item.Mode != "agent" {
+			t.Fatalf("expected weixin conversation default mode=agent, got %#v", item)
+		}
 		if item.Active {
 			t.Fatalf("expected desktop conversation to remain active by default: %#v", item)
 		}

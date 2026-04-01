@@ -163,7 +163,10 @@ func (s *Service) EnsureConversation(ctx context.Context, mc MessageContext) err
 	} else if ok {
 		return nil
 	}
-	return s.saveSessionSnapshot(ctx, sessionstate.Snapshot{Key: key})
+	return s.saveSessionSnapshot(ctx, sessionstate.Snapshot{
+		Key:  key,
+		Mode: string(defaultMode()),
+	})
 }
 
 func (s *Service) persistedLoadedSkillNames(mc MessageContext) []string {

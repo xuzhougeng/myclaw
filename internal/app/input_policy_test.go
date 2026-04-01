@@ -133,3 +133,41 @@ func TestCanonicalizeCommandInput(t *testing.T) {
 		t.Fatalf("expected unknown command to remain unchanged, got %q", got)
 	}
 }
+
+func TestParseNewConversationMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    Mode
+		wantErr string
+	}{
+		{name: "default agent", input: "/new", want: ModeAgent},
+		{name: "ask", input: "/new ask", want: ModeAsk},
+		{name: "agent", input: "/new agent", want: ModeAgent},
+		{name: "invalid mode", input: "/new kb", wantErr: "用法: /new [ask|agent]"},
+		{name: "too many args", input: "/new ask extra", wantErr: "用法: /new [ask|agent]"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ParseNewConversationMode(tc.input)
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("expected error %q, got mode=%q err=%v", tc.wantErr, got, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parse new conversation mode: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("expected mode %q, got %q", tc.want, got)
+			}
+		})
+	}
+}

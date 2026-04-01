@@ -496,11 +496,99 @@ func TestHandleMessageNewCommandStartsDistinctConversation(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected new session snapshot for %q", sessionID)
 	}
+	if snapshot.Mode != string(appsvc.ModeAgent) {
+		t.Fatalf("expected /new default mode=agent, got %#v", snapshot)
+	}
 	if len(snapshot.History) != 2 || snapshot.History[0].Content != "/new" || snapshot.History[1].Content != "已进入新对话。" {
 		t.Fatalf("unexpected /new history: %#v", snapshot.History)
 	}
 	if extractText(sent.Msg) != "已进入新对话。" {
 		t.Fatalf("unexpected /new outbound reply: %#v", sent.Msg)
+	}
+}
+
+func TestHandleMessageNewCommandSupportsModeSelection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		command  string
+		wantMode string
+	}{
+		{name: "ask", command: "/new ask", wantMode: string(appsvc.ModeAsk)},
+		{name: "agent", command: "/new agent", wantMode: string(appsvc.ModeAgent)},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			store := knowledge.NewStore(filepath.Join(root, "app.db"))
+			reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "app.db")))
+			sessionStore := sessionstate.NewStore(filepath.Join(root, "app.db"))
+			service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, nil)
+
+			var sent SendMessageRequest
+			bridge := NewBridge(newTestClient(t, &sent), service, reminders, BridgeConfig{DataDir: root})
+			msg := WeixinMessage{
+				FromUserID:   "user-1",
+				ContextToken: "ctx-1",
+				MessageType:  MessageTypeUser,
+				MessageState: MessageStateFinish,
+				ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: tc.command}}},
+			}
+
+			bridge.handleMessage(context.Background(), msg)
+
+			sessionID := strings.TrimSpace(bridge.conversationSessions[bridge.conversationSlotKey(msg)])
+			snapshot, ok, err := sessionStore.Load(context.Background(), "source:weixin:user-1|session:"+sessionID)
+			if err != nil {
+				t.Fatalf("load new snapshot: %v", err)
+			}
+			if !ok {
+				t.Fatalf("expected new session snapshot for %q", sessionID)
+			}
+			if snapshot.Mode != tc.wantMode {
+				t.Fatalf("expected mode %q, got %#v", tc.wantMode, snapshot)
+			}
+			if len(snapshot.History) != 2 || snapshot.History[0].Content != tc.command || snapshot.History[1].Content != "已进入新对话。" {
+				t.Fatalf("unexpected /new history: %#v", snapshot.History)
+			}
+			if extractText(sent.Msg) != "已进入新对话。" {
+				t.Fatalf("unexpected /new outbound reply: %#v", sent.Msg)
+			}
+		})
+	}
+}
+
+func TestHandleMessageNewCommandRejectsInvalidMode(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "app.db"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "app.db")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "app.db"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, nil)
+
+	var sent SendMessageRequest
+	bridge := NewBridge(newTestClient(t, &sent), service, reminders, BridgeConfig{DataDir: root})
+	msg := WeixinMessage{
+		FromUserID:   "user-1",
+		ContextToken: "ctx-1",
+		MessageType:  MessageTypeUser,
+		MessageState: MessageStateFinish,
+		ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "/new kb"}}},
+	}
+
+	bridge.handleMessage(context.Background(), msg)
+
+	if len(bridge.conversationSessions) != 0 {
+		t.Fatalf("expected invalid /new mode not to create a new session, got %#v", bridge.conversationSessions)
+	}
+	if extractText(sent.Msg) != "用法: /new [ask|agent]" {
+		t.Fatalf("unexpected /new invalid mode reply: %#v", sent.Msg)
 	}
 }
 

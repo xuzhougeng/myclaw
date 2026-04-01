@@ -274,6 +274,15 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 	log.Printf("[weixin] inbound from=%s text=%s", msg.FromUserID, truncate(text, 80))
 	inputPolicy := app.InspectInputPolicy(text)
 	if inputPolicy.IsConversationControl && inputPolicy.Command == "/new" {
+		mode, err := app.ParseNewConversationMode(text)
+		if err != nil {
+			if sendErr := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, err.Error()); sendErr != nil {
+				log.Printf("[weixin] send /new usage reply failed: %v", sendErr)
+			}
+			b.registerReminderNotifier(msg)
+			return
+		}
+
 		messageContext, err := b.startNewConversation(ctx, msg)
 		if err != nil {
 			log.Printf("[weixin] start new conversation failed: %v", err)
@@ -282,6 +291,16 @@ func (b *Bridge) handleMessage(ctx context.Context, msg WeixinMessage) {
 			}
 			b.registerReminderNotifier(msg)
 			return
+		}
+		if b.service != nil {
+			if _, err := b.service.SetMode(ctx, messageContext, mode); err != nil {
+				log.Printf("[weixin] set new conversation mode failed: %v", err)
+				if sendErr := b.sendChunkedReply(ctx, msg.FromUserID, msg.ContextToken, "开启新对话失败，请稍后重试。"); sendErr != nil {
+					log.Printf("[weixin] send /new mode failure reply failed: %v", sendErr)
+				}
+				b.registerReminderNotifier(msg)
+				return
+			}
 		}
 		reply := "已进入新对话。"
 		if b.service != nil && strings.TrimSpace(text) != "" {

@@ -29,6 +29,8 @@ func (s *Service) conversationMode(ctx context.Context, mc MessageContext) (Mode
 			mode = normalizeMode(snapshot.Mode)
 			if mode == "" {
 				mode = defaultMode()
+				snapshot.Mode = string(mode)
+				_ = s.saveSessionSnapshot(ctx, snapshot)
 			}
 			s.rememberConversationMode(key, mode)
 			return mode, nil

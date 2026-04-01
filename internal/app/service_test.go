@@ -1592,6 +1592,67 @@ func TestSetModePreservesConversationHistory(t *testing.T) {
 	}
 }
 
+func TestEnsureConversationPersistsDefaultMode(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "app.db"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "app.db")))
+	stateStore := sessionstate.NewStore(filepath.Join(root, "app.db"))
+	service := NewServiceWithSkillsAndSessions(store, nil, reminders, nil, stateStore)
+	mc := MessageContext{Interface: "weixin", UserID: "u1", SessionID: "session-1"}
+
+	if err := service.EnsureConversation(context.Background(), mc); err != nil {
+		t.Fatalf("ensure conversation: %v", err)
+	}
+
+	snapshot, ok, err := stateStore.Load(context.Background(), conversationSessionKey(mc))
+	if err != nil {
+		t.Fatalf("load session snapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected persisted session snapshot")
+	}
+	if snapshot.Mode != string(ModeAgent) {
+		t.Fatalf("expected persisted mode %q, got %#v", ModeAgent, snapshot)
+	}
+}
+
+func TestGetModeBackfillsDefaultModeForLegacySnapshot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "app.db"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "app.db")))
+	stateStore := sessionstate.NewStore(filepath.Join(root, "app.db"))
+	service := NewServiceWithSkillsAndSessions(store, nil, reminders, nil, stateStore)
+	mc := MessageContext{Interface: "weixin", UserID: "u1", SessionID: "legacy-session"}
+	key := conversationSessionKey(mc)
+
+	if _, err := stateStore.Save(context.Background(), sessionstate.Snapshot{Key: key}); err != nil {
+		t.Fatalf("save legacy session snapshot: %v", err)
+	}
+
+	mode, err := service.GetMode(context.Background(), mc)
+	if err != nil {
+		t.Fatalf("get mode: %v", err)
+	}
+	if mode != ModeAgent {
+		t.Fatalf("expected mode %q, got %q", ModeAgent, mode)
+	}
+
+	snapshot, ok, err := stateStore.Load(context.Background(), key)
+	if err != nil {
+		t.Fatalf("reload session snapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected persisted legacy snapshot")
+	}
+	if snapshot.Mode != string(ModeAgent) {
+		t.Fatalf("expected backfilled mode %q, got %#v", ModeAgent, snapshot)
+	}
+}
+
 func TestHandleMessageTreatsSpuriousHelpRouteAsAnswer(t *testing.T) {
 	t.Parallel()
 

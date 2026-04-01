@@ -367,7 +367,8 @@ func (a *DesktopApp) ensureChatSession(ctx context.Context, project, sessionID s
 		return nil
 	}
 	_, err := a.sessionStore.Save(ctx, sessionstate.Snapshot{
-		Key: desktopConversationSnapshotKey(project, sessionID),
+		Key:  desktopConversationSnapshotKey(project, sessionID),
+		Mode: string(appsvc.ModeAgent),
 	})
 	return err
 }
@@ -622,9 +623,6 @@ func toChatMessages(snapshot sessionstate.Snapshot) []ChatMessage {
 }
 
 func conversationModeLabel(item chatSessionSnapshot) string {
-	if !isDesktopConversationSource(item.Source) {
-		return ""
-	}
 	return normalizeNewChatMode(item.Snapshot.Mode)
 }
 
