@@ -82,3 +82,51 @@ func TestManagerRunDueDailyReminder(t *testing.T) {
 		t.Fatalf("expected next run advanced, got %v", items[0].NextRunAt)
 	}
 }
+
+func TestManagerRunDueMultipleOnceReminders(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(filepath.Join(t.TempDir(), "app.db"))
+	manager := NewManager(store)
+	now := time.Date(2026, 3, 27, 10, 0, 0, 0, time.Local)
+	manager.now = func() time.Time { return now }
+
+	target := Target{Interface: "weixin", UserID: "user-1"}
+	var notified []string
+	manager.RegisterNotifier(target, NotifierFunc(func(ctx context.Context, item Reminder) error {
+		notified = append(notified, item.Message)
+		return nil
+	}))
+
+	if _, err := store.Add(context.Background(), Reminder{
+		Target:    target,
+		Message:   "喝水",
+		Frequency: FrequencyOnce,
+		NextRunAt: now.Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("add first overdue reminder: %v", err)
+	}
+	if _, err := store.Add(context.Background(), Reminder{
+		Target:    target,
+		Message:   "站起来活动",
+		Frequency: FrequencyOnce,
+		NextRunAt: now.Add(-1 * time.Minute),
+	}); err != nil {
+		t.Fatalf("add second overdue reminder: %v", err)
+	}
+
+	if err := manager.runDue(context.Background(), now); err != nil {
+		t.Fatalf("run due: %v", err)
+	}
+	if len(notified) != 2 {
+		t.Fatalf("expected two notifications, got %#v", notified)
+	}
+
+	items, err := manager.List(context.Background(), target)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected once reminders removed, got %#v", items)
+	}
+}

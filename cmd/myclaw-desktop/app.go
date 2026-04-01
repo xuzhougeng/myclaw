@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -306,12 +307,21 @@ func (a *DesktopApp) startBackgroundServices() {
 	runCtx, cancel := context.WithCancel(context.Background())
 	a.reminderCancel = cancel
 	go func() {
+		reportDesktopBackendEvent(a.dataDir, "desktop.reminders.start", nil)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				reportDesktopBackendPanic(a.dataDir, "desktop.reminders.run", recovered, debug.Stack())
+			}
+		}()
 		if err := a.reminders.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("reminder scheduler stopped: %v", err)
 			if a.ctx != nil {
 				runtime.LogErrorf(a.ctx, "reminder scheduler stopped: %v", err)
 			}
 		}
+		reportDesktopBackendEvent(a.dataDir, "desktop.reminders.exit", map[string]string{
+			"canceled": fmt.Sprintf("%t", errors.Is(runCtx.Err(), context.Canceled)),
+		})
 	}()
 }
 

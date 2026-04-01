@@ -166,18 +166,21 @@ func (m *Manager) runDue(ctx context.Context, now time.Time) error {
 	}
 
 	changed := false
-	for index := range items {
-		item := &items[index]
+	nextItems := make([]Reminder, 0, len(items))
+	for _, item := range items {
 		if item.NextRunAt.After(now) {
+			nextItems = append(nextItems, item)
 			continue
 		}
 
 		notifier := m.notifierFor(item.Target)
 		if notifier == nil {
+			nextItems = append(nextItems, item)
 			continue
 		}
-		if err := notifier.Notify(ctx, *item); err != nil {
+		if err := notifier.Notify(ctx, item); err != nil {
 			log.Printf("[reminder] notify failed for %s: %v", item.ID, err)
+			nextItems = append(nextItems, item)
 			continue
 		}
 
@@ -186,16 +189,15 @@ func (m *Manager) runDue(ctx context.Context, now time.Time) error {
 		case FrequencyDaily:
 			item.NextRunAt = nextDailyOccurrence(now, item.DailyHour, item.DailyMinute)
 			item.UpdatedAt = now
+			nextItems = append(nextItems, item)
 		default:
-			items = append(items[:index], items[index+1:]...)
-			index--
 		}
 	}
 
 	if !changed {
 		return nil
 	}
-	return m.store.SaveAll(ctx, items)
+	return m.store.SaveAll(ctx, nextItems)
 }
 
 func (m *Manager) notifierFor(target Target) Notifier {
