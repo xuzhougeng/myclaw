@@ -200,6 +200,7 @@ type ChatResponse struct {
 	Timestamp      string             `json:"timestamp"`
 	SessionID      string             `json:"sessionId,omitempty"`
 	SessionChanged bool               `json:"sessionChanged,omitempty"`
+	HistoryPersisted bool             `json:"historyPersisted"`
 	Usage          *ai.TokenUsage     `json:"usage,omitempty"`
 	Process        []ai.CallTraceStep `json:"process,omitempty"`
 }
@@ -1071,12 +1072,15 @@ func (a *DesktopApp) sendMessage(ctx context.Context, input string, onDelta func
 			return ChatResponse{}, err
 		}
 		return ChatResponse{
-			Reply:          "已开启新对话。",
-			Timestamp:      time.Now().Local().Format("2006-01-02 15:04:05"),
-			SessionID:      state.SessionID,
-			SessionChanged: true,
+			Reply:            "已开启新对话。",
+			Timestamp:        time.Now().Local().Format("2006-01-02 15:04:05"),
+			SessionID:        state.SessionID,
+			SessionChanged:   true,
+			HistoryPersisted: false,
 		}, nil
 	}
+	policy := appsvc.InspectInputPolicy(input)
+	historyPersisted := !policy.IsKnownCommand || policy.PersistHistory
 	mc, err := a.chatMessageContext(ctx, project)
 	if err != nil {
 		return ChatResponse{}, err
@@ -1103,11 +1107,12 @@ func (a *DesktopApp) sendMessage(ctx context.Context, input string, onDelta func
 		processPayload = append([]ai.CallTraceStep(nil), process...)
 	}
 	return ChatResponse{
-		Reply:     reply,
-		Timestamp: time.Now().Local().Format("2006-01-02 15:04:05"),
-		SessionID: mc.SessionID,
-		Usage:     usagePayload,
-		Process:   processPayload,
+		Reply:            reply,
+		Timestamp:        time.Now().Local().Format("2006-01-02 15:04:05"),
+		SessionID:        mc.SessionID,
+		HistoryPersisted: historyPersisted,
+		Usage:            usagePayload,
+		Process:          processPayload,
 	}, nil
 }
 

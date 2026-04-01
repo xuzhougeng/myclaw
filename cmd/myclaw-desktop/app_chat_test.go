@@ -97,6 +97,41 @@ func TestDesktopSendMessageNewConversationReturnsSessionChanged(t *testing.T) {
 	if result.SessionID == "" || result.SessionID == first.SessionID {
 		t.Fatalf("expected a new session id, got first=%q result=%#v", first.SessionID, result)
 	}
+	if result.HistoryPersisted {
+		t.Fatalf("expected /new to avoid chat history persistence, got %#v", result)
+	}
+}
+
+func TestDesktopSendMessageHelpDoesNotPersistHistory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := knowledge.NewStore(filepath.Join(root, "app.db"))
+	projectStore := projectstate.NewStore(filepath.Join(root, "app.db"))
+	promptStore := promptlib.NewStore(filepath.Join(root, "app.db"))
+	reminders := reminder.NewManager(reminder.NewStore(filepath.Join(root, "app.db")))
+	sessionStore := sessionstate.NewStore(filepath.Join(root, "app.db"))
+	service := appsvc.NewServiceWithRuntime(store, nil, reminders, nil, sessionStore, promptStore)
+	app := NewDesktopApp(root, store, promptStore, projectStore, nil, nil, service, sessionStore, reminders, nil)
+
+	result, err := app.SendMessage("/help")
+	if err != nil {
+		t.Fatalf("send /help: %v", err)
+	}
+	if result.HistoryPersisted {
+		t.Fatalf("expected /help to avoid chat history persistence, got %#v", result)
+	}
+	if !strings.Contains(result.Reply, "/help") {
+		t.Fatalf("expected help reply, got %#v", result)
+	}
+
+	state, err := app.GetChatState()
+	if err != nil {
+		t.Fatalf("get chat state: %v", err)
+	}
+	if len(state.Messages) != 0 {
+		t.Fatalf("expected /help to avoid persisted chat messages, got %#v", state.Messages)
+	}
 }
 
 func TestDesktopSendMessageReturnsAndPersistsUsage(t *testing.T) {

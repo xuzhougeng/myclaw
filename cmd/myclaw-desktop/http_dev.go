@@ -707,17 +707,18 @@ func (s desktopHTTPDevServer) streamChat(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if err := writeEvent(map[string]any{
-		"type":           "done",
-		"reply":          result.Reply,
-		"timestamp":      result.Timestamp,
-		"sessionId":      result.SessionID,
-		"sessionChanged": result.SessionChanged,
-		"usage":          result.Usage,
-	}); err != nil {
-		log.Printf("write chat stream done: %v", err)
+		if err := writeEvent(map[string]any{
+			"type":           "done",
+			"reply":          result.Reply,
+			"timestamp":      result.Timestamp,
+			"sessionId":      result.SessionID,
+			"sessionChanged": result.SessionChanged,
+			"historyPersisted": result.HistoryPersisted,
+			"usage":          result.Usage,
+		}); err != nil {
+			log.Printf("write chat stream done: %v", err)
+		}
 	}
-}
 
 func decodeJSONBody(r *http.Request, out any) error {
 	defer r.Body.Close()

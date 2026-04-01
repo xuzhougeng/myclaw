@@ -64,6 +64,9 @@ async function sendMessage(rawText = null, displayText = null) {
     placeholder.usage = normalizeTokenUsage(result.usage);
     placeholder.process = normalizeChatProcess(result.process);
     placeholder.streaming = false;
+    if (result.historyPersisted === false) {
+      markLatestChatExchangeTransient();
+    }
     syncCurrentChatConversationFromMessages();
     renderChat();
     await Promise.all([refreshAll(), refreshChatState()]);
@@ -89,6 +92,20 @@ async function sendMessage(rawText = null, displayText = null) {
     state.chatStreaming = false;
     renderChatContentActions();
     renderChatComposerState();
+  }
+}
+
+function markLatestChatExchangeTransient() {
+  if (state.chat.length < 2) return;
+  const assistantIndex = state.chat.length - 1;
+  const userIndex = assistantIndex - 1;
+  if (userIndex < 0) return;
+
+  if (state.chat[userIndex]) {
+    state.chat[userIndex].transient = true;
+  }
+  if (state.chat[assistantIndex]) {
+    state.chat[assistantIndex].transient = true;
   }
 }
 

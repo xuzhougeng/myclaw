@@ -483,6 +483,7 @@ function renderChatSessions() {
 }
 
 function applyChatState(nextState) {
+  const previousSessionId = state.chatState.sessionId || '';
   state.chatState = normalizeChatState(nextState);
   state.chatState = {
     ...state.chatState,
@@ -495,15 +496,50 @@ function applyChatState(nextState) {
     state.chatSessionContextMenu = defaultChatSessionContextMenuState();
     renderChatSessionContextMenu();
   }
-  state.chat = (state.chatState.messages || []).map((message) => ({
+  const incomingMessages = (state.chatState.messages || []).map((message) => ({
     role: message.role,
     text: message.text,
     time: message.time || '',
     usage: normalizeTokenUsage(message.usage),
     process: normalizeChatProcess(message.process),
   }));
+  state.chat = previousSessionId && previousSessionId === state.chatState.sessionId
+    ? mergeTransientChatMessages(incomingMessages)
+    : incomingMessages;
   renderChatSessions();
   renderChat();
+}
+
+function mergeTransientChatMessages(incomingMessages) {
+  const localMessages = Array.isArray(state.chat) ? state.chat : [];
+  if (!localMessages.some((message) => message?.transient)) {
+    return incomingMessages;
+  }
+
+  const merged = [];
+  let incomingIndex = 0;
+  for (const localMessage of localMessages) {
+    if (localMessage?.transient) {
+      merged.push({
+        role: localMessage.role,
+        text: localMessage.text,
+        time: localMessage.time || '',
+        usage: normalizeTokenUsage(localMessage.usage),
+        process: normalizeChatProcess(localMessage.process),
+        transient: true,
+      });
+      continue;
+    }
+    if (incomingIndex < incomingMessages.length) {
+      merged.push({ ...incomingMessages[incomingIndex] });
+      incomingIndex += 1;
+    }
+  }
+  while (incomingIndex < incomingMessages.length) {
+    merged.push({ ...incomingMessages[incomingIndex] });
+    incomingIndex += 1;
+  }
+  return merged;
 }
 
 function syncCurrentChatConversationFromMessages() {
