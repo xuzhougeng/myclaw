@@ -37,7 +37,7 @@ jobs:
           echo "BUILD_VERSION=${version}" >> "$GITHUB_ENV"
 
       - name: Test
-        run: go test ./cmd/myclaw-desktop ./internal/...
+        run: go test ./cmd/baize-desktop ./internal/...
 
       - name: Build signed and notarized DMG
         env:
@@ -52,10 +52,10 @@ jobs:
 
       - name: Verify notarized output
         run: |
-          APP_PATH="$(find cmd/myclaw-desktop/build/bin -maxdepth 1 -type d -name '*.app' | head -n 1)"
-          DMG_PATH="dist/myclaw-macos-${BUILD_VERSION}.dmg"
+          APP_PATH="$(find cmd/baize-desktop/build/bin -maxdepth 1 -type d -name '*.app' | head -n 1)"
+          DMG_PATH="dist/baize-macos-${BUILD_VERSION}.dmg"
           if [ -z "${APP_PATH}" ] || [ ! -d "${APP_PATH}" ]; then
-            ls -R cmd/myclaw-desktop/build
+            ls -R cmd/baize-desktop/build
             echo "Error: .app bundle was not generated."
             exit 1
           fi
@@ -74,7 +74,7 @@ jobs:
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
         with:
-          name: myclaw-desktop-macos-arm64
+          name: baize-desktop-macos-arm64
           path: |
             ${{ env.APP_PATH }}
             ${{ env.DMG_PATH }}

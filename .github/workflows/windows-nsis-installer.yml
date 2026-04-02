@@ -48,7 +48,7 @@ jobs:
 
       - name: Test
         shell: powershell
-        run: go test ./cmd/myclaw-desktop ./internal/...
+        run: go test ./cmd/baize-desktop ./internal/...
 
       - name: Resolve build version
         shell: powershell
@@ -72,9 +72,9 @@ jobs:
       - name: Verify installer output
         shell: powershell
         run: |
-          $installer = Join-Path "dist" ("myclaw-{0}-amd64-installer.exe" -f $env:BUILD_VERSION)
+          $installer = Join-Path "dist" ("baize-{0}-amd64-installer.exe" -f $env:BUILD_VERSION)
           if (-not (Test-Path $installer)) {
-            Get-ChildItem -Path cmd/myclaw-desktop/build -Recurse | Select-Object FullName
+            Get-ChildItem -Path cmd/baize-desktop/build -Recurse | Select-Object FullName
             Get-ChildItem -Path dist -Recurse | Select-Object FullName
             throw "Versioned NSIS installer was not generated."
           }
@@ -84,7 +84,7 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: myclaw-desktop-windows-amd64
+          name: baize-desktop-windows-amd64
           path: ${{ env.INSTALLER_PATH }}
           if-no-files-found: error
           retention-days: 14
