@@ -2,7 +2,7 @@ param(
     [ValidateSet("amd64", "arm64")]
     [string]$Arch = "amd64",
     [string]$OutputDir = "dist",
-    [string]$AppName = "myclaw",
+    [string]$AppName = "baize",
     [string]$Version = "",
     [switch]$Clean,
     [switch]$DebugMode
@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $PSCommandPath
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
-$desktopDir = Join-Path $repoRoot "cmd/myclaw-desktop"
+$desktopDir = Join-Path $repoRoot "cmd/baize-desktop"
 $buildBinDir = Join-Path $desktopDir "build/bin"
 $outputRoot = Join-Path $repoRoot $OutputDir
 
@@ -101,7 +101,7 @@ function Invoke-FrontendBundleBuild {
     }
 
     $environment = Get-GoFallbackEnvironment -GoCommand $goCommand.Source
-    $environment["MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS"] = if ($DebugMode) { "1" } else { "0" }
+    $environment["BAIZE_DESKTOP_DEBUG_DIAGNOSTICS"] = if ($DebugMode) { "1" } else { "0" }
 
     Push-Location $repoRoot
     try {

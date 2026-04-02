@@ -1,6 +1,6 @@
-APP_NAME := myclaw
-CMD_PATH := ./cmd/myclaw
-DESKTOP_CMD_PATH := ./cmd/myclaw-desktop
+APP_NAME := baize
+CMD_PATH := ./cmd/baize
+DESKTOP_CMD_PATH := ./cmd/baize-desktop
 DIST_DIR := dist
 PACKAGE_DIR := $(DIST_DIR)/packages
 STAGE_DIR := $(DIST_DIR)/stage

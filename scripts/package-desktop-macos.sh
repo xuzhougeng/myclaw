@@ -4,16 +4,16 @@ set -euo pipefail
 
 VERSION="${1:-0.0.0}"
 PLIST_VERSION="${VERSION#v}"
-APP_NAME="myclaw"
-APP_DISPLAY_NAME="myclaw"
-BUNDLE_ID="${MACOS_BUNDLE_ID:-com.myclaw.desktop}"
+APP_NAME="baize"
+APP_DISPLAY_NAME="baize"
+BUNDLE_ID="${MACOS_BUNDLE_ID:-com.baize.desktop}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
-BUILD_DIR="${ROOT_DIR}/cmd/myclaw-desktop/build/bin"
+BUILD_DIR="${ROOT_DIR}/cmd/baize-desktop/build/bin"
 APP_SRC="${BUILD_DIR}/${APP_NAME}.app"
 APP_BINARY="${APP_SRC}/Contents/MacOS/${APP_NAME}"
 APP_RESOURCES_DIR="${APP_SRC}/Contents/Resources"
-APP_ICON_SRC="${ROOT_DIR}/cmd/myclaw-desktop/build/appicon.png"
+APP_ICON_SRC="${ROOT_DIR}/cmd/baize-desktop/build/appicon.png"
 APP_ICON_NAME="appicon.icns"
 APP_ICON_FILE="${APP_RESOURCES_DIR}/${APP_ICON_NAME}"
 DMG_PATH="${DIST_DIR}/${APP_NAME}-macos-${VERSION}.dmg"
@@ -129,7 +129,7 @@ compile_binary() {
             -tags "${GO_TAGS}" \
             -ldflags "${GO_LDFLAGS} ${APP_VERSION_LDFLAG}" \
             -o "${output_path}" \
-            ./cmd/myclaw-desktop
+            ./cmd/baize-desktop
 }
 
 build_binary() {
@@ -281,7 +281,7 @@ create_dmg() {
     ln -s /Applications "${TMP_DIR}/Applications"
 
     hdiutil create \
-        -volname "myclaw" \
+        -volname "baize" \
         -srcfolder "${TMP_DIR}" \
         -ov \
         -format UDZO \

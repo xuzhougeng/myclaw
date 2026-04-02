@@ -21,7 +21,7 @@ func main() {
 		exitf("resolve repo root: %v", err)
 	}
 
-	frontendDir := filepath.Join(rootDir, "cmd", "myclaw-desktop", "frontend")
+	frontendDir := filepath.Join(rootDir, "cmd", "baize-desktop", "frontend")
 	srcDir := filepath.Join(frontendDir, "src")
 	distDir := filepath.Join(frontendDir, "dist")
 
@@ -86,13 +86,13 @@ func repoRoot() (string, error) {
 }
 
 func buildJSBundleHeader() []byte {
-	debugEnabled := os.Getenv("MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS") == "1"
+	debugEnabled := os.Getenv("BAIZE_DESKTOP_DEBUG_DIAGNOSTICS") == "1"
 	buildMode := "release"
 	if debugEnabled {
 		buildMode = "debug"
 	}
 	return []byte(fmt.Sprintf(
-		"window.__MYCLAW_DESKTOP_BUILD_MODE__ = %q;\nwindow.__MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS__ = %s;\n",
+		"window.__BAIZE_DESKTOP_BUILD_MODE__ = %q;\nwindow.__BAIZE_DESKTOP_DEBUG_DIAGNOSTICS__ = %s;\n",
 		buildMode,
 		strconv.FormatBool(debugEnabled),
 	))

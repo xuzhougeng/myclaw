@@ -2,7 +2,7 @@ param(
     [ValidateSet("amd64", "arm64")]
     [string]$Arch = "amd64",
     [string]$OutputDir = "dist",
-    [string]$AppName = "myclaw",
+    [string]$AppName = "baize",
     [switch]$All,
     [switch]$RunTests,
     [switch]$UseCgo
@@ -48,7 +48,7 @@ try {
 
         $output = Join-Path $outputRoot ("{0}-windows-{1}.exe" -f $AppName, $targetArch)
         Write-Host "Building $output (CGO_ENABLED=$($env:CGO_ENABLED)) ..."
-        Invoke-GoCommand -Arguments @("build", "-trimpath", "-o", $output, "./cmd/myclaw")
+        Invoke-GoCommand -Arguments @("build", "-trimpath", "-o", $output, "./cmd/baize")
     }
 }
 finally {

@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$binaryName = "myclaw"
+$binaryName = "baize"
 $versionedBaseName = "$binaryName-$Version"
 $versionedExeName = "$versionedBaseName.exe"
 $versionedInstallerName = "$versionedBaseName-amd64-installer.exe"
@@ -104,7 +104,7 @@ function Invoke-FrontendBundleBuild {
     }
 
     $environment = Get-GoFallbackEnvironment -GoCommand $goCommand.Source
-    $environment["MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS"] = if ($DebugMode) { "1" } else { "0" }
+    $environment["BAIZE_DESKTOP_DEBUG_DIAGNOSTICS"] = if ($DebugMode) { "1" } else { "0" }
 
     Push-Location $repoRoot
     try {
@@ -178,7 +178,7 @@ if (Test-Path $installerPath) {
 }
 
 # Build with Wails
-Push-Location (Join-Path $repoRoot "cmd/myclaw-desktop")
+Push-Location (Join-Path $repoRoot "cmd/baize-desktop")
 try {
     if ($wailsInvocation.UsesFallback) {
         Write-Host "wails CLI not found in PATH; using go run fallback pinned to $($wailsInvocation.ResolvedVersion)."
@@ -206,14 +206,14 @@ finally {
 }
 
 # Normalize installer filename so build/bin and dist both carry the version.
-$buildBinDir = Join-Path $repoRoot "cmd/myclaw-desktop/build/bin"
+$buildBinDir = Join-Path $repoRoot "cmd/baize-desktop/build/bin"
 $versionedBuiltInstallerPath = Join-Path $buildBinDir $versionedInstallerName
 $builtInstaller = Get-ChildItem -Path $buildBinDir -Filter "$versionedBaseName-*-installer.exe" | Select-Object -First 1
 if ($null -eq $builtInstaller) {
     $builtInstaller = Get-ChildItem -Path $buildBinDir -Filter "*-installer.exe" | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
 }
 if ($null -eq $builtInstaller) {
-    throw "Installer not found in cmd/myclaw-desktop/build/bin"
+    throw "Installer not found in cmd/baize-desktop/build/bin"
 }
 
 if ($builtInstaller.Name -ne $versionedInstallerName) {

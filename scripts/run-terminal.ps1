@@ -10,7 +10,7 @@ $repoRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
 
 Push-Location $repoRoot
 try {
-    & go run ./cmd/myclaw -terminal -data-dir $DataDir
+    & go run ./cmd/baize -terminal -data-dir $DataDir
     if ($LASTEXITCODE -ne 0) {
         throw "go run failed with exit code $LASTEXITCODE"
     }

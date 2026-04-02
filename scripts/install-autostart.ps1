@@ -1,8 +1,8 @@
 param(
-    [string]$ExePath = "dist\myclaw-windows-amd64.exe",
-    [string]$StartupName = "myclaw-weixin",
-    [string]$DataDir = "$env:LOCALAPPDATA\myclaw\data",
-    [string]$LogFile = "$env:LOCALAPPDATA\myclaw\logs\myclaw.log",
+    [string]$ExePath = "dist\baize-windows-amd64.exe",
+    [string]$StartupName = "baize-weixin",
+    [string]$DataDir = "$env:LOCALAPPDATA\baize\data",
+    [string]$LogFile = "$env:LOCALAPPDATA\baize\logs\baize.log",
     [string]$ExtraArgs = ""
 )
 
