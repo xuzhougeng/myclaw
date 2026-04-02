@@ -2,7 +2,7 @@
 
 ## Scope
 
-This plan defines the first shippable `ScreenTrace` feature for `myclaw`.
+This plan defines the first shippable `ScreenTrace` feature for `baize`.
 
 Goals:
 

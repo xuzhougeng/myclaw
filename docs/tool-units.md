@@ -1,6 +1,6 @@
 # Tool Unit 规范
 
-本文档定义 `myclaw` 里“可复用 tool-style 模块”的新增要求。目标不是写概念文，而是给新增 / 改名 / 重构 tool 时一个统一落地标准。
+本文档定义 `baize` 里“可复用 tool-style 模块”的新增要求。目标不是写概念文，而是给新增 / 改名 / 重构 tool 时一个统一落地标准。
 
 如果你只是想知道当前仓库的总体设计思路，可以顺带参考 [独立工作单元设计规范](./work-unit-design.md)。本文更偏工程约束和提交流程。
 
@@ -193,10 +193,10 @@ func FormatResult(result ToolResult) (string, error) {
 
 ## Eval Runner
 
-`cmd/myclaw-eval` 已实现，可用于对 tool unit 进行批量评测。
+`cmd/baize-eval` 已实现，可用于对 tool unit 进行批量评测。
 
 ```
-myclaw-eval -data-dir <dir> -dataset <path> [-output <path>]
+baize-eval -data-dir <dir> -dataset <path> [-output <path>]
 ```
 
 Flags：

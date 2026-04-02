@@ -1,6 +1,6 @@
 # AI 分阶段真实模型评测方案
 
-本文档描述如何在 `myclaw` 里对不同 AI 阶段做真实模型评测。
+本文档描述如何在 `baize` 里对不同 AI 阶段做真实模型评测。
 
 目标不是替代现有单元测试，而是补上一层“拿你自己设计的数据集，直接调用真实模型，看每个阶段是否稳定工作”的评测链路。
 
@@ -25,7 +25,7 @@
 - 保留现在的 `*_test.go` 做确定性测试。
 - 另做一套“评测数据集 + 独立 runner + 结果归档”。
 
-第一版先把数据结构和评测口径定下来，runner 已在 `cmd/myclaw-eval` 实现。
+第一版先把数据结构和评测口径定下来，runner 已在 `cmd/baize-eval` 实现。
 
 ## 当前仓库里最适合做阶段评测的入口
 
@@ -215,11 +215,11 @@ eval/
 
 ## 运行方式
 
-使用 `cmd/myclaw-eval` 命令运行评测：
+使用 `cmd/baize-eval` 命令运行评测：
 
 ```bash
-go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl
-go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl -output eval/testdata/runs/result.json
+go run ./cmd/baize-eval -dataset docs/evals/route-command.jsonl
+go run ./cmd/baize-eval -dataset docs/evals/route-command.jsonl -output eval/testdata/runs/result.json
 ```
 
 参数：
@@ -326,7 +326,7 @@ go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl -output eval/te
 
 1. 先按本文档把 `eval/testdata/*.jsonl` 数据集写出来
 2. 先只覆盖结构化阶段
-3. 已完成：`cmd/myclaw-eval` 直接调用 `internal/ai` 的公开方法
+3. 已完成：`cmd/baize-eval` 直接调用 `internal/ai` 的公开方法
 4. 把每次跑分结果落盘到 `eval/testdata/runs/`
 5. 下一步：持续扩充测试用例，覆盖更多边界和负样本
 6. 再决定是否需要把开放式回答引入半自动评审
@@ -348,4 +348,4 @@ go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl -output eval/te
 - 你的工具契约是否足够自解释
 - 模型切换后最先退化的是哪一层
 
-`cmd/myclaw-eval` 已实现，现在的优先级是扩充测试用例，而不是继续往 `docs/` 里堆说明文字。
+`cmd/baize-eval` 已实现，现在的优先级是扩充测试用例，而不是继续往 `docs/` 里堆说明文字。
