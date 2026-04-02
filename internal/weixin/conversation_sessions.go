@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/app"
-	"myclaw/internal/sqliteutil"
+	"baize/internal/app"
+	"baize/internal/sqliteutil"
 )
 
 type ConversationUpdate struct {

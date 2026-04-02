@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"myclaw/internal/knowledge"
-	"myclaw/internal/sqliteutil"
+	"baize/internal/knowledge"
+	"baize/internal/sqliteutil"
 )
 
 const projectStateRowID = "primary"

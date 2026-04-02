@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"myclaw/internal/ai"
+	"baize/internal/ai"
 )
 
 type CaseResult struct {

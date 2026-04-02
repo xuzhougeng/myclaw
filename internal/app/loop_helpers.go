@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	"myclaw/internal/ai"
+	"baize/internal/ai"
 )
 
 // seenQueryTracker deduplicates string keys across loop rounds.

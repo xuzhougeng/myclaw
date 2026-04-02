@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/bashtool"
-	"myclaw/internal/powershelltool"
+	"baize/internal/bashtool"
+	"baize/internal/powershelltool"
 )
 
 func (p *localAgentToolProvider) executeBashTool(ctx context.Context, mc MessageContext, rawInput string) (string, error) {

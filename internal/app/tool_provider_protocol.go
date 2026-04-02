@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"myclaw/internal/ai"
+	"baize/internal/ai"
 )
 
 type ProtocolToolSpec struct {

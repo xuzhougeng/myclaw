@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"myclaw/internal/ai"
+	"baize/internal/ai"
 )
 
 func TestSeenQueryTrackerDuplicateDetection(t *testing.T) {

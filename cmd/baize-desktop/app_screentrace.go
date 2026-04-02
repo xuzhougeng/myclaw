@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/knowledge"
-	"myclaw/internal/screentrace"
+	"baize/internal/knowledge"
+	"baize/internal/screentrace"
 )
 
 func (a *DesktopApp) recordScreenTraceDigest(ctx context.Context, digest screentrace.Digest) (string, error) {

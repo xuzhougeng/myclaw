@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/sqliteutil"
+	"baize/internal/ai"
+	"baize/internal/sqliteutil"
 )
 
 type Snapshot struct {

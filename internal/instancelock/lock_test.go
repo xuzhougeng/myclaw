@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const helperEnv = "MYCLAW_INSTANCE_LOCK_HELPER"
+const helperEnv = "BAIZE_INSTANCE_LOCK_HELPER"
 
 func TestAcquireReleaseAllowsReacquire(t *testing.T) {
 	t.Parallel()
@@ -57,8 +57,8 @@ func TestAcquireRejectsSecondProcess(t *testing.T) {
 	cmd.Env = append(
 		os.Environ(),
 		helperEnv+"=1",
-		"MYCLAW_INSTANCE_LOCK_DATA_DIR="+dataDir,
-		"MYCLAW_INSTANCE_LOCK_ROOT="+lockRoot,
+		"BAIZE_INSTANCE_LOCK_DATA_DIR="+dataDir,
+		"BAIZE_INSTANCE_LOCK_ROOT="+lockRoot,
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -74,8 +74,8 @@ func TestLockHelperProcess(t *testing.T) {
 		return
 	}
 
-	dataDir := os.Getenv("MYCLAW_INSTANCE_LOCK_DATA_DIR")
-	lockRoot := os.Getenv("MYCLAW_INSTANCE_LOCK_ROOT")
+	dataDir := os.Getenv("BAIZE_INSTANCE_LOCK_DATA_DIR")
+	lockRoot := os.Getenv("BAIZE_INSTANCE_LOCK_ROOT")
 	guard, err := acquireAt(lockRoot, dataDir)
 	switch {
 	case err == nil:

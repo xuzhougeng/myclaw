@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"myclaw/internal/modelconfig"
+	"baize/internal/modelconfig"
 )
 
 func newTestAgentService(t *testing.T, handler func(*http.Request) (*http.Response, error)) *Service {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/knowledge"
+	"baize/internal/ai"
+	"baize/internal/knowledge"
 )
 
 func (s *Service) conversationMode(ctx context.Context, mc MessageContext) (Mode, error) {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/weixin"
+	"baize/internal/weixin"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	qr "rsc.io/qr"

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/app"
+	"baize/internal/app"
 )
 
 const scannerMaxTokenSize = 1024 * 1024
@@ -30,7 +30,7 @@ func NewREPL(service *app.Service, input io.Reader, output io.Writer) *REPL {
 }
 
 func (r *REPL) Run(ctx context.Context) error {
-	fmt.Fprintf(r.output, "myclaw terminal\n")
+	fmt.Fprintf(r.output, "baize terminal\n")
 	fmt.Fprintln(r.output, "model config is loaded from the local model database under the data directory")
 	fmt.Fprintln(r.output, "type /help for commands")
 
@@ -44,7 +44,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		default:
 		}
 
-		fmt.Fprint(r.output, "myclaw> ")
+		fmt.Fprint(r.output, "baize> ")
 		if !scanner.Scan() {
 			if err := scanner.Err(); err != nil {
 				return err

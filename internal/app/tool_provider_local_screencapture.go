@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/screencapture"
+	"baize/internal/screencapture"
 )
 
 var executeScreenCapture = screencapture.Execute

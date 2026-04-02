@@ -63,7 +63,7 @@ func TestSendFileMessageUploadsAndSendsFileItem(t *testing.T) {
 
 	root := t.TempDir()
 	filePath := filepath.Join(root, "sample.pdf")
-	plaintext := []byte("hello from myclaw")
+	plaintext := []byte("hello from baize")
 	if err := os.WriteFile(filePath, plaintext, 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}

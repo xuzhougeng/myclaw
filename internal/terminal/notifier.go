@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"myclaw/internal/reminder"
+	"baize/internal/reminder"
 )
 
 type Notifier struct {
@@ -22,7 +22,7 @@ func (n *Notifier) Notify(_ context.Context, item reminder.Reminder) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	_, err := fmt.Fprintf(n.output, "\n[notice #%s] %s\nmyclaw> ", shortID(item.ID), item.Message)
+	_, err := fmt.Fprintf(n.output, "\n[notice #%s] %s\nbaize> ", shortID(item.ID), item.Message)
 	return err
 }
 

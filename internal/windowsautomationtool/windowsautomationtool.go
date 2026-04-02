@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/toolcontract"
+	"baize/internal/toolcontract"
 )
 
 const (
@@ -70,7 +70,7 @@ func Definition() toolcontract.Spec {
 		InputContract:     `Provide {"action":"frontmost_window"} or one of {"action":"list_windows","limit":20}, {"action":"focus_window","title_contains":"..."}, {"action":"focus_app","process_name":"Code.exe"}, {"action":"launch_or_focus_app","app_name":"notepad.exe"}. Optionally include {"timeout_seconds":5}. This tool is only exposed on Windows.`,
 		OutputContract:    "Returns JSON with tool, shell, action, exit_code, stdout, stderr, and truncated. stdout contains compact JSON or plain text produced by the selected action.",
 		InputJSONExample:  `{"action":"focus_window","title_contains":"Visual Studio Code"}`,
-		OutputJSONExample: `{"tool":"windows_automation_tool","shell":"powershell","action":"focus_window","exit_code":0,"stdout":"{\"process_name\":\"Code\",\"process_id\":12345,\"title\":\"main.go - myclaw - Visual Studio Code\",\"success\":true}","stderr":""}`,
+		OutputJSONExample: `{"tool":"windows_automation_tool","shell":"powershell","action":"focus_window","exit_code":0,"stdout":"{\"process_name\":\"Code\",\"process_id\":12345,\"title\":\"main.go - baize - Visual Studio Code\",\"success\":true}","stderr":""}`,
 		Usage:             UsageText(),
 	}
 }

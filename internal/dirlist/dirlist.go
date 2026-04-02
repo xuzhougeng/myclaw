@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/toolcontract"
+	"baize/internal/toolcontract"
 )
 
 const (

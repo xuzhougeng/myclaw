@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/reminder"
+	"baize/internal/ai"
+	"baize/internal/knowledge"
+	"baize/internal/reminder"
 )
 
 // agentFakeAI wraps fakeAI and overrides PlanNext with a custom function so each

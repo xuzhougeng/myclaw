@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/ai"
-	appsvc "myclaw/internal/app"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/sessionstate"
+	"baize/internal/ai"
+	appsvc "baize/internal/app"
+	"baize/internal/knowledge"
+	"baize/internal/sessionstate"
 )
 
 const (

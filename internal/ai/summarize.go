@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/modelconfig"
+	"baize/internal/modelconfig"
 )
 
 const pdfSummaryChunkRunes = 12000

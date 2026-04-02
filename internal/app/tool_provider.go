@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/toolcontract"
+	"baize/internal/ai"
+	"baize/internal/toolcontract"
 )
 
 type AgentToolProviderKind string

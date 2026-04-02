@@ -68,8 +68,8 @@ func TestReportDesktopBackendStartupWritesMarker(t *testing.T) {
 func TestDesktopBackendDebugLogPath(t *testing.T) {
 	t.Parallel()
 
-	path := desktopBackendDebugLogPath(filepath.Join("tmp", "myclaw-data"))
-	if !strings.Contains(filepath.ToSlash(path), "tmp/myclaw-data/debug/desktop-backend-debug.log") {
+	path := desktopBackendDebugLogPath(filepath.Join("tmp", "baize-data"))
+	if !strings.Contains(filepath.ToSlash(path), "tmp/baize-data/debug/desktop-backend-debug.log") {
 		t.Fatalf("unexpected backend debug log path: %q", path)
 	}
 }

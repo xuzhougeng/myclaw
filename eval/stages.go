@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"myclaw/internal/ai"
+	"baize/internal/ai"
 )
 
 func runRouteCommand(ctx context.Context, svc *ai.Service, tc TestCase) (map[string]any, error) {

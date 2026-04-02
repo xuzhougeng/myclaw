@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/toolcontract"
+	"baize/internal/toolcontract"
 
 	"github.com/kbinani/screenshot"
 )
@@ -82,7 +82,7 @@ func Definition() toolcontract.Spec {
 		InputContract:     `Provide {} or optionally {"analyze":true,"max_dimension":1600,"jpeg_quality":72}.`,
 		OutputContract:    "Returns JSON with the saved image path, mime type, dimensions, display index, capture time, whether analysis was requested, the analysis status, and an optional summary.",
 		InputJSONExample:  `{"analyze":true,"max_dimension":1600}`,
-		OutputJSONExample: `{"tool":"screen_capture","path":"C:\\Users\\me\\AppData\\Local\\Temp\\myclaw-screen-capture\\screen-20260402-103000.jpg","mime_type":"image/jpeg","width":1600,"height":900,"display_index":0,"captured_at":"2026-04-02T10:30:00Z","analyze":true,"analysis_status":"summarized","summary":"current_user 正在阅读文档并修改代码。"}`,
+		OutputJSONExample: `{"tool":"screen_capture","path":"C:\\Users\\me\\AppData\\Local\\Temp\\baize-screen-capture\\screen-20260402-103000.jpg","mime_type":"image/jpeg","width":1600,"height":900,"display_index":0,"captured_at":"2026-04-02T10:30:00Z","analyze":true,"analysis_status":"summarized","summary":"current_user 正在阅读文档并修改代码。"}`,
 		Usage:             UsageText(),
 	}
 }
@@ -180,7 +180,7 @@ func Execute(ctx context.Context, raw ToolInput, opts ExecuteOptions) (ToolResul
 
 	baseDir := strings.TrimSpace(opts.BaseDir)
 	if baseDir == "" {
-		baseDir = filepath.Join(os.TempDir(), "myclaw-screen-capture")
+		baseDir = filepath.Join(os.TempDir(), "baize-screen-capture")
 	}
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
 		return ToolResult{}, err

@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"myclaw/internal/ai"
+	"baize/internal/ai"
 )
 
 type desktopHTTPDevServer struct {
@@ -25,7 +25,7 @@ type desktopHTTPDevServer struct {
 func runHTTPDevServer(listenAddr string, app *DesktopApp) error {
 	server := desktopHTTPDevServer{
 		app:         app,
-		frontendDir: filepath.Join("cmd", "myclaw-desktop", "frontend", "dist"),
+		frontendDir: filepath.Join("cmd", "baize-desktop", "frontend", "dist"),
 	}
 
 	app.startBackgroundServices()
@@ -783,7 +783,7 @@ func decodeJSONBody(r *http.Request, out any) error {
 }
 
 func writeUploadedTempFile(file multipart.File, header *multipart.FileHeader) (string, error) {
-	tempDir, err := os.MkdirTemp("", "myclaw-upload-*")
+	tempDir, err := os.MkdirTemp("", "baize-upload-*")
 	if err != nil {
 		return "", err
 	}

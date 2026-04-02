@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/modelconfig"
+	"baize/internal/modelconfig"
 )
 
 type Service struct {
@@ -288,7 +288,7 @@ func (s *Service) createOpenAIResponse(ctx context.Context, cfg modelconfig.Conf
 				Name:        req.SchemaName,
 				Schema:      req.Schema,
 				Strict:      true,
-				Description: "Structured response for myclaw",
+				Description: "Structured response for baize",
 			},
 		}
 	} else {
@@ -1183,7 +1183,7 @@ func buildAnthropicRequestWithMode(model string, req generationRequest, useStruc
 		request.Tools = []anthropicToolDefinition{
 			{
 				Name:        req.SchemaName,
-				Description: "Return the final structured response for myclaw.",
+				Description: "Return the final structured response for baize.",
 				InputSchema: req.Schema,
 			},
 		}

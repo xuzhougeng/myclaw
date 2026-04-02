@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"myclaw/internal/sqliteutil"
+	"baize/internal/sqliteutil"
 )
 
 type Frequency string

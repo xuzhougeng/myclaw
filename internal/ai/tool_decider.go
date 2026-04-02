@@ -80,7 +80,7 @@ func (s *Service) DetectToolOpportunities(ctx context.Context, task string, tool
 	}
 
 	instructions := strings.TrimSpace(`
-You are the generic tool opportunity detector for myclaw.
+You are the generic tool opportunity detector for baize.
 Your job is:
 1. understand the user's current need
 2. decide whether any available tool should be considered
@@ -208,7 +208,7 @@ func (s *Service) PlanToolUse(ctx context.Context, task string, tool ToolCapabil
 	}
 
 	instructions := strings.TrimSpace(`
-You are the generic tool planner for myclaw.
+You are the generic tool planner for baize.
 For the selected tool, decide the next step in this loop:
 1. understand the user's goal
 2. use the tool's contract and usage notes

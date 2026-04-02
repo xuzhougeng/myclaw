@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/dirlist"
-	"myclaw/internal/filesearch"
+	"baize/internal/ai"
+	"baize/internal/dirlist"
+	"baize/internal/filesearch"
 )
 
 type ToolItem struct {

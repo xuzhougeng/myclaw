@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/knowledge"
-	"myclaw/internal/runtimepolicy"
+	"baize/internal/knowledge"
+	"baize/internal/runtimepolicy"
 )
 
 func (s *Service) RouteCommand(ctx context.Context, input string) (RouteDecision, error) {
@@ -46,7 +46,7 @@ func (s *Service) RouteCommand(ctx context.Context, input string) (RouteDecision
 	}
 
 	instructions := strings.TrimSpace(`
-You are the command router for myclaw.
+You are the command router for baize.
 Classify the user input into exactly one command:
 - remember: save something into the knowledge base
 - append: append a note to an existing knowledge item by ID or ID prefix

@@ -11,26 +11,26 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/app"
-	"myclaw/internal/instancelock"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/modelconfig"
-	"myclaw/internal/projectstate"
-	"myclaw/internal/promptlib"
-	"myclaw/internal/reminder"
-	"myclaw/internal/sessionstate"
-	"myclaw/internal/skilllib"
-	"myclaw/internal/terminal"
-	"myclaw/internal/weixin"
+	"baize/internal/ai"
+	"baize/internal/app"
+	"baize/internal/instancelock"
+	"baize/internal/knowledge"
+	"baize/internal/modelconfig"
+	"baize/internal/projectstate"
+	"baize/internal/promptlib"
+	"baize/internal/reminder"
+	"baize/internal/sessionstate"
+	"baize/internal/skilllib"
+	"baize/internal/terminal"
+	"baize/internal/weixin"
 )
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
-	dataDirFlag := flag.String("data-dir", envOrDefault("MYCLAW_DATA_DIR", "data"), "directory used to persist data")
-	logFileFlag := flag.String("log-file", envOrDefault("MYCLAW_LOG_FILE", ""), "optional log file path")
-	weixinEnabled := flag.Bool("weixin", envOrDefault("MYCLAW_WEIXIN_ENABLED", "0") == "1", "enable WeChat bridge")
+	dataDirFlag := flag.String("data-dir", envOrDefault("BAIZE_DATA_DIR", "data"), "directory used to persist data")
+	logFileFlag := flag.String("log-file", envOrDefault("BAIZE_LOG_FILE", ""), "optional log file path")
+	weixinEnabled := flag.Bool("weixin", envOrDefault("BAIZE_WEIXIN_ENABLED", "0") == "1", "enable WeChat bridge")
 	weixinLogin := flag.Bool("weixin-login", false, "run WeChat QR login and exit")
 	weixinLogout := flag.Bool("weixin-logout", false, "remove saved WeChat credentials and exit")
 	terminalEnabled := flag.Bool("terminal", false, "run interactive terminal")
@@ -51,7 +51,7 @@ func main() {
 	instanceGuard, err := instancelock.Acquire(dataDir)
 	if err != nil {
 		if errors.Is(err, instancelock.ErrAlreadyRunning) {
-			log.Fatalf("myclaw is already running; only one instance is allowed at a time")
+			log.Fatalf("baize is already running; only one instance is allowed at a time")
 		}
 		log.Fatalf("acquire instance lock: %v", err)
 	}
@@ -79,10 +79,10 @@ func main() {
 	skillLoader := skilllib.NewLoader(skilllib.DefaultDirs(dataDir)...)
 	service := app.NewServiceWithRuntime(store, aiService, reminderManager, skillLoader, sessionStore, promptStore)
 	service.SetProjectStore(projectStore)
-	service.SetFileSearchEverythingPath(envOrDefault("MYCLAW_WEIXIN_EVERYTHING_PATH", ""))
+	service.SetFileSearchEverythingPath(envOrDefault("BAIZE_WEIXIN_EVERYTHING_PATH", ""))
 	bridge := weixin.NewBridge(weixin.NewClient("", ""), service, reminderManager, weixin.BridgeConfig{
 		DataDir:        dataDir,
-		EverythingPath: envOrDefault("MYCLAW_WEIXIN_EVERYTHING_PATH", ""),
+		EverythingPath: envOrDefault("BAIZE_WEIXIN_EVERYTHING_PATH", ""),
 	})
 	repl := terminal.NewREPL(service, os.Stdin, os.Stdout)
 
@@ -121,7 +121,7 @@ func main() {
 				log.Fatalf("weixin login: %v", err)
 			}
 		}
-		log.Printf("myclaw started: data_dir=%s interface=weixin", dataDir)
+		log.Printf("baize started: data_dir=%s interface=weixin", dataDir)
 		go func() {
 			errCh <- bridge.Run(ctx)
 		}()
@@ -129,7 +129,7 @@ func main() {
 
 	if runTerminal {
 		reminderManager.RegisterNotifier(reminder.Target{Interface: "terminal", UserID: "terminal"}, terminal.NewNotifier(os.Stdout))
-		log.Printf("myclaw started: data_dir=%s interface=terminal", dataDir)
+		log.Printf("baize started: data_dir=%s interface=terminal", dataDir)
 		if err := repl.Run(ctx); err != nil && err != context.Canceled {
 			log.Fatalf("terminal stopped: %v", err)
 		}

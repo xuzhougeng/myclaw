@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"myclaw/internal/knowledge"
-	"myclaw/internal/reminder"
-	"myclaw/internal/sessionstate"
+	"baize/internal/knowledge"
+	"baize/internal/reminder"
+	"baize/internal/sessionstate"
 )
 
 func TestAppendWithExplicitFinalSummary(t *testing.T) {

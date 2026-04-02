@@ -155,7 +155,7 @@ func (s *Service) DecideAgentStep(ctx context.Context, task string, history []Co
 	}
 
 	instructions := strings.TrimSpace(`
-You are orchestrating tool use for myclaw's agent mode.
+You are orchestrating tool use for baize's agent mode.
 At each step, decide exactly one of:
 - answer: provide the final assistant reply to the user
 - tool: call exactly one available tool

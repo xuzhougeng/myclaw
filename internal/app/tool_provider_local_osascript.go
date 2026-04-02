@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/osascripttool"
+	"baize/internal/osascripttool"
 )
 
 var executeOsaScriptTool = osascripttool.Execute

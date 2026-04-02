@@ -7,15 +7,15 @@ import (
 	"strings"
 	"testing"
 
-	"myclaw/internal/ai"
-	appsvc "myclaw/internal/app"
-	"myclaw/internal/filesearch"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/projectstate"
-	"myclaw/internal/promptlib"
-	"myclaw/internal/reminder"
-	"myclaw/internal/sessionstate"
-	"myclaw/internal/weixin"
+	"baize/internal/ai"
+	appsvc "baize/internal/app"
+	"baize/internal/filesearch"
+	"baize/internal/knowledge"
+	"baize/internal/projectstate"
+	"baize/internal/promptlib"
+	"baize/internal/reminder"
+	"baize/internal/sessionstate"
+	"baize/internal/weixin"
 )
 
 func TestDesktopChatSessionsCanBeCreatedAndSwitched(t *testing.T) {

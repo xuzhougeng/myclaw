@@ -15,7 +15,7 @@ import (
 
 const (
 	masterKeySize          = 32
-	noChangeSecretSentinel = "\x00myclaw:keep-secret\x00"
+	noChangeSecretSentinel = "\x00baize:keep-secret\x00"
 )
 
 func (s *Store) loadMasterKeyLocked() ([]byte, error) {

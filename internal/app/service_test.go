@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/fileingest"
-	"myclaw/internal/filesearch"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/projectstate"
-	"myclaw/internal/promptlib"
-	"myclaw/internal/reminder"
-	"myclaw/internal/sessionstate"
-	"myclaw/internal/skilllib"
+	"baize/internal/ai"
+	"baize/internal/fileingest"
+	"baize/internal/filesearch"
+	"baize/internal/knowledge"
+	"baize/internal/projectstate"
+	"baize/internal/promptlib"
+	"baize/internal/reminder"
+	"baize/internal/sessionstate"
+	"baize/internal/skilllib"
 )
 
 func TestHandleMessageRememberAndList(t *testing.T) {

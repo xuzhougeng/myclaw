@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/knowledge"
+	"baize/internal/knowledge"
 )
 
 func (s *Service) activeProject(ctx context.Context, mc MessageContext) (string, error) {

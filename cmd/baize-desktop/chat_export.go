@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"myclaw/internal/sessionstate"
+	"baize/internal/sessionstate"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -131,7 +131,7 @@ func defaultChatMarkdownFilename(project string, snapshot sessionstate.Snapshot)
 	if project == "" {
 		project = "default"
 	}
-	return fmt.Sprintf("myclaw-chat-%s-%s-%s.md", project, title, stamp)
+	return fmt.Sprintf("baize-chat-%s-%s-%s.md", project, title, stamp)
 }
 
 func sanitizeChatMarkdownFilenameSegment(value string) string {

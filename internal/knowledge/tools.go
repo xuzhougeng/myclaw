@@ -1,6 +1,6 @@
 package knowledge
 
-import "myclaw/internal/toolcontract"
+import "baize/internal/toolcontract"
 
 const (
 	ToolFamilyKey   = "knowledge"

@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/bashtool"
-	"myclaw/internal/dirlist"
-	"myclaw/internal/filesearch"
-	"myclaw/internal/osascripttool"
-	"myclaw/internal/powershelltool"
-	"myclaw/internal/screencapture"
-	"myclaw/internal/toolcontract"
-	"myclaw/internal/windowsautomationtool"
+	"baize/internal/bashtool"
+	"baize/internal/dirlist"
+	"baize/internal/filesearch"
+	"baize/internal/osascripttool"
+	"baize/internal/powershelltool"
+	"baize/internal/screencapture"
+	"baize/internal/toolcontract"
+	"baize/internal/windowsautomationtool"
 )
 
 type localAgentToolProvider struct {

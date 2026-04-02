@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/modelconfig"
+	"baize/internal/ai"
+	"baize/internal/modelconfig"
 )
 
 const disabledPollInterval = 5 * time.Second

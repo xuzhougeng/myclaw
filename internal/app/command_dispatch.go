@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/filesearch"
-	"myclaw/internal/knowledge"
+	"baize/internal/filesearch"
+	"baize/internal/knowledge"
 )
 
 type commandHandler func(*Service, context.Context, MessageContext, string, []string) (string, error)

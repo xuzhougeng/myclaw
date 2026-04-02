@@ -41,7 +41,7 @@ func NewLoader(dirs ...string) *Loader {
 
 func DefaultDirs(dataDir string) []string {
 	dirs := []string{filepath.Join(dataDir, "skills")}
-	for _, dir := range filepath.SplitList(os.Getenv("MYCLAW_SKILLS_DIRS")) {
+	for _, dir := range filepath.SplitList(os.Getenv("BAIZE_SKILLS_DIRS")) {
 		dir = strings.TrimSpace(dir)
 		if dir == "" {
 			continue

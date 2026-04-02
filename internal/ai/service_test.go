@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"myclaw/internal/filesearch"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/modelconfig"
+	"baize/internal/filesearch"
+	"baize/internal/knowledge"
+	"baize/internal/modelconfig"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

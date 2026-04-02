@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"myclaw/internal/sqliteutil"
+	"baize/internal/sqliteutil"
 )
 
 const (

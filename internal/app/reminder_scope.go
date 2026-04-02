@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/reminder"
+	"baize/internal/ai"
+	"baize/internal/reminder"
 )
 
 const reminderChatSummaryLimit = 6

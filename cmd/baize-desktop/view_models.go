@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/knowledge"
-	"myclaw/internal/modelconfig"
-	"myclaw/internal/promptlib"
-	"myclaw/internal/reminder"
-	"myclaw/internal/screentrace"
-	"myclaw/internal/skilllib"
+	"baize/internal/knowledge"
+	"baize/internal/modelconfig"
+	"baize/internal/promptlib"
+	"baize/internal/reminder"
+	"baize/internal/screentrace"
+	"baize/internal/skilllib"
 )
 
 func toKnowledgeItem(entry knowledge.Entry) KnowledgeItem {

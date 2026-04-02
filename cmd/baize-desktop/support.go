@@ -18,13 +18,13 @@ func envOrDefault(key, fallback string) string {
 func defaultDesktopDataDir() string {
 	if runtime.GOOS == "windows" {
 		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-			return filepath.Join(localAppData, "myclaw", "data")
+			return filepath.Join(localAppData, "baize", "data")
 		}
 	}
 
 	configDir, err := os.UserConfigDir()
 	if err == nil && configDir != "" {
-		return filepath.Join(configDir, "myclaw", "data")
+		return filepath.Join(configDir, "baize", "data")
 	}
 
 	return "data"

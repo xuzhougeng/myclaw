@@ -14,9 +14,9 @@ import (
 
 const (
 	defaultCurrentVersion = "dev"
-	githubRepo            = "myclaw"
-	githubLatestTagsAPI   = "https://api.github.com/repos/xuzhougeng/myclaw/tags?per_page=1"
-	githubReleasesURL     = "https://github.com/xuzhougeng/myclaw/releases"
+	githubRepo            = "baize"
+	githubLatestTagsAPI   = "https://api.github.com/repos/xuzhougeng/baize/tags?per_page=1"
+	githubReleasesURL     = "https://github.com/xuzhougeng/baize/releases"
 )
 
 var (

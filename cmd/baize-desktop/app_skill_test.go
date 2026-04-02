@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	appsvc "myclaw/internal/app"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/reminder"
-	"myclaw/internal/skilllib"
+	appsvc "baize/internal/app"
+	"baize/internal/knowledge"
+	"baize/internal/reminder"
+	"baize/internal/skilllib"
 )
 
 func TestImportSkillArchiveRejectsDuplicateSkillName(t *testing.T) {

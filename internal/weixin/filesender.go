@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"myclaw/internal/toolcontract"
+	"baize/internal/toolcontract"
 )
 
 const FileSenderToolName = "weixin_sender"

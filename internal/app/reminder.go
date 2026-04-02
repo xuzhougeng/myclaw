@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/reminder"
+	"baize/internal/reminder"
 )
 
 var (

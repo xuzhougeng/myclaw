@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"myclaw/internal/knowledge"
-	"myclaw/internal/osascripttool"
+	"baize/internal/knowledge"
+	"baize/internal/osascripttool"
 )
 
 func TestExecuteOsaScriptToolUsesSharedProvider(t *testing.T) {

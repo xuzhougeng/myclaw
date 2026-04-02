@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"myclaw/internal/knowledge"
-	"myclaw/internal/screencapture"
+	"baize/internal/knowledge"
+	"baize/internal/screencapture"
 )
 
 func TestExecuteScreenCaptureUsesSharedProviderAndAnalyzer(t *testing.T) {

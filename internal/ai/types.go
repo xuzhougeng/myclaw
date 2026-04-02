@@ -1,6 +1,6 @@
 package ai
 
-import "myclaw/internal/toolcontract"
+import "baize/internal/toolcontract"
 
 type RouteDecision struct {
 	Command      string `json:"command"`

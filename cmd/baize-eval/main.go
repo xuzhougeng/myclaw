@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"myclaw/eval"
-	"myclaw/internal/ai"
-	"myclaw/internal/modelconfig"
+	"baize/eval"
+	"baize/internal/ai"
+	"baize/internal/modelconfig"
 )
 
 func main() {

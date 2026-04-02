@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"myclaw/internal/ai"
+	"baize/internal/ai"
 )
 
 func addProcessTrace(ctx context.Context, title, detail string) {

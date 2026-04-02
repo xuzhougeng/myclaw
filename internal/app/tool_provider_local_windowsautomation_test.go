@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"myclaw/internal/knowledge"
-	"myclaw/internal/windowsautomationtool"
+	"baize/internal/knowledge"
+	"baize/internal/windowsautomationtool"
 )
 
 func TestExecuteWindowsAutomationToolUsesSharedProvider(t *testing.T) {

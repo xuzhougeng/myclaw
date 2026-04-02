@@ -12,18 +12,18 @@ import (
 	"sync"
 	"time"
 
-	"myclaw/internal/ai"
-	appsvc "myclaw/internal/app"
-	"myclaw/internal/fileingest"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/modelconfig"
-	"myclaw/internal/projectstate"
-	"myclaw/internal/promptlib"
-	"myclaw/internal/reminder"
-	"myclaw/internal/screentrace"
-	"myclaw/internal/sessionstate"
-	"myclaw/internal/skilllib"
-	"myclaw/internal/weixin"
+	"baize/internal/ai"
+	appsvc "baize/internal/app"
+	"baize/internal/fileingest"
+	"baize/internal/knowledge"
+	"baize/internal/modelconfig"
+	"baize/internal/projectstate"
+	"baize/internal/promptlib"
+	"baize/internal/reminder"
+	"baize/internal/screentrace"
+	"baize/internal/sessionstate"
+	"baize/internal/skilllib"
+	"baize/internal/weixin"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -1473,7 +1473,7 @@ func (a *DesktopApp) showReminderDialog(reminderItem reminder.Reminder) error {
 	runtime.WindowShow(a.ctx)
 	_, err := runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
 		Type:    runtime.InfoDialog,
-		Title:   "myclaw 提醒",
+		Title:   "baize 提醒",
 		Message: reminderItem.Message,
 	})
 	return err

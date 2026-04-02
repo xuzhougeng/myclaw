@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/filesearch"
+	"baize/internal/filesearch"
 )
 
 const fileSearchDisabledReply = "文件检索工具当前已关闭，请先在工具页启用。"

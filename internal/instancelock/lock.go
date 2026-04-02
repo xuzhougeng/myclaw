@@ -11,7 +11,7 @@ import (
 
 const fileName = "instance.lock"
 
-var ErrAlreadyRunning = errors.New("myclaw instance already running")
+var ErrAlreadyRunning = errors.New("baize instance already running")
 
 type AlreadyRunningError struct {
 	Path string
@@ -106,7 +106,7 @@ func (g *Guard) Release() error {
 
 func defaultLockRoot(dataDir string) (string, error) {
 	if configDir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(configDir) != "" {
-		return filepath.Join(configDir, "myclaw"), nil
+		return filepath.Join(configDir, "baize"), nil
 	}
 
 	dataDir = strings.TrimSpace(dataDir)
@@ -114,7 +114,7 @@ func defaultLockRoot(dataDir string) (string, error) {
 		return filepath.Abs(dataDir)
 	}
 
-	return filepath.Join(os.TempDir(), "myclaw"), nil
+	return filepath.Join(os.TempDir(), "baize"), nil
 }
 
 func writeMetadata(file *os.File, dataDir string) error {

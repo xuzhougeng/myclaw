@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/windowsautomationtool"
+	"baize/internal/windowsautomationtool"
 )
 
 var executeWindowsAutomationTool = windowsautomationtool.Execute

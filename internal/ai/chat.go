@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/knowledge"
+	"baize/internal/knowledge"
 )
 
 func (s *Service) Answer(ctx context.Context, question string, entries []knowledge.Entry) (string, error) {
@@ -36,7 +36,7 @@ func (s *Service) Answer(ctx context.Context, question string, entries []knowled
 	}
 
 	instructions := strings.TrimSpace(`
-You are myclaw, a private knowledge-base assistant.
+You are baize, a private knowledge-base assistant.
 Answer in Chinese unless the user clearly asks otherwise.
 Use only the provided knowledge base content.
 If the knowledge base is insufficient, say so directly.
@@ -75,7 +75,7 @@ func (s *Service) AnswerStream(ctx context.Context, question string, entries []k
 	}
 
 	instructions := strings.TrimSpace(`
-You are myclaw, a private knowledge-base assistant.
+You are baize, a private knowledge-base assistant.
 Answer in Chinese unless the user clearly asks otherwise.
 Use only the provided knowledge base content.
 If the knowledge base is insufficient, say so directly.
@@ -93,7 +93,7 @@ func (s *Service) Chat(ctx context.Context, input string, history []Conversation
 	}
 
 	instructions := strings.TrimSpace(`
-You are myclaw, a private AI workspace assistant.
+You are baize, a private AI workspace assistant.
 Answer in Chinese unless the user clearly asks otherwise.
 Be concise, practical, and direct.
 Do not claim to have consulted a knowledge base unless one was explicitly provided.
@@ -120,7 +120,7 @@ func (s *Service) ChatStream(ctx context.Context, input string, history []Conver
 	}
 
 	instructions := strings.TrimSpace(`
-You are myclaw, a private AI workspace assistant.
+You are baize, a private AI workspace assistant.
 Answer in Chinese unless the user clearly asks otherwise.
 Be concise, practical, and direct.
 Do not claim to have consulted a knowledge base unless one was explicitly provided.
@@ -147,7 +147,7 @@ func (s *Service) TranslateToChinese(ctx context.Context, input string) (string,
 	}
 
 	instructions := strings.TrimSpace(`
-You are myclaw's translation mode.
+You are baize's translation mode.
 Translate the user's input into natural, fluent Simplified Chinese.
 Preserve factual meaning, tone, names, technical terms, formatting, and line breaks whenever possible.
 Do not explain, do not summarize, and do not add commentary.

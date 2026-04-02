@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	appsvc "myclaw/internal/app"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/modelconfig"
-	"myclaw/internal/projectstate"
-	"myclaw/internal/promptlib"
-	"myclaw/internal/reminder"
-	"myclaw/internal/sessionstate"
-	"myclaw/internal/weixin"
+	appsvc "baize/internal/app"
+	"baize/internal/knowledge"
+	"baize/internal/modelconfig"
+	"baize/internal/projectstate"
+	"baize/internal/promptlib"
+	"baize/internal/reminder"
+	"baize/internal/sessionstate"
+	"baize/internal/weixin"
 )
 
 func TestDesktopSettingsCanBeSavedAndReloaded(t *testing.T) {

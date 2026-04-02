@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"myclaw/internal/reminder"
+	"baize/internal/reminder"
 )
 
 func (p *localAgentToolProvider) reminderToolSet() localToolSet {

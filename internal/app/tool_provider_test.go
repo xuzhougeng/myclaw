@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"myclaw/internal/bashtool"
-	"myclaw/internal/dirlist"
-	"myclaw/internal/filesearch"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/osascripttool"
-	"myclaw/internal/powershelltool"
-	"myclaw/internal/reminder"
-	"myclaw/internal/screencapture"
-	"myclaw/internal/windowsautomationtool"
+	"baize/internal/bashtool"
+	"baize/internal/dirlist"
+	"baize/internal/filesearch"
+	"baize/internal/knowledge"
+	"baize/internal/osascripttool"
+	"baize/internal/powershelltool"
+	"baize/internal/reminder"
+	"baize/internal/screencapture"
+	"baize/internal/windowsautomationtool"
 )
 
 func TestLocalToolSideEffectLabels(t *testing.T) {

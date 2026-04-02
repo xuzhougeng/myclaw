@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/sessionstate"
+	"baize/internal/ai"
+	"baize/internal/sessionstate"
 )
 
 const (
@@ -16,10 +16,10 @@ const (
 	defaultConversationHistoryRunes          = 2400
 	defaultWeixinConversationHistoryMessages = 12
 	defaultWeixinConversationHistoryRunes    = 360
-	envConversationHistoryMessages           = "MYCLAW_HISTORY_MESSAGES"
-	envConversationHistoryRunes              = "MYCLAW_HISTORY_RUNES"
-	envWeixinHistoryMessages                 = "MYCLAW_WEIXIN_HISTORY_MESSAGES"
-	envWeixinHistoryRunes                    = "MYCLAW_WEIXIN_HISTORY_RUNES"
+	envConversationHistoryMessages           = "BAIZE_HISTORY_MESSAGES"
+	envConversationHistoryRunes              = "BAIZE_HISTORY_RUNES"
+	envWeixinHistoryMessages                 = "BAIZE_WEIXIN_HISTORY_MESSAGES"
+	envWeixinHistoryRunes                    = "BAIZE_WEIXIN_HISTORY_RUNES"
 )
 
 type conversationHistoryLimits struct {

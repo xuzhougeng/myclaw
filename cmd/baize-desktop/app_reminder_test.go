@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"myclaw/internal/reminder"
+	"baize/internal/reminder"
 )
 
 func TestListRemindersAggregatesSourcesAndFormatsOutput(t *testing.T) {

@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	appsvc "myclaw/internal/app"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/projectstate"
-	"myclaw/internal/promptlib"
-	"myclaw/internal/reminder"
-	"myclaw/internal/screentrace"
-	"myclaw/internal/sessionstate"
+	appsvc "baize/internal/app"
+	"baize/internal/knowledge"
+	"baize/internal/projectstate"
+	"baize/internal/promptlib"
+	"baize/internal/reminder"
+	"baize/internal/screentrace"
+	"baize/internal/sessionstate"
 )
 
 func TestDesktopScreenTraceAPIsExposeRecordsAndDigests(t *testing.T) {

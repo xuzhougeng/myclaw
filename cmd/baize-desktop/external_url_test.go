@@ -11,7 +11,7 @@ func TestNormalizeExternalURL(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{name: "https url", input: "https://github.com/xuzhougeng/myclaw/releases", want: "https://github.com/xuzhougeng/myclaw/releases"},
+		{name: "https url", input: "https://github.com/xuzhougeng/baize/releases", want: "https://github.com/xuzhougeng/baize/releases"},
 		{name: "trim spaces", input: "  http://example.com/path  ", want: "http://example.com/path"},
 		{name: "reject blank", input: "   ", wantErr: true},
 		{name: "reject missing host", input: "https:///releases", wantErr: true},

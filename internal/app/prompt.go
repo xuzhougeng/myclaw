@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/promptlib"
+	"baize/internal/ai"
+	"baize/internal/promptlib"
 )
 
 func (s *Service) handlePromptCommand(ctx context.Context, mc MessageContext, input string) (string, error) {

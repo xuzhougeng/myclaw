@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"myclaw/internal/knowledge"
+	"baize/internal/knowledge"
 )
 
 func (p *localAgentToolProvider) knowledgeToolSet() localToolSet {

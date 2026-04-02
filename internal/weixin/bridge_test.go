@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	aicore "myclaw/internal/ai"
-	appsvc "myclaw/internal/app"
-	"myclaw/internal/filesearch"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/reminder"
-	"myclaw/internal/sessionstate"
+	aicore "baize/internal/ai"
+	appsvc "baize/internal/app"
+	"baize/internal/filesearch"
+	"baize/internal/knowledge"
+	"baize/internal/reminder"
+	"baize/internal/sessionstate"
 )
 
 func TestExtractTextSupportsVoiceFallback(t *testing.T) {

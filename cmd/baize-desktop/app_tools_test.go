@@ -5,14 +5,14 @@ import (
 	goruntime "runtime"
 	"testing"
 
-	appsvc "myclaw/internal/app"
-	"myclaw/internal/bashtool"
-	"myclaw/internal/knowledge"
-	"myclaw/internal/powershelltool"
-	"myclaw/internal/projectstate"
-	"myclaw/internal/promptlib"
-	"myclaw/internal/reminder"
-	"myclaw/internal/sessionstate"
+	appsvc "baize/internal/app"
+	"baize/internal/bashtool"
+	"baize/internal/knowledge"
+	"baize/internal/powershelltool"
+	"baize/internal/projectstate"
+	"baize/internal/promptlib"
+	"baize/internal/reminder"
+	"baize/internal/sessionstate"
 )
 
 func TestDesktopListToolsIncludesLocalCapabilities(t *testing.T) {

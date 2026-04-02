@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"myclaw/internal/ai"
-	"myclaw/internal/app"
-	"myclaw/internal/filesearch"
-	"myclaw/internal/reminder"
+	"baize/internal/ai"
+	"baize/internal/app"
+	"baize/internal/filesearch"
+	"baize/internal/reminder"
 )
 
 const maxReplyChunkRunes = 1400

@@ -1,4 +1,4 @@
-module myclaw
+module baize
 
 go 1.24
 

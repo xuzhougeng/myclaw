@@ -1,6 +1,6 @@
 package eval
 
-import "myclaw/internal/ai"
+import "baize/internal/ai"
 
 func DemoTools() map[string]ai.ToolCapability {
 	return map[string]ai.ToolCapability{

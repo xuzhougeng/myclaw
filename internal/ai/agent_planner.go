@@ -164,7 +164,7 @@ func (s *Service) PlanAgentLoopStep(ctx context.Context, history []ConversationM
 	appendAttemptListToPrompt(&prompt, state.ToolAttempts)
 
 	instructions := strings.TrimSpace(`
-你是 myclaw 代理模式的循环调度器。
+你是 baize 代理模式的循环调度器。
 每次决策恰好选择以下四个动作之一：
 - continue: 调用一个可用工具，继续收集信息或执行操作
 - answer: 已有足够信息，输出最终答复给用户
@@ -223,7 +223,7 @@ func (s *Service) SummarizeAgentWorkingState(ctx context.Context, state AgentTas
 	appendAttemptListToPrompt(&prompt, state.ToolAttempts)
 
 	instructions := strings.TrimSpace(`
-你是 myclaw 代理工作状态摘要生成器。
+你是 baize 代理工作状态摘要生成器。
 用 2-3 句简洁的中文描述目前已找到或已完成的内容。
 不要重复工具名称列表，聚焦于关键发现和进展。
 `)
@@ -264,7 +264,7 @@ func (s *Service) SummarizeAgentFinalState(ctx context.Context, state AgentTaskS
 	}
 
 	instructions := strings.TrimSpace(`
-你是 myclaw 代理最终状态摘要生成器。
+你是 baize 代理最终状态摘要生成器。
 生成一段简洁的中文摘要，供对话历史存档使用。
 涵盖：完成了什么任务、关键发现、执行了哪些有副作用的操作（若有）。
 保持简洁，不超过 5 句话。

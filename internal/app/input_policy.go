@@ -1,6 +1,6 @@
 package app
 
-import "myclaw/internal/runtimepolicy"
+import "baize/internal/runtimepolicy"
 
 type CommandExecutionKind = runtimepolicy.CommandExecutionKind
 

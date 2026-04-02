@@ -341,7 +341,7 @@ func createTrayMenu() (windows.Handle, error) {
 	}
 	menuHandle := windows.Handle(result)
 
-	if err := appendMenuString(menuHandle, trayMenuShowCommand, "Show myclaw"); err != nil {
+	if err := appendMenuString(menuHandle, trayMenuShowCommand, "Show baize"); err != nil {
 		procDestroyMenu.Call(result)
 		return 0, err
 	}
@@ -402,7 +402,7 @@ func addTrayIcon(hwnd, icon windows.Handle) error {
 		UCallbackMessage: trayCallbackMessage,
 		HIcon:            icon,
 	}
-	copy(data.SzTip[:], windows.StringToUTF16("myclaw"))
+	copy(data.SzTip[:], windows.StringToUTF16("baize"))
 
 	return shellNotifyIcon(nimAdd, &data)
 }

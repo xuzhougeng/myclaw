@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"myclaw/internal/ai"
+	"baize/internal/ai"
 )
 
 const maxAgentToolSteps = 3

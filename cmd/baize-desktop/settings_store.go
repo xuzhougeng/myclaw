@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	appsvc "myclaw/internal/app"
-	"myclaw/internal/screentrace"
-	"myclaw/internal/sqliteutil"
+	appsvc "baize/internal/app"
+	"baize/internal/screentrace"
+	"baize/internal/sqliteutil"
 )
 
 const desktopSettingsRowID = "primary"

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"myclaw/internal/modelconfig"
+	"baize/internal/modelconfig"
 )
 
 type ScreenAnalysis struct {
