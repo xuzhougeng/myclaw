@@ -596,7 +596,7 @@ function normalizeProjectStorageKey(project) {
 }
 
 function chatSessionOrderStorageKey(project = state.projectState.activeProject) {
-  return `myclaw-chat-session-order:${normalizeProjectStorageKey(project)}`;
+  return `baize-chat-session-order:${normalizeProjectStorageKey(project)}`;
 }
 
 function loadChatSessionOrder(project = state.projectState.activeProject) {

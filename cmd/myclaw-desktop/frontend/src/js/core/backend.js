@@ -1,5 +1,5 @@
 function desktopDiagnosticsEnabled() {
-  return window.__MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS__ === true;
+  return window.__BAIZE_DESKTOP_DEBUG_DIAGNOSTICS__ === true;
 }
 
 const desktopDiagnosticsState = {
@@ -51,7 +51,7 @@ function buildDesktopDiagnosticSnapshot(reason, detail = {}) {
     timestamp: new Date().toISOString(),
     reason,
     detail: summarizeDiagnosticValue(detail),
-    buildMode: window.__MYCLAW_DESKTOP_BUILD_MODE__ || 'release',
+    buildMode: window.__BAIZE_DESKTOP_BUILD_MODE__ || 'release',
     location: window.location.href,
     readyState: document.readyState,
     userAgent: navigator.userAgent,
@@ -153,7 +153,7 @@ function ensureDesktopDiagnosticsPanel() {
 
   const meta = document.getElementById('desktop-debug-meta');
   if (meta) {
-    meta.textContent = `build=${window.__MYCLAW_DESKTOP_BUILD_MODE__ || 'release'}  entries=${desktopDiagnosticsState.entries.length}`;
+    meta.textContent = `build=${window.__BAIZE_DESKTOP_BUILD_MODE__ || 'release'}  entries=${desktopDiagnosticsState.entries.length}`;
   }
 
   const output = document.getElementById('desktop-debug-output');
@@ -531,8 +531,8 @@ function createHTTPBackend() {
     RefreshChatResponse: () => requestJSON('POST', '/api/chat/refresh'),
     ExportChatMarkdown: async () => {
       const payload = await requestJSON('GET', '/api/chat/export-markdown');
-      downloadTextFile(payload.filename || 'myclaw-chat.md', payload.markdown || '', 'text/markdown;charset=utf-8');
-      return { message: `已导出 Markdown：${payload.filename || 'myclaw-chat.md'}` };
+      downloadTextFile(payload.filename || 'baize-chat.md', payload.markdown || '', 'text/markdown;charset=utf-8');
+      return { message: `已导出 Markdown：${payload.filename || 'baize-chat.md'}` };
     },
     NewChatSession: (mode = 'agent') => requestJSON('POST', '/api/chat/session/new', { mode }),
     SwitchChatSession: (sessionId) => requestJSON('POST', '/api/chat/session/switch', { sessionId }),

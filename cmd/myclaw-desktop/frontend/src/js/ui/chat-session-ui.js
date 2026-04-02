@@ -59,7 +59,7 @@ function bindQuickAddModal() {
 }
 
 function bindChatSessionUI() {
-  state.chatSidebarCollapsed = localStorage.getItem('myclaw-chat-sidebar-collapsed') === '1';
+  state.chatSidebarCollapsed = localStorage.getItem('baize-chat-sidebar-collapsed') === '1';
   applyChatSidebarState();
 
   const toggle = document.getElementById('chat-sidebar-toggle');
@@ -252,7 +252,7 @@ function bindChatSessionUI() {
 
 function setChatSidebarCollapsed(collapsed) {
   state.chatSidebarCollapsed = Boolean(collapsed);
-  localStorage.setItem('myclaw-chat-sidebar-collapsed', state.chatSidebarCollapsed ? '1' : '0');
+  localStorage.setItem('baize-chat-sidebar-collapsed', state.chatSidebarCollapsed ? '1' : '0');
   applyChatSidebarState();
 }
 

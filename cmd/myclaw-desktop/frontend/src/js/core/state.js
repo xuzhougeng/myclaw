@@ -1,4 +1,4 @@
-const TOOL_GROUP_COLLAPSE_STORAGE_KEY = 'myclaw-tool-group-collapsed';
+const TOOL_GROUP_COLLAPSE_STORAGE_KEY = 'baize-tool-group-collapsed';
 
 function loadToolGroupCollapseState() {
   try {

@@ -56,7 +56,7 @@ window.navigateTo = function(viewName, sectionId) {
 
 // Theme management
 function initTheme() {
-  const saved = localStorage.getItem('myclaw-theme');
+  const saved = localStorage.getItem('baize-theme');
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   const theme = saved || (prefersDark ? 'dark' : 'light');
   document.documentElement.setAttribute('data-theme', theme);
@@ -67,7 +67,7 @@ function toggleTheme() {
   const current = document.documentElement.getAttribute('data-theme') || 'dark';
   const next = current === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem('myclaw-theme', next);
+  localStorage.setItem('baize-theme', next);
   updateThemeIcon(next);
 }
 
