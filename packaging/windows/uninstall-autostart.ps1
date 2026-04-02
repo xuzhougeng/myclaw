@@ -1,5 +1,5 @@
 param(
-    [string]$StartupName = "myclaw-weixin"
+    [string]$StartupName = "baize-weixin"
 )
 
 Set-StrictMode -Version Latest

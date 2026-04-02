@@ -1,7 +1,7 @@
-myclaw Windows package
+baize Windows package
 
 Files:
-- myclaw.exe
+- baize.exe
 - run-weixin.ps1
 - run-terminal.ps1
 - run-all.ps1
@@ -23,11 +23,11 @@ File ingest:
 - The default release zip is built with CGO disabled, so PDF ingest will return a clear "PDF extraction unavailable" message instead of crashing.
 
 Default data and logs:
-- Data: %LOCALAPPDATA%\myclaw\data
-- Logs: %LOCALAPPDATA%\myclaw\logs
-- WeChat login state is stored under %LOCALAPPDATA%\myclaw\data\weixin-bridge.
+- Data: %LOCALAPPDATA%\baize\data
+- Logs: %LOCALAPPDATA%\baize\logs
+- WeChat login state is stored under %LOCALAPPDATA%\baize\data\weixin-bridge.
 
 Autostart:
 - install-autostart.ps1 installs a hidden Startup-folder launcher
 - uninstall-autostart.ps1 removes it
-- AI model profiles are reused from %LOCALAPPDATA%\myclaw\data\model
+- AI model profiles are reused from %LOCALAPPDATA%\baize\data\model

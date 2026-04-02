@@ -1,12 +1,12 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "myclaw",
-  "outputfilename": "myclaw",
+  "name": "baize",
+  "outputfilename": "baize",
   "frontend:dir": "frontend",
   "frontend:install": "",
   "frontend:build": "",
   "author": {
-    "name": "myclaw",
+    "name": "baize",
     "email": ""
   }
 }

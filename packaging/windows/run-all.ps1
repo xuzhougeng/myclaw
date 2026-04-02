@@ -1,12 +1,12 @@
 param(
-    [string]$DataDir = "$env:LOCALAPPDATA\myclaw\data",
-    [string]$LogFile = "$env:LOCALAPPDATA\myclaw\logs\myclaw-all.log"
+    [string]$DataDir = "$env:LOCALAPPDATA\baize\data",
+    [string]$LogFile = "$env:LOCALAPPDATA\baize\logs\baize-all.log"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$exePath = Join-Path $PSScriptRoot "myclaw.exe"
+$exePath = Join-Path $PSScriptRoot "baize.exe"
 if (-not (Test-Path $exePath)) {
     throw "Executable not found: $exePath"
 }
@@ -16,5 +16,5 @@ New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogFile) | Out-Nu
 
 & $exePath -weixin -terminal -data-dir $DataDir -log-file $LogFile
 if ($LASTEXITCODE -ne 0) {
-    throw "myclaw exited with code $LASTEXITCODE"
+    throw "baize exited with code $LASTEXITCODE"
 }

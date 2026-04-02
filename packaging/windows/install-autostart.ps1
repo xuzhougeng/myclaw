@@ -1,14 +1,14 @@
 param(
-    [string]$StartupName = "myclaw-weixin",
-    [string]$DataDir = "$env:LOCALAPPDATA\myclaw\data",
-    [string]$LogFile = "$env:LOCALAPPDATA\myclaw\logs\myclaw.log",
+    [string]$StartupName = "baize-weixin",
+    [string]$DataDir = "$env:LOCALAPPDATA\baize\data",
+    [string]$LogFile = "$env:LOCALAPPDATA\baize\logs\baize.log",
     [string]$ExtraArgs = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$exePath = Join-Path $PSScriptRoot "myclaw.exe"
+$exePath = Join-Path $PSScriptRoot "baize.exe"
 if (-not (Test-Path $exePath)) {
     throw "Executable not found: $exePath"
 }
