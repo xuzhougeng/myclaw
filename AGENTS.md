@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`cmd/myclaw` is the CLI entry point; `cmd/myclaw-desktop` hosts the Wails desktop app and checked-in web assets under `frontend/dist/`; `cmd/myclaw-eval` is the model evaluation CLI. Shared business logic lives in `internal/` packages such as `ai`, `app`, `dirlist`, `fileingest`, `knowledge`, `modelconfig`, `osascripttool`, `projectstate`, `promptlib`, `reminder`, `runtimepolicy`, `screencapture`, `screentrace`, `sessionstate`, `skilllib`, `sqliteutil`, `terminal`, `weixin`, and `windowsautomationtool`. Keep new code in `internal/<domain>` unless it is an executable entry point. Repo docs and images live in `docs/`; release packaging scripts live in `scripts/` and `packaging/windows/`.
+`cmd/baize` is the CLI entry point; `cmd/baize-desktop` hosts the Wails desktop app and checked-in web assets under `frontend/dist/`; `cmd/baize-eval` is the model evaluation CLI. Shared business logic lives in `internal/` packages such as `ai`, `app`, `dirlist`, `fileingest`, `knowledge`, `modelconfig`, `osascripttool`, `projectstate`, `promptlib`, `reminder`, `runtimepolicy`, `screencapture`, `screentrace`, `sessionstate`, `skilllib`, `sqliteutil`, `terminal`, `weixin`, and `windowsautomationtool`. Keep new code in `internal/<domain>` unless it is an executable entry point. Repo docs and images live in `docs/`; release packaging scripts live in `scripts/` and `packaging/windows/`.
 
 Persistent app state is now centered on a SQLite database (`app.db`) under the data directory. Keep core runtime state in shared storage packages, and treat extra files such as WeChat credentials or secret keys as interface-specific/supporting artifacts rather than the primary source of truth.
 
@@ -29,7 +29,7 @@ This repository is being refactored toward a conversation-first, interface-thin 
 - If a change alters architecture assumptions, update `README.md` and this file in the same change.
 
 ## Build, Test, and Development Commands
-Use `go run ./cmd/myclaw` for the terminal app, `go run ./cmd/myclaw-desktop` for the desktop shell, and `go run ./cmd/myclaw-eval -dataset <path>` to run a JSONL evaluation dataset against the AI stages; see `docs/ai-stage-eval.md` for format details. `make dev` starts the desktop app in HTTP dev mode on `127.0.0.1:3415`. `make test` runs `go test ./...` across the repository. `make build-current` builds the CLI into `dist/`; `make package-linux`, `make package-windows`, and `make package-macos` create release archives.
+Use `go run ./cmd/baize` for the terminal app, `go run ./cmd/baize-desktop` for the desktop shell, and `go run ./cmd/baize-eval -dataset <path>` to run a JSONL evaluation dataset against the AI stages; see `docs/ai-stage-eval.md` for format details. `make dev` starts the desktop app in HTTP dev mode on `127.0.0.1:3415`. `make test` runs `go test ./...` across the repository. `make build-current` builds the CLI into `dist/`; `make package-linux`, `make package-windows`, and `make package-macos` create release archives.
 
 ## Coding Style & Naming Conventions
 Target Go 1.24 and let `gofmt` own formatting; do not hand-align whitespace. Follow Go naming: exported identifiers use PascalCase, internal helpers use camelCase, package directories stay lowercase, and platform files use suffixes like `_windows.go` or `_stub.go`. Keep functions small and package boundaries clear; prefer extending existing `internal/*` packages over adding cross-package shortcuts.
@@ -51,7 +51,7 @@ When adding, renaming, or removing a reusable tool unit:
 - Update the registry in `docs/tool-units.md` in the same change
 
 ## Testing Guidelines
-Place tests beside the code they cover as `*_test.go`; this repo already follows that pattern in `internal/*` and `cmd/myclaw-desktop`. Prefer table-driven tests for routing, storage, and parser behavior. There is no stated coverage gate, but new logic should include focused tests and `make test` should pass before a PR is opened.
+Place tests beside the code they cover as `*_test.go`; this repo already follows that pattern in `internal/*` and `cmd/baize-desktop`. Prefer table-driven tests for routing, storage, and parser behavior. There is no stated coverage gate, but new logic should include focused tests and `make test` should pass before a PR is opened.
 
 ## Commit & Pull Request Guidelines
 Install hooks with `make install-hooks`; `.githooks/commit-msg` enforces conventional subjects in the form `feat(scope): summary`, `docs(scope): summary`, or `chore(scope): summary`. Use lowercase scopes such as `model`, `desktop-chat`, or `ci`, matching recent history. PRs should explain user-visible behavior, list validation steps, link related issues, and include screenshots when desktop UI or docs output changes.

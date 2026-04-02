@@ -166,7 +166,7 @@
 ### 修复
 
 - Debug 构建启动时，后端强制写一条 startup marker 到：
-  - `%LOCALAPPDATA%\myclaw\data\debug\desktop-backend-debug.log`
+  - `%LOCALAPPDATA%\baize\data\debug\desktop-backend-debug.log`
 - marker 包含：
   - `buildMode`
   - `dataDir`
