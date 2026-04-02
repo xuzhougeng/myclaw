@@ -1,6 +1,27 @@
-# myclaw
+# baize
 
-`myclaw` 是一个跨终端、桌面和微信三种入口的个人智能助理。它的目标不是做三个彼此独立的小程序，而是做一个统一的对话内核，再通过不同接口把能力暴露给用户。
+```
+          ,   ,
+         /|   |\
+        / |   | \
+       /  (◎ ◎)  \
+      |   ( ~~~ )  |
+      |    \___/   |       白  泽
+       \           /    ────────────
+        `~~~~~~~~~'     知天下万物
+        /   | |   \     能言人语
+       (_)  |_|  (_)     bái  zé
+```
+
+> 《山海经》：黄帝巡狩，东至海，登桓山，于海滨得白泽神兽。  
+> 能言语，达于万物之情。以其言，遂图写以示天下。
+
+**baize**（白泽）取自山海经神兽，遍知天下万物、能言人语，为君主解答一切疑问。  
+以此为名，寓意本项目作为个人的全知对话核心，跨端响应、随问随答。
+
+---
+
+`baize` 是一个跨终端、桌面和微信三种入口的个人智能助理。它的目标不是做三个彼此独立的小程序，而是做一个统一的对话内核，再通过不同接口把能力暴露给用户。
 
 当前仓库正在进行一次架构收口。下面的“设计原则”和 Mermaid 图描述的是本轮重构要遵守的目标架构，不代表所有历史实现都已经完全符合；后续代码修改应优先向这套模型靠拢，而不是继续在接口层堆分支。
 
@@ -87,9 +108,9 @@ flowchart TD
 ## 目录
 
 ```text
-cmd/myclaw            CLI / terminal 入口
-cmd/myclaw-desktop    Wails 桌面端与 HTTP dev 入口
-cmd/myclaw-eval       模型评估 CLI，运行 eval/testdata/*.jsonl 数据集
+cmd/baize            CLI / terminal 入口
+cmd/baize-desktop    Wails 桌面端与 HTTP dev 入口
+cmd/baize-eval       模型评估 CLI，运行 eval/testdata/*.jsonl 数据集
 internal/app          统一对话运行时、会话逻辑、命令分发
 internal/ai           AI 命令路由、通用工具决策、回答与摘要
 internal/filesearch   独立文件检索工具单元
@@ -124,20 +145,20 @@ internal/sqliteutil   SQLite 公共工具函数
 
 ## 运行
 
-当前实现会强制单实例运行：同一用户环境下同时只允许一个 `myclaw` 进程。若已有 terminal、desktop 或 HTTP dev 模式实例在运行，再启动新的 `myclaw` 会直接报错退出。
+当前实现会强制单实例运行：同一用户环境下同时只允许一个 `baize` 进程。若已有 terminal、desktop 或 HTTP dev 模式实例在运行，再启动新的 `baize` 会直接报错退出。
 
 ### 0. 终端模式
 
 直接运行即可进入终端：
 
 ```bash
-go run ./cmd/myclaw
+go run ./cmd/baize
 ```
 
 或者显式指定：
 
 ```bash
-go run ./cmd/myclaw -terminal
+go run ./cmd/baize -terminal
 ```
 
 ### 0.5. Wails 桌面模式
@@ -145,7 +166,7 @@ go run ./cmd/myclaw -terminal
 直接启动桌面前端：
 
 ```bash
-go run ./cmd/myclaw-desktop
+go run ./cmd/baize-desktop
 ```
 
 桌面模式当前提供：
@@ -162,12 +183,12 @@ go run ./cmd/myclaw-desktop
 
 桌面版默认数据目录会放到用户配置目录：
 
-- Windows: `%LOCALAPPDATA%\myclaw\data`
-- Linux/macOS: 对应系统的用户配置目录下 `myclaw/data`
+- Windows: `%LOCALAPPDATA%\baize\data`
+- Linux/macOS: 对应系统的用户配置目录下 `baize/data`
 
-如果你显式传了 `-data-dir` 或设置了 `MYCLAW_DATA_DIR`，则以传入值为准。
+如果你显式传了 `-data-dir` 或设置了 `BAIZE_DATA_DIR`，则以传入值为准。
 
-模型配置现在只从本地模型数据库读取，不再从 `MYCLAW_MODEL_*` 环境变量读取。
+模型配置现在只从本地模型数据库读取，不再从 `BAIZE_MODEL_*` 环境变量读取。
 
 - 桌面端和 terminal 的核心状态现在统一保存在数据目录下的 `app.db`
 - 模型 API Key 会配套写入 `model/secret.key`，密钥文件与数据库分离
@@ -213,8 +234,8 @@ make dev HTTP_DEV_ADDR=127.0.0.1:8080
 运行 JSONL 数据集对 AI 各阶段进行评估：
 
 ```bash
-go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl
-go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl -output eval/testdata/runs/result.json
+go run ./cmd/baize-eval -dataset docs/evals/route-command.jsonl
+go run ./cmd/baize-eval -dataset docs/evals/route-command.jsonl -output eval/testdata/runs/result.json
 ```
 
 参数说明：
@@ -227,7 +248,7 @@ go run ./cmd/myclaw-eval -dataset docs/evals/route-command.jsonl -output eval/te
 ### 1. 微信扫码登录
 
 ```bash
-go run ./cmd/myclaw -weixin-login
+go run ./cmd/baize -weixin-login
 ```
 
 当前实现不依赖第三方 Go 包，但也没有内置终端二维码渲染。执行登录命令后，程序会输出 `qrcode_img_content`，你需要把这段内容生成二维码后再用微信扫码。
@@ -237,13 +258,13 @@ go run ./cmd/myclaw -weixin-login
 ### 2. 启动微信桥接
 
 ```bash
-go run ./cmd/myclaw -weixin
+go run ./cmd/baize -weixin
 ```
 
 或者：
 
 ```bash
-MYCLAW_WEIXIN_ENABLED=1 go run ./cmd/myclaw
+BAIZE_WEIXIN_ENABLED=1 go run ./cmd/baize
 ```
 
 ### 3. 常用消息
@@ -343,7 +364,7 @@ service.RegisterACPToolProvider("wechat", myACPClient)
 
 也可以通过环境变量追加额外目录：
 
-- `MYCLAW_SKILLS_DIRS`
+- `BAIZE_SKILLS_DIRS`
 
 示例：
 
@@ -385,8 +406,8 @@ PowerShell:
 
 默认会输出到 `dist/`：
 
-- `dist/myclaw-windows-amd64.exe`
-- `dist/myclaw-windows-arm64.exe`（使用 `-All` 或 `-Arch arm64`）
+- `dist/baize-windows-amd64.exe`
+- `dist/baize-windows-arm64.exe`（使用 `-All` 或 `-Arch arm64`）
 
 说明：
 
@@ -397,16 +418,16 @@ PowerShell:
 
 `make release` 现在除了编译各平台二进制，还会生成 zip 包：
 
-- `dist/packages/myclaw-windows-amd64.zip`
-- `dist/packages/myclaw-windows-arm64.zip`
-- `dist/packages/myclaw-linux-amd64.zip`
-- `dist/packages/myclaw-linux-arm64.zip`
-- `dist/packages/myclaw-darwin-amd64.zip`
-- `dist/packages/myclaw-darwin-arm64.zip`
+- `dist/packages/baize-windows-amd64.zip`
+- `dist/packages/baize-windows-arm64.zip`
+- `dist/packages/baize-linux-amd64.zip`
+- `dist/packages/baize-linux-arm64.zip`
+- `dist/packages/baize-darwin-amd64.zip`
+- `dist/packages/baize-darwin-arm64.zip`
 
 Windows zip 包内会包含：
 
-- `myclaw.exe`
+- `baize.exe`
 - `run-weixin.ps1`
 - `run-terminal.ps1`
 - `run-all.ps1`
@@ -416,8 +437,8 @@ Windows zip 包内会包含：
 
 默认数据目录和日志目录会使用：
 
-- `%LOCALAPPDATA%\myclaw\data`
-- `%LOCALAPPDATA%\myclaw\logs`
+- `%LOCALAPPDATA%\baize\data`
+- `%LOCALAPPDATA%\baize\logs`
 
 这样在 Windows 上解压后就可以直接复制整个目录并运行脚本，不需要 Go 源码环境，也不会因为换了解压目录而丢失微信登录状态。
 
@@ -437,11 +458,11 @@ Windows zip 包内会包含：
 
 桌面打包配置放在：
 
-- `cmd/myclaw-desktop/wails.json`
+- `cmd/baize-desktop/wails.json`
 
 产物会落在：
 
-- `cmd/myclaw-desktop/build/bin/`
+- `cmd/baize-desktop/build/bin/`
 
 workflow 上传的 artifact 现在只包含 NSIS 安装器：
 
@@ -489,11 +510,11 @@ workflow 上传的 artifact 现在只包含 NSIS 安装器：
 - `GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct`
 - `GOSUMDB=sum.golang.google.cn`
 
-如果你只想手工调用 Wails，也可以在 `cmd/myclaw-desktop/` 下执行：
+如果你只想手工调用 Wails，也可以在 `cmd/baize-desktop/` 下执行：
 
 ```powershell
 $env:CGO_ENABLED="1"
-wails build -platform windows/amd64 -o myclaw-amd64.exe -nsis -webview2 download -m -s
+wails build -platform windows/amd64 -o baize-amd64.exe -nsis -webview2 download -m -s
 ```
 
 这里的 `-m` 是 Wails 的 `SkipModTidy`，用于避免桌面打包时顺手改写 `go.mod` / `go.sum`。
@@ -541,11 +562,11 @@ APPLE_TEAM_ID=... \
 
 默认行为：
 
-- 登录 Windows 后自动启动 `myclaw`
+- 登录 Windows 后自动启动 `baize`
 - 以隐藏窗口方式运行
 - 自动带上 `-weixin`
-- 数据目录使用 `%LOCALAPPDATA%\myclaw\data`
-- 日志写到 `%LOCALAPPDATA%\myclaw\logs\myclaw.log`
+- 数据目录使用 `%LOCALAPPDATA%\baize\data`
+- 日志写到 `%LOCALAPPDATA%\baize\logs\baize.log`
 
 卸载开机自启：
 
@@ -553,7 +574,7 @@ APPLE_TEAM_ID=... \
 .\scripts\uninstall-autostart.ps1
 ```
 
-如果你希望 AI 功能在开机自启后也可用，只要模型 profile 已经保存在同一个数据目录下即可，无需再配置 `MYCLAW_MODEL_*` 环境变量。
+如果你希望 AI 功能在开机自启后也可用，只要模型 profile 已经保存在同一个数据目录下即可，无需再配置 `BAIZE_MODEL_*` 环境变量。
 
 ### Linux 交叉编译
 
