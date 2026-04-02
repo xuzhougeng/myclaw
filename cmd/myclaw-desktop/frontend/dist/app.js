@@ -1,5 +1,5 @@
-window.__MYCLAW_DESKTOP_BUILD_MODE__ = "release";
-window.__MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS__ = false;
+window.__BAIZE_DESKTOP_BUILD_MODE__ = "release";
+window.__BAIZE_DESKTOP_DEBUG_DIAGNOSTICS__ = false;
 
 /* Source: js/core/navigation.js */
 const NAV_VIEW_ALIASES = {
@@ -60,7 +60,7 @@ window.navigateTo = function(viewName, sectionId) {
 
 // Theme management
 function initTheme() {
-  const saved = localStorage.getItem('myclaw-theme');
+  const saved = localStorage.getItem('baize-theme');
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   const theme = saved || (prefersDark ? 'dark' : 'light');
   document.documentElement.setAttribute('data-theme', theme);
@@ -71,7 +71,7 @@ function toggleTheme() {
   const current = document.documentElement.getAttribute('data-theme') || 'dark';
   const next = current === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem('myclaw-theme', next);
+  localStorage.setItem('baize-theme', next);
   updateThemeIcon(next);
 }
 
@@ -930,7 +930,7 @@ function escapeAttribute(value) {
 
 
 /* Source: js/core/state.js */
-const TOOL_GROUP_COLLAPSE_STORAGE_KEY = 'myclaw-tool-group-collapsed';
+const TOOL_GROUP_COLLAPSE_STORAGE_KEY = 'baize-tool-group-collapsed';
 
 function loadToolGroupCollapseState() {
   try {
@@ -1624,7 +1624,7 @@ function normalizeProjectStorageKey(project) {
 }
 
 function chatSessionOrderStorageKey(project = state.projectState.activeProject) {
-  return `myclaw-chat-session-order:${normalizeProjectStorageKey(project)}`;
+  return `baize-chat-session-order:${normalizeProjectStorageKey(project)}`;
 }
 
 function loadChatSessionOrder(project = state.projectState.activeProject) {
@@ -3078,7 +3078,7 @@ function bindQuickAddModal() {
 }
 
 function bindChatSessionUI() {
-  state.chatSidebarCollapsed = localStorage.getItem('myclaw-chat-sidebar-collapsed') === '1';
+  state.chatSidebarCollapsed = localStorage.getItem('baize-chat-sidebar-collapsed') === '1';
   applyChatSidebarState();
 
   const toggle = document.getElementById('chat-sidebar-toggle');
@@ -3271,7 +3271,7 @@ function bindChatSessionUI() {
 
 function setChatSidebarCollapsed(collapsed) {
   state.chatSidebarCollapsed = Boolean(collapsed);
-  localStorage.setItem('myclaw-chat-sidebar-collapsed', state.chatSidebarCollapsed ? '1' : '0');
+  localStorage.setItem('baize-chat-sidebar-collapsed', state.chatSidebarCollapsed ? '1' : '0');
   applyChatSidebarState();
 }
 
@@ -4194,7 +4194,7 @@ function updateFilePreview(file) {
 
 /* Source: js/core/backend.js */
 function desktopDiagnosticsEnabled() {
-  return window.__MYCLAW_DESKTOP_DEBUG_DIAGNOSTICS__ === true;
+  return window.__BAIZE_DESKTOP_DEBUG_DIAGNOSTICS__ === true;
 }
 
 const desktopDiagnosticsState = {
@@ -4246,7 +4246,7 @@ function buildDesktopDiagnosticSnapshot(reason, detail = {}) {
     timestamp: new Date().toISOString(),
     reason,
     detail: summarizeDiagnosticValue(detail),
-    buildMode: window.__MYCLAW_DESKTOP_BUILD_MODE__ || 'release',
+    buildMode: window.__BAIZE_DESKTOP_BUILD_MODE__ || 'release',
     location: window.location.href,
     readyState: document.readyState,
     userAgent: navigator.userAgent,
@@ -4348,7 +4348,7 @@ function ensureDesktopDiagnosticsPanel() {
 
   const meta = document.getElementById('desktop-debug-meta');
   if (meta) {
-    meta.textContent = `build=${window.__MYCLAW_DESKTOP_BUILD_MODE__ || 'release'}  entries=${desktopDiagnosticsState.entries.length}`;
+    meta.textContent = `build=${window.__BAIZE_DESKTOP_BUILD_MODE__ || 'release'}  entries=${desktopDiagnosticsState.entries.length}`;
   }
 
   const output = document.getElementById('desktop-debug-output');
@@ -4726,8 +4726,8 @@ function createHTTPBackend() {
     RefreshChatResponse: () => requestJSON('POST', '/api/chat/refresh'),
     ExportChatMarkdown: async () => {
       const payload = await requestJSON('GET', '/api/chat/export-markdown');
-      downloadTextFile(payload.filename || 'myclaw-chat.md', payload.markdown || '', 'text/markdown;charset=utf-8');
-      return { message: `已导出 Markdown：${payload.filename || 'myclaw-chat.md'}` };
+      downloadTextFile(payload.filename || 'baize-chat.md', payload.markdown || '', 'text/markdown;charset=utf-8');
+      return { message: `已导出 Markdown：${payload.filename || 'baize-chat.md'}` };
     },
     NewChatSession: (mode = 'agent') => requestJSON('POST', '/api/chat/session/new', { mode }),
     SwitchChatSession: (sessionId) => requestJSON('POST', '/api/chat/session/switch', { sessionId }),
